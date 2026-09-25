@@ -1,0 +1,213 @@
+{
+  "generatedAt": 1790257821168,
+  "reports": [
+    {
+      "provider": "opencode-go",
+      "fetchedAt": 1790257782909,
+      "limits": [
+        {
+          "id": "rolling-5h",
+          "label": "5 Hour limit",
+          "scope": {
+            "provider": "opencode-go",
+            "windowId": "5h",
+            "shared": true
+          },
+          "window": {
+            "id": "5h",
+            "label": "5 Hour",
+            "resetsAt": 1790275059651,
+            "durationMs": 18000000
+          },
+          "amount": {
+            "used": 0,
+            "usedFraction": 0,
+            "remainingFraction": 1,
+            "unit": "percent"
+          },
+          "status": "ok"
+        },
+        {
+          "id": "weekly",
+          "label": "Weekly limit",
+          "scope": {
+            "provider": "opencode-go",
+            "windowId": "7d",
+            "shared": true
+          },
+          "window": {
+            "id": "7d",
+            "label": "Weekly",
+            "resetsAt": 1790553600000,
+            "durationMs": 604800000
+          },
+          "amount": {
+            "used": 53,
+            "usedFraction": 0.53,
+            "remainingFraction": 0.47,
+            "unit": "percent"
+          },
+          "status": "ok"
+        },
+        {
+          "id": "monthly",
+          "label": "Monthly limit",
+          "scope": {
+            "provider": "opencode-go",
+            "windowId": "monthly",
+            "shared": true
+          },
+          "window": {
+            "id": "monthly",
+            "label": "Monthly",
+            "resetsAt": 1792553472000
+          },
+          "amount": {
+            "used": 26,
+            "usedFraction": 0.26,
+            "remainingFraction": 0.74,
+            "unit": "percent"
+          },
+          "status": "ok"
+        }
+      ],
+      "metadata": {
+        "planType": "OpenCode Go",
+        "endpoint": "https://opencode.ai/zen/go/v1/usage"
+      }
+    },
+    {
+      "provider": "openai-codex",
+      "fetchedAt": 1790257742886,
+      "limits": [
+        {
+          "id": "openai-codex:primary",
+          "label": "5 hours",
+          "scope": {
+            "provider": "openai-codex",
+            "windowId": "5h",
+            "shared": true
+          },
+          "window": {
+            "id": "5h",
+            "label": "5 hours",
+            "durationMs": 18000000,
+            "resetsAt": 1790268806000
+          },
+          "amount": {
+            "used": 7,
+            "limit": 100,
+            "remaining": 93,
+            "usedFraction": 0.07,
+            "remainingFraction": 0.9299999999999999,
+            "unit": "percent"
+          },
+          "status": "ok"
+        },
+        {
+          "id": "openai-codex:secondary",
+          "label": "7 days",
+          "scope": {
+            "provider": "openai-codex",
+            "windowId": "7d",
+            "shared": true
+          },
+          "window": {
+            "id": "7d",
+            "label": "7 days",
+            "durationMs": 604800000,
+            "resetsAt": 1790424319000
+          },
+          "amount": {
+            "used": 70,
+            "limit": 100,
+            "remaining": 30,
+            "usedFraction": 0.7,
+            "remainingFraction": 0.30000000000000004,
+            "unit": "percent"
+          },
+          "status": "ok"
+        }
+      ],
+      "resetCredits": {
+        "availableCount": 3,
+        "credits": [
+          {
+            "grantedAt": "2026-09-04T05:27:25.114738Z",
+            "expiresAt": "2026-10-04T05:27:25.114738Z",
+            "status": "available"
+          },
+          {
+            "grantedAt": "2026-09-04T23:43:46.141516Z",
+            "expiresAt": "2026-10-04T23:43:46.141516Z",
+            "status": "available"
+          },
+          {
+            "grantedAt": "2026-09-22T19:10:21.879301Z",
+            "expiresAt": "2026-10-22T19:10:21.879301Z",
+            "status": "available"
+          }
+        ]
+      },
+      "metadata": {
+        "planType": "plus",
+        "allowed": true,
+        "limitReached": false,
+        "email": "user@example.com",
+        "accountId": "00000000-0000-0000-0000-000000000000",
+        "meterStates": {
+          "chat": {
+            "allowed": true,
+            "limitReached": false
+          }
+        },
+        "orgId": "00000000-0000-0000-0000-000000000000",
+        "orgName": "plus"
+      }
+    }
+  ],
+  "accountsWithoutUsage": [],
+  "disabledCredentials": [],
+  "capacity": {
+    "opencode-go": [
+      {
+        "window": "5h",
+        "durationMs": 18000000,
+        "accounts": 1,
+        "usedAccounts": 0,
+        "remainingAccounts": 1
+      },
+      {
+        "window": "7d",
+        "durationMs": 604800000,
+        "accounts": 1,
+        "usedAccounts": 0.53,
+        "remainingAccounts": 0.47
+      },
+      {
+        "window": "Monthly",
+        "accounts": 1,
+        "usedAccounts": 0.26,
+        "remainingAccounts": 0.74
+      }
+    ],
+    "openai-codex": [
+      {
+        "window": "5h",
+        "durationMs": 18000000,
+        "meter": "chat",
+        "accounts": 1,
+        "usedAccounts": 0.07,
+        "remainingAccounts": 0.9299999999999999
+      },
+      {
+        "window": "7d",
+        "durationMs": 604800000,
+        "meter": "chat",
+        "accounts": 1,
+        "usedAccounts": 0.7,
+        "remainingAccounts": 0.30000000000000004
+      }
+    ]
+  }
+}

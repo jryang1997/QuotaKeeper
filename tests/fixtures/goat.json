@@ -1,0 +1,13 @@
+{
+  "credits": { "monthlyCredits": 44.15, "purchasedCredits": 0.0, "freeCredits": 0.0 },
+  "windowLimits": {
+    "fiveHour": { "used": 1.55, "cap": 14.0, "resetAt": 1790008520000.0 },
+    "weekly": { "used": 19.61, "cap": 35.0, "resetAt": 1790151200000.0 }
+  },
+  "subscription": {
+    "status": "active",
+    "planId": "individual-goat",
+    "currentPeriodStart": "2026-08-27T00:00:00Z",
+    "currentPeriodEnd": "2026-09-27T00:00:00Z"
+  }
+}

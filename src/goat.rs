@@ -1,0 +1,350 @@
+//! GOAT 原生采集:api.commandcode.ai alpha billing(内部/alpha 端点,非官方稳定契约).
+//!
+//! 口径复用 cmduse(cmd-usage 0.6.9 / cmduse-core)验证过的实现:
+//! - 认证:`CMD_API_KEY` env 或 `~/.commandcode/auth.json` 的 `apiKey`(`cmd login` 写入).
+//! - `GET /alpha/billing/credits` → balances + windowLimits(fiveHour/weekly used/cap/resetAt 毫秒).
+//! - `GET /alpha/billing/subscriptions` → planId/status/currentPeriodEnd(月窗口推导用).
+//! - 月窗口:used = cap - monthlyCredits(钳制),reset = periodEnd;5h/周逐字采用,不自推.
+//! - 来源:man cmduse.1(https://docs.rs/crate/cmd-usage/0.6.9/source/cmduse.1),
+//!   wire shapes(https://docs.rs/crate/cmduse-core/0.6.5/source/src/wire.rs).
+//! - 风险:alpha 前缀随时变;401/403 停转重登(`cmdc login`);429/5xx 退避.
+//!
+//! 约束:key 只读内存送 Authorization 头,永不打印/落盘/进日志.
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::Deserialize;
+
+use crate::model::{Limit, ProviderId, Report, Status, status_for};
+
+const API_BASE: &str = "https://api.commandcode.ai";
+const TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Credits {
+    monthly_credits: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    purchased_credits: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    free_credits: f64,
+}
+
+#[derive(Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+struct Window {
+    #[serde(default)]
+    used: f64,
+    #[serde(default)]
+    cap: f64,
+    #[serde(default)]
+    exceeded: bool,
+    #[serde(default)]
+    reset_at: Option<f64>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct WindowLimits {
+    #[serde(default)]
+    five_hour: Option<Window>,
+    #[serde(default)]
+    weekly: Option<Window>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreditsResp {
+    credits: Credits,
+    #[serde(default)]
+    window_limits: WindowLimits,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SubData {
+    #[allow(dead_code)]
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    plan_id: String,
+    #[serde(default)]
+    current_period_end: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    current_period_start: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct SubscriptionsResp {
+    #[serde(default)]
+    data: Option<SubData>,
+}
+
+/// 读 key:env 优先,其次官方 CLI 登录态.报错只点名文件,不回显内容.
+fn api_key() -> anyhow::Result<String> {
+    if let Ok(k) = std::env::var("CMD_API_KEY")
+        && !k.trim().is_empty()
+    {
+        return Ok(k);
+    }
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| anyhow::anyhow!("GOAT 未登录:在真实终端运行 `cmdc login`"))?;
+    let path = format!("{home}/.commandcode/auth.json");
+    let text = std::fs::read_to_string(&path).map_err(|_| {
+        anyhow::anyhow!(
+            "GOAT 未登录:在真实终端运行 `cmdc login`(会在 ~/.commandcode/auth.json 写入 apiKey)"
+        )
+    })?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|_| anyhow::anyhow!("GOAT 登录态损坏:{path} 不是合法 JSON,重跑 `cmdc login`"))?;
+    v.get("apiKey")
+        .and_then(|k| k.as_str())
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| k.to_string())
+        .ok_or_else(|| anyhow::anyhow!("GOAT 登录态缺 apiKey 字段:重跑 `cmdc login`"))
+}
+
+fn get_json<T: for<'de> Deserialize<'de>>(path: &str, key: &str) -> anyhow::Result<T> {
+    let resp = ureq::get(&format!("{API_BASE}{path}"))
+        .set("Authorization", &format!("Bearer {key}"))
+        .set("Accept", "application/json")
+        .timeout(TIMEOUT)
+        .call()
+        .map_err(|e| anyhow::anyhow!("GOAT {path} 请求失败:{e}"))?;
+    resp.into_json::<T>()
+        .map_err(|e| anyhow::anyhow!("GOAT {path} 解析失败:{e}"))
+}
+
+/// planId → 展示名.顺序抄 cmduse-core NAME_RULES(enterprise/provider 优先).
+fn plan_name(plan_id: &str) -> String {
+    let id = plan_id.to_lowercase();
+    if id.contains("enterprise") {
+        "Enterprise".into()
+    } else if id.contains("provider") {
+        "Provider".into()
+    } else if id.contains("team") {
+        "Team Pro".into()
+    } else if id.contains("max") && id.contains("20") {
+        "Max 20x".into()
+    } else if id.contains("max") {
+        "Max 10x".into()
+    } else if id.contains("goat") {
+        "GOAT".into()
+    } else if id.contains("pro") {
+        "Pro".into()
+    } else if id.contains("go") {
+        "Go".into()
+    } else if id.is_empty() {
+        "GOAT".into()
+    } else {
+        plan_id.into()
+    }
+}
+
+/// planId → 月池(美元).None = PAYG 无月 cap(Enterprise/Provider/未知).
+fn plan_monthly_cap(plan_id: &str) -> Option<f64> {
+    let id = plan_id.to_lowercase();
+    if id.contains("enterprise") || id.contains("provider") {
+        None
+    } else if id.contains("goat") {
+        Some(70.0)
+    } else if id.contains("max") && id.contains("20") {
+        Some(300.0)
+    } else if id.contains("max") {
+        Some(150.0)
+    } else if id.contains("team") {
+        Some(40.0)
+    } else if id.contains("pro") {
+        Some(80.0)
+    } else if id.contains("go") {
+        Some(10.0)
+    } else if id.is_empty() {
+        Some(70.0)
+    } else {
+        None
+    }
+}
+
+fn parse_iso_ms(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
+}
+
+fn window_limit(label: &str, w: Window, now_ms: i64) -> Option<Limit> {
+    if w.cap <= 0.0 {
+        return None;
+    }
+    let used_pct = (w.used / w.cap * 100.0).clamp(0.0, 100.0);
+    Some(Limit {
+        label: label.to_string(),
+        used_pct,
+        resets_in_ms: w.reset_at.map(|r| r as i64 - now_ms),
+        status: if w.exceeded {
+            Status::Exhausted
+        } else {
+            status_for(used_pct)
+        },
+    })
+}
+
+fn monthly_limit(cap: f64, remaining: f64, period_end: Option<&str>, now_ms: i64) -> Limit {
+    let used = (cap - remaining).clamp(0.0, cap);
+    let used_pct = (used / cap * 100.0).clamp(0.0, 100.0);
+    Limit {
+        label: "Monthly".to_string(),
+        used_pct,
+        resets_in_ms: period_end.and_then(parse_iso_ms).map(|r| r - now_ms),
+        status: status_for(used_pct),
+    }
+}
+
+fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
+    let mut limits = Vec::new();
+    if let Some(w) = credits.window_limits.five_hour
+        && let Some(l) = window_limit("5 hours", w, now_ms)
+    {
+        limits.push(l);
+    }
+    if let Some(w) = credits.window_limits.weekly
+        && let Some(l) = window_limit("7 days", w, now_ms)
+    {
+        limits.push(l);
+    }
+    if let Some(cap) = plan_monthly_cap(&subs.plan_id) {
+        limits.push(monthly_limit(
+            cap,
+            credits.credits.monthly_credits,
+            subs.current_period_end.as_deref(),
+            now_ms,
+        ));
+    }
+    Report {
+        provider: ProviderId::Goat,
+        plan_type: plan_name(&subs.plan_id),
+        limits,
+    }
+}
+
+/// 拉一次 GOAT 快照.无登录态/断网一律 Err,调用方转 Missing 卡展示.
+pub fn fetch_report() -> anyhow::Result<Report> {
+    let key = api_key()?;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let credits: CreditsResp = get_json("/alpha/billing/credits", &key)?;
+    // subscriptions 失败不致命:窗口照出,plan 标默认,月卡按默认 cap 推.
+    let subs: SubData = get_json::<SubscriptionsResp>("/alpha/billing/subscriptions", &key)
+        .map(|r| r.data.unwrap_or_default())
+        .unwrap_or_default();
+    Ok(build_report(&credits, &subs, now_ms))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureDoc {
+        credits: Credits,
+        window_limits: WindowLimits,
+        subscription: SubData,
+    }
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/goat.json");
+    // fixture resetAt 相对该 now 的偏移:5h=2h22m,周=1d18h(抄 cmduse.1 示例).
+    const NOW_MS: i64 = 1_790_000_000_000;
+
+    fn fixture_report() -> Report {
+        let doc: FixtureDoc = serde_json::from_str(FIXTURE).unwrap();
+        build_report(
+            &CreditsResp {
+                credits: doc.credits,
+                window_limits: doc.window_limits,
+            },
+            &doc.subscription,
+            NOW_MS,
+        )
+    }
+
+    #[test]
+    fn goat_fixture_windows_match_cmduse_math() {
+        let r = fixture_report();
+        assert_eq!(r.provider, ProviderId::Goat);
+        assert_eq!(r.plan_type, "GOAT");
+        assert_eq!(r.limits.len(), 3);
+        // 5h:1.55/14;周:19.61/35;月:(70-44.15)/70.
+        assert!((r.limits[0].used_pct - (1.55 / 14.0 * 100.0)).abs() < 1e-9);
+        assert!((r.limits[1].used_pct - (19.61 / 35.0 * 100.0)).abs() < 1e-9);
+        assert!((r.limits[2].used_pct - (25.85 / 70.0 * 100.0)).abs() < 1e-9);
+        assert_eq!(r.limits[0].resets_in_ms, Some(8_520_000));
+        assert_eq!(r.limits[1].resets_in_ms, Some(151_200_000));
+        assert_eq!(
+            crate::model::format_countdown(r.limits[0].resets_in_ms.unwrap()),
+            "2h 22m"
+        );
+        assert_eq!(
+            crate::model::format_countdown(r.limits[1].resets_in_ms.unwrap()),
+            "1d 18h"
+        );
+    }
+    /// 真实 200 响应形状回归(2026-09-25 实测,已脱敏):小数 used/cap + 13 位 resetAt + individual-goat.
+    #[test]
+    fn live_shape_parses_float_windows() {
+        let doc: FixtureDoc = serde_json::from_str(
+            r#"{"credits":{"monthlyCredits":14.9067062948,"purchasedCredits":0.0,"freeCredits":0.0},"windowLimits":{"fiveHour":{"used":0.736504846,"cap":14.0,"resetAt":1790265034888.0},"weekly":{"used":10.3077762467,"cap":35.0,"resetAt":1790435108074.0}},"subscription":{"status":"active","planId":"individual-goat","currentPeriodStart":"2026-09-01T09:17:45.000Z","currentPeriodEnd":"2026-10-01T09:17:45.000Z"}}"#,
+        )
+        .unwrap();
+        let r = build_report(
+            &CreditsResp {
+                credits: doc.credits,
+                window_limits: doc.window_limits,
+            },
+            &doc.subscription,
+            NOW_MS,
+        );
+        assert_eq!(r.plan_type, "GOAT");
+        assert_eq!(r.limits.len(), 3);
+        assert!((r.limits[0].used_pct - (0.736504846 / 14.0 * 100.0)).abs() < 1e-9);
+        assert!((r.limits[1].used_pct - (10.3077762467 / 35.0 * 100.0)).abs() < 1e-9);
+        assert!((r.limits[2].used_pct - ((70.0 - 14.9067062948) / 70.0 * 100.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn payg_plan_skips_monthly_card() {
+        let doc: FixtureDoc = serde_json::from_str(
+            r#"{"credits":{"monthlyCredits":0.0},"windowLimits":{"fiveHour":{"used":1.0,"cap":14.0}},"subscription":{"status":"active","planId":"individual-provider"}}"#,
+        )
+        .unwrap();
+        let r = build_report(
+            &CreditsResp {
+                credits: doc.credits,
+                window_limits: doc.window_limits,
+            },
+            &doc.subscription,
+            NOW_MS,
+        );
+        assert_eq!(r.plan_type, "Provider");
+        assert_eq!(r.limits.len(), 1);
+    }
+
+    #[test]
+    fn zero_cap_window_is_dropped() {
+        assert!(window_limit("5 hours", Window::default(), NOW_MS).is_none());
+    }
+
+    #[test]
+    fn plan_names_follow_cmduse_order() {
+        assert_eq!(plan_name("individual-goat"), "GOAT");
+        assert_eq!(plan_name("individual-max-20"), "Max 20x");
+        assert_eq!(plan_name("individual-max-10"), "Max 10x");
+        // provider 含 "pro" 子串,必须先匹配到 Provider.
+        assert_eq!(plan_name("individual-provider"), "Provider");
+    }
+}
