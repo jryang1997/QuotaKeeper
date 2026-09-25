@@ -1,0 +1,5 @@
+# 固化:repo 内任何 cargo 调用自动用 GNU host 工具链,
+# 不再需要 `cargo +stable-x86_64-pc-windows-gnu` 前缀。
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+components = ["rustfmt", "clippy"]

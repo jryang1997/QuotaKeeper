@@ -1,0 +1,13 @@
+# 固化:本机无 MSVC link.exe(Git usr/bin 的 GNU link.exe 同名遮蔽),
+# 且 rustup shims 在 MSYS bash 下解析失败。固定走 WinLibs GCC,
+# 绝对路径,不依赖 PATH 顺序,新终端一遍过。
+[build]
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+linker = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/gcc.exe"
+ar = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/ar.exe"
+
+[env]
+CC_x86_64_pc_windows_gnu = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/gcc.exe"
+AR_x86_64_pc_windows_gnu = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/ar.exe"
