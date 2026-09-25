@@ -133,7 +133,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut page = Page::Quota;
     let mut quota_view = QuotaView::Cards;
     // 每张卡圆环显示的窗口:Go=Monthly,Codex=7 days,GOAT=Monthly(越界由渲染端钳制)
-    let mut ring_window: [usize; 3] = [2, 1, 2];
+    let mut ring_window: [usize; 4] = [2, 1, 2, 0];
     let mut sel_agent: Option<usize> = None;
     let mut sel_day: Option<usize> = None;
     let mut sel_heat: Option<String> = None;
@@ -206,13 +206,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Esc => {
-                        if sel_agent.is_some() || sel_day.is_some() || sel_heat.is_some() {
-                            sel_agent = None;
-                            sel_day = None;
-                            sel_heat = None;
-                        } else {
-                            break;
-                        }
+                        sel_agent = None;
+                        sel_day = None;
+                        sel_heat = None;
                     }
                     KeyCode::Char('r') if !in_flight => {
                         spawn_refresh(tx.clone());

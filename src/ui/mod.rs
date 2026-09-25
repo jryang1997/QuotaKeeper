@@ -156,7 +156,7 @@ pub struct ViewState<'a> {
     /// 配额页当前视图
     pub quota_view: QuotaView,
     /// 每张卡圆环当前聚焦的窗口下标(5h/周/月)
-    pub ring_window: &'a [usize; 3],
+    pub ring_window: &'a [usize],
     /// 用量页每日:表格(false) / 柱状图(true)
     pub chart_mode: bool,
     /// 用量页维度:0 Agent / 1 会话 / 2 项目
