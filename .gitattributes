@@ -1,0 +1,6 @@
+# 行尾固定:批处理必须 CRLF(否则 cmd 会错切 if 块/标签),源码 LF,图标二进制
+* text=auto
+*.bat text eol=crlf
+*.rs text eol=lf
+*.toml text eol=lf
+*.ico binary
