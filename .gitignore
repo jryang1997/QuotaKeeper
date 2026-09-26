@@ -1,2 +1,6 @@
 /target
 .zcode/
+
+# GUI 构建产物
+gui/target/
+gui/frontend/node_modules/
