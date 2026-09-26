@@ -1,8 +1,7 @@
 //! 入口:事件循环 + 后台刷新线程(经 mpsc 回传),UI 永不阻塞.
 //!
-//! 布局为壳 + 侧栏三页(配额/Token 用量/热力图);鼠标捕获已开启,点击侧栏切换
-//! 页面、配额页右上 ⟳ 切换卡片/圆环、点击圆环循环 5h→周→月、点击表格行/热力格
-//! 弹出明细;键盘 ↑↓/Tab/1·2·3/v/r/q·Esc 等价操作.
+//! 布局为壳 + 三页(配额/Token 用量/热力图);宽窗口侧栏可点,窄窗口自动收起.
+//! 点击图表/热力格查看明细;键盘 ↑↓/Tab/1·2·3/?/r/q·Esc 等操作.
 //! 刷新线程一次带回 quota(可失败)与 ledger(永不完全失败,单源错误在 UI 展示),
 //! 因此 OMP 挂了 Token 页照常可用.
 
@@ -22,7 +21,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use model::Snapshot;
-use ui::{HitRegions, Page, QuotaView};
+use ui::{HitRegions, Page, TrendMetric, TrendRange};
 
 enum Msg {
     Refreshed(Result<(Snapshot, u64), String>, Box<ledger::LedgerReport>),
@@ -131,13 +130,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut tick: u64 = 0;
 
     let mut page = Page::Quota;
-    let mut quota_view = QuotaView::Cards;
-    // 每张卡圆环显示的窗口:Go=Monthly,Codex=7 days,GOAT=Monthly(越界由渲染端钳制)
-    let mut ring_window: [usize; 4] = [2, 1, 2, 0];
+    let mut show_help = false;
     let mut sel_agent: Option<usize> = None;
     let mut sel_day: Option<usize> = None;
+    let mut sel_trend: Option<usize> = None;
     let mut sel_heat: Option<String> = None;
-    let mut chart_mode = false;
+    let mut chart_mode = true;
+    let mut trend_range = TrendRange::H24;
+    let mut trend_metric = TrendMetric::Tokens;
     let mut dim: usize = 0; // 用量页维度:0 Agent / 1 会话 / 2 项目
     // 配额阈值通知状态机:每 (卡, 额度) 记上一轮等级,跃迁才发 toast
     let mut prev_levels: Vec<(String, u8)> = Vec::new();
@@ -189,12 +189,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
             ledger: ledger_report.as_ref(),
             sel_agent,
             sel_day,
+            sel_trend,
             sel_heat: sel_heat.as_deref(),
-            quota_view,
-            ring_window: &ring_window,
             chart_mode,
+            trend_range,
+            trend_metric,
             dim,
             tick,
+            show_help,
         };
         terminal.draw(|f| ui::render(f, &view, &mut hits))?;
         if refreshing {
@@ -203,11 +205,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
 
         if event::poll(Duration::from_millis(250))? {
             match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press && show_help => {
+                    if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+                        show_help = false;
+                    } else if key.code == KeyCode::Char('q') {
+                        break;
+                    }
+                }
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('?') => show_help = true,
                     KeyCode::Esc => {
                         sel_agent = None;
                         sel_day = None;
+                        sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('r') if !in_flight => {
@@ -215,15 +226,24 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         in_flight = true;
                         refreshing = true;
                     }
-                    KeyCode::Char('v') => {
-                        quota_view = match quota_view {
-                            QuotaView::Cards => QuotaView::Rings,
-                            QuotaView::Rings => QuotaView::Cards,
-                        };
-                    }
-                    KeyCode::Char('g') => {
+                    KeyCode::Char('g') if page == Page::Usage => {
                         chart_mode = !chart_mode;
                         sel_day = None;
+                        sel_trend = None;
+                    }
+                    KeyCode::Char('t') if page == Page::Usage => {
+                        trend_range = match trend_range {
+                            TrendRange::H24 => TrendRange::D14,
+                            TrendRange::D14 => TrendRange::H24,
+                        };
+                        sel_trend = None;
+                    }
+                    KeyCode::Char('c') if page == Page::Usage => {
+                        trend_metric = match trend_metric {
+                            TrendMetric::Tokens => TrendMetric::Cost,
+                            TrendMetric::Cost => TrendMetric::Tokens,
+                        };
+                        sel_trend = None;
                     }
                     KeyCode::Char('p') => {
                         ui::theme::cycle();
@@ -233,11 +253,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         ui::i18n::cycle();
                         ui::i18n::save(&home);
                     }
-                    KeyCode::Char('s') => {
+                    KeyCode::Char('s') if page == Page::Usage => {
                         dim = (dim + 1) % 3;
                         sel_agent = None;
                     }
-                    KeyCode::Tab | KeyCode::Down | KeyCode::Up => {
+                    KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
                         page = match page {
                             Page::Quota => Page::Usage,
                             Page::Usage => Page::Heatmap,
@@ -245,61 +265,79 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         };
                         sel_agent = None;
                         sel_day = None;
+                        sel_trend = None;
+                        sel_heat = None;
+                    }
+                    KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => {
+                        page = match page {
+                            Page::Quota => Page::Heatmap,
+                            Page::Usage => Page::Quota,
+                            Page::Heatmap => Page::Usage,
+                        };
+                        sel_agent = None;
+                        sel_day = None;
+                        sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('1') => {
                         page = Page::Quota;
                         sel_agent = None;
                         sel_day = None;
+                        sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('2') => {
                         page = Page::Usage;
                         sel_agent = None;
                         sel_day = None;
+                        sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('3') => {
                         page = Page::Heatmap;
                         sel_agent = None;
                         sel_day = None;
+                        sel_trend = None;
                         sel_heat = None;
                     }
                     _ => {}
                 },
-                Event::Mouse(m) if m.kind == MouseEventKind::Up(MouseButton::Left) => {
+                Event::Mouse(m)
+                    if m.kind == MouseEventKind::Up(MouseButton::Left) && !show_help =>
+                {
                     match hits.hit(m.column, m.row) {
                         Some(ui::Hit::Sidebar(p)) => {
                             page = p;
                             sel_agent = None;
                             sel_day = None;
+                            sel_trend = None;
                             sel_heat = None;
-                        }
-                        Some(ui::Hit::ToggleView) => {
-                            quota_view = match quota_view {
-                                QuotaView::Cards => QuotaView::Rings,
-                                QuotaView::Rings => QuotaView::Cards,
-                            };
                         }
                         Some(ui::Hit::ToggleChart) => {
                             chart_mode = !chart_mode;
                             sel_day = None;
+                            sel_trend = None;
+                        }
+                        Some(ui::Hit::TrendRange(range)) => {
+                            trend_range = range;
+                            sel_trend = None;
+                        }
+                        Some(ui::Hit::TrendMetric(metric)) => {
+                            trend_metric = metric;
+                            sel_trend = None;
+                        }
+                        Some(ui::Hit::TrendBucket(i)) => {
+                            sel_agent = None;
+                            sel_day = None;
+                            sel_trend = if sel_trend == Some(i) { None } else { Some(i) };
                         }
                         Some(ui::Hit::DimTab(i)) => {
                             dim = i;
                             sel_agent = None;
                         }
-                        Some(ui::Hit::Ring(i)) => {
-                            // 点击环体循环该卡的窗口:5h → 周 → 月 → 5h
-                            if let Some(snap) = &snapshot
-                                && let Some(model::Card::Live(r)) = snap.cards.get(i)
-                                && !r.limits.is_empty()
-                            {
-                                ring_window[i] = (ring_window[i] + 1) % r.limits.len();
-                            }
-                        }
                         Some(ui::Hit::AgentRow(i)) => {
                             sel_day = None;
+                            sel_trend = None;
                             sel_heat = None;
                             sel_agent = if sel_agent == Some(i) { None } else { Some(i) };
                         }
@@ -307,10 +345,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                             sel_agent = None;
                             sel_heat = None;
                             sel_day = if sel_day == Some(i) { None } else { Some(i) };
+                            sel_trend = None;
                         }
                         Some(ui::Hit::HeatCell(date)) => {
                             sel_agent = None;
                             sel_day = None;
+                            sel_trend = None;
                             sel_heat = if sel_heat.as_deref() == Some(date.as_str()) {
                                 None
                             } else {

@@ -24,6 +24,8 @@ pub struct Theme {
     pub border: Color,
     pub select_bg: Color,
     pub select_fg: Color,
+    /// Agent 图表用色，按 ledger::types::CLIENTS 固定顺序。
+    pub series: [Color; 6],
     /// 热力图五级,索引 0 = 空日底色。
     pub heat: [Color; 5],
 }
@@ -41,6 +43,14 @@ pub const THEMES: [Theme; 4] = [
         border: Color::Rgb(198, 204, 214),
         select_bg: Color::Rgb(221, 228, 236),
         select_fg: Color::Rgb(31, 35, 40),
+        series: [
+            Color::Rgb(9, 105, 218),
+            Color::Rgb(130, 80, 223),
+            Color::Rgb(5, 133, 118),
+            Color::Rgb(180, 95, 18),
+            Color::Rgb(191, 56, 93),
+            Color::Rgb(48, 115, 170),
+        ],
         heat: [
             Color::Rgb(208, 215, 222),
             Color::Rgb(155, 233, 168),
@@ -61,6 +71,14 @@ pub const THEMES: [Theme; 4] = [
         border: Color::Rgb(41, 46, 66),
         select_bg: Color::Rgb(41, 46, 66),
         select_fg: Color::Rgb(192, 202, 245),
+        series: [
+            Color::Rgb(122, 162, 247),
+            Color::Rgb(187, 154, 247),
+            Color::Rgb(115, 218, 202),
+            Color::Rgb(255, 182, 108),
+            Color::Rgb(247, 142, 178),
+            Color::Rgb(137, 200, 238),
+        ],
         heat: [
             Color::Rgb(41, 46, 66),
             Color::Rgb(31, 86, 71),
@@ -81,6 +99,14 @@ pub const THEMES: [Theme; 4] = [
         border: Color::Rgb(80, 73, 69),
         select_bg: Color::Rgb(80, 73, 69),
         select_fg: Color::Rgb(251, 241, 199),
+        series: [
+            Color::Rgb(131, 165, 152),
+            Color::Rgb(211, 134, 155),
+            Color::Rgb(142, 192, 124),
+            Color::Rgb(254, 128, 25),
+            Color::Rgb(177, 98, 134),
+            Color::Rgb(184, 187, 38),
+        ],
         heat: [
             Color::Rgb(60, 56, 54),
             Color::Rgb(82, 86, 34),
@@ -101,6 +127,14 @@ pub const THEMES: [Theme; 4] = [
         border: Color::Rgb(88, 91, 112),
         select_bg: Color::Rgb(88, 91, 112),
         select_fg: Color::Rgb(205, 214, 244),
+        series: [
+            Color::Rgb(137, 180, 250),
+            Color::Rgb(203, 166, 247),
+            Color::Rgb(148, 226, 213),
+            Color::Rgb(250, 179, 135),
+            Color::Rgb(245, 194, 231),
+            Color::Rgb(137, 220, 235),
+        ],
         heat: [
             Color::Rgb(69, 71, 90),
             Color::Rgb(58, 98, 76),

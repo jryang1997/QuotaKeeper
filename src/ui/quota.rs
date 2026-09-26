@@ -1,8 +1,4 @@
-//! 配额页:卡片视图(每条额度 = 文字行 + █░ 粗块条)与圆环视图。
-//!
-//! 圆环视图是"环环相扣"的同心三环:外=月、中=周、内=5h,同时呈现三个窗口;
-//! 聚焦窗口(点击环体或 ring_window)以饱和色高亮并在环心显示百分比,
-//! 其余两环降饱和;右上 ⟳ 按钮或 `v` 键与卡片视图互切。
+//! 配额页:每条额度用文字与横向块条呈现。
 //! 阈值口径抄 OMP usage-cli(80/100):>=100 exhausted,>=80 warning。
 
 use chrono::Datelike;
@@ -15,9 +11,9 @@ use ratatui::{
 };
 
 use crate::model::{Card, Limit, ProviderId, Status, format_countdown};
+use crate::ui::ViewState;
 use crate::ui::i18n;
 use crate::ui::theme as t;
-use crate::ui::{Band, HitRegions, QuotaView, RingGauge, ViewState};
 
 fn status_color(s: Status) -> Color {
     let th = t::get();
@@ -81,10 +77,6 @@ fn limit_bar_line(l: &Limit, width: u16) -> Line<'static> {
     ])
 }
 
-fn short_name(p: ProviderId) -> String {
-    p.title().split(" ·").next().unwrap_or(">").to_string()
-}
-
 /// 窗口长度(按额度标签关键字);Monthly 走自然月,单独处理.
 fn window_len(label: &str) -> Option<chrono::Duration> {
     let l = label.to_lowercase();
@@ -97,9 +89,8 @@ fn window_len(label: &str) -> Option<chrono::Duration> {
     }
 }
 
-/// 燃烧率预测:窗口内匀速外推 —— 已过 E 用了 X% → 剩余 (100-X)% 还需 E*(100-X)/X.
-/// 返回 (文案, 颜色);<1h 判急迫用 err 色,否则暗色。X=0 或窗口未知返回 None.
-fn predict(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<(String, Color)> {
+/// 按窗口已过时间和已用百分比线性外推剩余秒数。
+pub(crate) fn eta_seconds(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<i64> {
     let x = l.used_pct;
     if x <= 0.0 || x >= 100.0 {
         return None;
@@ -140,7 +131,16 @@ fn predict(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<(String, C
         return None;
     }
     let secs = elapsed_secs * (100.0 - x) / x;
-    let cd = crate::model::format_countdown((secs * 1000.0) as i64);
+    if !secs.is_finite() || secs <= 0.0 {
+        return None;
+    }
+    Some(secs as i64)
+}
+
+/// 配额页沿用同一 ETA 计算，只负责文字与颜色。
+fn predict(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<(String, Color)> {
+    let secs = eta_seconds(l, now)?;
+    let cd = crate::model::format_countdown(secs.saturating_mul(1000));
     let zh = i18n::lang() == i18n::Lang::Zh;
     let text = if zh {
         format!("预计 {cd} 耗尽")
@@ -149,7 +149,7 @@ fn predict(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<(String, C
     };
     Some((
         text,
-        if secs < 3600.0 {
+        if secs < 3600 {
             t::get().err
         } else {
             t::get().dim
@@ -165,11 +165,15 @@ fn card_height(card: &Card) -> u16 {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegions) {
-    match st.quota_view {
-        QuotaView::Cards => render_cards(frame, area, st),
-        QuotaView::Rings => render_rings(frame, area, st, hits),
+fn compact_height(card: &Card) -> u16 {
+    match card {
+        Card::Live(r) => r.limits.len() as u16 + 2,
+        Card::Missing { .. } => 3,
     }
+}
+
+pub fn render(frame: &mut Frame, area: Rect, st: &ViewState) {
+    render_cards(frame, area, st);
 }
 
 /// 卡片标题:plan_type 与 provider 名重复时(如 "OpenCode Go · $10/mo · OpenCode Go")去掉重复段.
@@ -190,17 +194,95 @@ fn render_cards(frame: &mut Frame, area: Rect, st: &ViewState) {
         frame.render_widget(Paragraph::new(i18n::t(i18n::K::Loading)), area);
         return;
     };
-    let constraints: Vec<Constraint> = snap
-        .cards
+    let full_height: u16 = snap.cards.iter().map(card_height).sum();
+    let compact = full_height > area.height;
+    let compact_total: u16 = snap.cards.iter().map(compact_height).sum();
+    if compact && compact_total > area.height && area.width >= 48 {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+            .split(area);
+        let middle = snap.cards.len().div_ceil(2);
+        render_card_list(frame, columns[0], &snap.cards[..middle], th, true);
+        render_card_list(frame, columns[1], &snap.cards[middle..], th, true);
+    } else {
+        render_card_list(frame, area, &snap.cards, th, compact);
+    }
+}
+
+fn render_card_list(frame: &mut Frame, area: Rect, cards: &[Card], th: &t::Theme, compact: bool) {
+    let constraints: Vec<Constraint> = cards
         .iter()
-        .map(|c| Constraint::Length(card_height(c)))
+        .map(|c| {
+            Constraint::Length(if compact {
+                compact_height(c)
+            } else {
+                card_height(c)
+            })
+        })
         .collect();
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
-    for (card, a) in snap.cards.iter().zip(areas.iter()) {
-        render_card(frame, *a, card, th);
+    for (card, a) in cards.iter().zip(areas.iter()) {
+        if compact {
+            render_compact_card(frame, *a, card, th);
+        } else {
+            render_card(frame, *a, card, th);
+        }
+    }
+}
+
+fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
+    let Card::Live(report) = card else {
+        render_card(frame, area, card, th);
+        return;
+    };
+    let block = Block::default()
+        .title(Span::styled(
+            format!(" {} ", card_title(report)),
+            Style::default().fg(th.accent),
+        ))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(th.border));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, limit) in report.limits.iter().enumerate() {
+        let bar_width = inner.width.saturating_sub(25).clamp(4, 14) as usize;
+        let filled = ((limit.used_pct / 100.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
+        let label: String = limit.label.chars().take(12).collect();
+        let line = Line::from(vec![
+            Span::raw(format!("{label} ")),
+            Span::styled(
+                format!("{:.0}% ", limit.used_pct),
+                Style::default()
+                    .fg(status_color(limit.status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "█".repeat(filled),
+                Style::default().fg(status_color(limit.status)),
+            ),
+            Span::styled(
+                "░".repeat(bar_width.saturating_sub(filled)),
+                Style::default().fg(th.track),
+            ),
+            Span::styled(
+                format!(" {}", reset_text(limit)),
+                Style::default().fg(th.dim),
+            ),
+        ]);
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect {
+                x: inner.x,
+                y: inner.y + index as u16,
+                width: inner.width,
+                height: 1,
+            },
+        );
     }
 }
 
@@ -253,167 +335,13 @@ fn render_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
     }
 }
 
-// ---------------- 圆环视图(同心环) ----------------
-
-fn render_rings(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegions) {
-    let th = t::get();
-    let Some(snap) = st.snapshot else {
-        frame.render_widget(Paragraph::new(i18n::t(i18n::K::Loading)), area);
-        return;
-    };
-    let n = snap.cards.len().max(1) as u32;
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints((0..n).map(|_| Constraint::Ratio(1, n)).collect::<Vec<_>>())
-        .split(area);
-    for (i, (card, col)) in snap.cards.iter().zip(cols.iter()).enumerate() {
-        let win = st.ring_window[i.min(st.ring_window.len() - 1)];
-        match card {
-            Card::Live(r) => {
-                // plan_type 与 short_name 重复时只显示一个
-                let sn = short_name(r.provider);
-                let title = if r.plan_type.is_empty()
-                    || sn.to_lowercase().contains(&r.plan_type.to_lowercase())
-                {
-                    sn
-                } else {
-                    format!("{sn} · {}", r.plan_type)
-                };
-                frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        title,
-                        Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
-                    ))),
-                    *col,
-                );
-                let rest = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Min(6),
-                        Constraint::Length(r.limits.len() as u16),
-                    ])
-                    .split(Rect {
-                        x: col.x,
-                        y: col.y + 1,
-                        width: col.width,
-                        height: col.height.saturating_sub(1),
-                    });
-                let focus = win.min(r.limits.len().saturating_sub(1));
-
-                // 同心环带:外 → 内 = limits 逆序(月最外,5h 最内)
-                let mut bands = Vec::new();
-                for (j, l) in r.limits.iter().enumerate().rev() {
-                    let c = status_color(l.status);
-                    let (arc, track) = if j == focus {
-                        (Style::default().fg(c), Style::default().fg(th.track))
-                    } else {
-                        (
-                            Style::default().fg(t::blend(c, th.track, 0.55)),
-                            Style::default().fg(t::blend(th.track, th.dim, 0.35)),
-                        )
-                    };
-                    bands.push(Band {
-                        ratio: l.used_pct / 100.0,
-                        arc,
-                        track,
-                    });
-                }
-                let focused = &r.limits[focus];
-                let ring_area = Rect {
-                    x: rest[0].x + 2,
-                    y: rest[0].y,
-                    width: rest[0].width.saturating_sub(4),
-                    height: rest[0].height,
-                };
-                frame.render_widget(
-                    RingGauge::concentric(
-                        bands,
-                        None,
-                        Some(format!("{:.0}%", focused.used_pct)),
-                        Style::default()
-                            .fg(status_color(focused.status))
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    ring_area,
-                );
-                hits.ring.push((rest[0], i));
-
-                for (j, lim) in r.limits.iter().enumerate() {
-                    let focused_line = j == focus;
-                    let marker = if focused_line { "▸ " } else { "  " };
-                    frame.render_widget(
-                        Paragraph::new(Line::from(vec![
-                            Span::raw(marker),
-                            Span::raw(lim.label.clone()),
-                            Span::styled(
-                                format!("  {:.0}%", lim.used_pct),
-                                Style::default().fg(status_color(lim.status)),
-                            ),
-                        ]))
-                        .style(if focused_line {
-                            Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(th.dim)
-                        }),
-                        Rect {
-                            x: rest[1].x + 2,
-                            y: rest[1].y + j as u16,
-                            width: rest[1].width.saturating_sub(2),
-                            height: 1,
-                        },
-                    );
-                }
-            }
-            Card::Missing { provider } => {
-                frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        short_name(*provider),
-                        Style::default().fg(th.dim),
-                    ))),
-                    *col,
-                );
-                let rest_h = col.height.saturating_sub(1);
-                let ring_area = Rect {
-                    x: col.x + 2,
-                    y: col.y + 1,
-                    width: col.width.saturating_sub(4),
-                    height: rest_h,
-                };
-                frame.render_widget(
-                    RingGauge::new(
-                        0.0,
-                        Style::default().fg(th.track),
-                        Style::default().fg(th.track),
-                        Some("—".into()),
-                    ),
-                    ring_area,
-                );
-                hits.ring.push((ring_area, i));
-                let hint = match provider {
-                    ProviderId::Goat => i18n::t(i18n::K::MGoat),
-                    _ => i18n::t(i18n::K::MGo),
-                };
-                frame.render_widget(
-                    Paragraph::new(Span::styled(hint, Style::default().fg(th.dim))),
-                    Rect {
-                        x: col.x + 1,
-                        y: col.bottom().saturating_sub(1),
-                        width: col.width.saturating_sub(1),
-                        height: 1,
-                    },
-                );
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::Page;
+    use crate::ui::{HitRegions, Page};
     use ratatui::{Terminal, backend::TestBackend};
 
-    fn view<'a>(quota_view: QuotaView, snap: &'a crate::model::Snapshot) -> ViewState<'a> {
+    fn view<'a>(snap: &'a crate::model::Snapshot) -> ViewState<'a> {
         ViewState {
             page: Page::Quota,
             snapshot: Some(snap),
@@ -423,12 +351,14 @@ mod tests {
             ledger: None,
             sel_agent: None,
             sel_day: None,
+            sel_trend: None,
             sel_heat: None,
-            quota_view,
-            ring_window: &[1, 1, 2],
             chart_mode: false,
+            trend_range: crate::ui::TrendRange::H24,
+            trend_metric: crate::ui::TrendMetric::Tokens,
             dim: 0,
             tick: 0,
+            show_help: false,
         }
     }
 
@@ -476,14 +406,14 @@ mod tests {
         assert!(predict(&mk(50.0, "weird window"), now).is_none());
     }
 
-    /// 无头渲染:卡片视图四卡标题 + █░ 块条 + 顶栏按钮都在。
+    /// 无头渲染:配额卡片标题与 █░ 块条。
     #[test]
     fn cards_view_renders_headless() {
         let s = snap();
         let backend = TestBackend::new(80, 24);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();
-        term.draw(|f| crate::ui::render(f, &view(QuotaView::Cards, &s), &mut hits))
+        term.draw(|f| crate::ui::render(f, &view(&s), &mut hits))
             .unwrap();
         // TestBackend 宽字符后带空格,去空白再断言 CJK
         let text: String = term
@@ -498,37 +428,5 @@ mod tests {
         assert!(text.contains("OpenCodeGo"), "缺 Go 卡");
         assert!(text.contains("GOAT"), "缺 GOAT 卡");
         assert!(text.contains('█') && text.contains('░'), "缺块条");
-        assert!(text.contains("圆环"), "缺顶栏切换按钮");
-    }
-
-    /// 圆环视图:盲文点 + 环心百分比 + 环命中区。
-    #[test]
-    fn rings_view_renders_headless() {
-        let s = snap();
-        let backend = TestBackend::new(100, 30);
-        let mut term = Terminal::new(backend).unwrap();
-        let mut hits = HitRegions::default();
-        term.draw(|f| crate::ui::render(f, &view(QuotaView::Rings, &s), &mut hits))
-            .unwrap();
-        let b = term.backend().buffer();
-        let text: String = b
-            .content()
-            .iter()
-            .map(|c| c.symbol().to_string())
-            .collect::<String>()
-            .split_whitespace()
-            .collect();
-        assert!(text.contains("卡片"), "缺顶栏切换按钮");
-        assert!(text.contains("53%"), "缺 Go 卡环心百分比(周窗口)");
-        assert!(text.contains("70%"), "缺 Codex 环心百分比");
-        assert!(
-            b.content().iter().any(|c| {
-                c.symbol()
-                    .chars()
-                    .any(|ch| ('\u{2801}'..='\u{28FF}').contains(&ch))
-            }),
-            "缺盲文环"
-        );
-        assert_eq!(hits.ring.len(), 4, "应有四个环命中区");
     }
 }

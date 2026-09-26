@@ -1,13 +1,13 @@
 # tui-token-monitor
 
-终端里的三页监测台:左侧圆角按钮切换(鼠标可点),配额页支持卡片/圆环双视图(右上 ⟳ 切换,圆环为同心三环+点阵大数字环心),Token 用量页支持 Agent/会话/项目三维度,热力图页是 GitHub 风格贡献格 + 工作时段 Profile。中英双语(`l` 键),四套主题(`p` 键)。
+终端里的三页监测台:宽窗口用左侧按钮切换,窄窗口自动让内容占满宽度;配额页用卡片和横向进度条,Token 用量页显示最近一小时活动、Agent/会话/项目三维度和可切换的堆叠趋势图,热力图页是 GitHub 风格贡献格 + 工作时段 Profile。中英双语(`l` 键),四套主题(`p` 键)。
 
-## 范围(已确认,2026-09-25)
+## 范围(已确认,2026-09-26)
 
-- **配额页**:OpenCode Go $10/mo(5h/周/月)+ Codex(ChatGPT Plus $20/mo,5h/7d)+ Command Code GOAT $10/mo(月 $70 / 5h $14 / 周 $35)+ **Antigravity(经 CPA 反代,unofficial)**.卡片视图每条额度 = 文字 + █░ 粗块条,行尾附**燃烧率预测**("预计 X 耗尽",窗口内匀速外推,<1h 红色告警);圆环视图用盲文点阵(U+2800,2×4 子像素/格)画**同心环**(外=月/中=周/内=5h),环心为点阵大数字百分比,点击环体换聚焦窗口;右上 ⟳ 按钮(或 `v` 键)切换两视图.
+- **配额页**:OpenCode Go $10/mo(5h/周/月)+ Codex(ChatGPT Plus $20/mo,5h/7d)+ Command Code GOAT $10/mo(月 $70 / 5h $14 / 周 $35)+ **Antigravity(经 CPA 反代,unofficial)**.每条额度用文字和 █░ 横向进度条显示,行尾附窗口内匀速外推的预计耗尽时间(<1h 红色告警).
 - **配额阈值通知**:任额度跨越 80% / 100% / 重置时弹 Windows toast(状态机去重,不重复轰炸).
 - **采集链路**:OMP 优先 → 失败自动落 Codex 原生配额(`~/.codex/auth.json` OAuth → `chatgpt.com/backend-api/wham/usage`,口径照抄 CodexBar,unofficial);**Antigravity 卡**读 CPA(CLIProxyAPI)管理接口 `auth-files` 取凭证健康 + OMP stats.db 里 `provider='cpa'` 的今日 token 强度(今日 vs 近 7 日均值)——credits 百分比因官方端点对消费级账号 403 且当前 CPA 构建无该端点而不可用,以强度条替代;管理密钥放 `~/.tui-token-monitor/cpa-key`.
-- **Token 用量页**:今日/本周(ISO 周一起)/本月汇总 + 近 30 天按 Agent 表 + 近 14 天每日表,行可点击看明细.六路数据源(口径照抄 tokscale 的字段映射与去重规则):
+- **Token 用量页**:顶部显示近 60 分钟本机用量、用量最多的 Agent、最近记录和最紧张的真实订阅额度；下方保留今日/本周(ISO 周一起)/本月汇总与近 30 天按 Agent/会话/项目表。趋势图可切换滚动 24 小时或近 14 天、Token 或金额，按 Agent 堆叠并可点击时段看明细；`g` 切回每日表。六路数据源:
 
 | Agent | 来源 | 成本 |
 |---|---|---|
@@ -35,14 +35,14 @@ cargo run
 
 工具链已全局固化(`~/.cargo/config.toml` + rustup default GNU + repo `rust-toolchain.toml`),新终端一遍过,无前缀.
 
-交互:左侧圆角按钮点击切换页面(键盘 `↑↓`/`Tab`/`1·2·3` 等价)· 配额页右上 `⟳` 切换卡片/圆环(`v` 同效)· 圆环点击换聚焦窗口 · 用量页 `s` 切维度、`g` 切每日表格/趋势图 · `l` 切中英文 · `p` 循环四套主题(均持久化)· 点击行与色块看明细(`Esc` 收起)· `r` 刷新 · `q` 退出 · 每 60s 自动刷新.OMP 挂掉自动落 Codex 原生配额,Token 页不受影响.
+交互:宽窗口可点击左侧按钮切换页面;`↑`/`k` 上一页,`↓`/`j`/`Tab` 下一页,`1·2·3` 直达页面 · 用量页 `s` 切维度、`g` 切每日表格/趋势图、`t` 切 24h/14d、`c` 切 Token/金额 · `l` 切中英文 · `p` 循环四套主题(均持久化)· `?` 显示快捷键 · 点击行与柱条看明细(`Esc` 收起)· `r` 刷新 · `q` 退出 · 每 60s 自动刷新.OMP 挂掉自动落 Codex 原生配额,Token 页不受影响.
 
-字体:为中文对齐与盲文环形计,终端字体请用 **Sarasa Term SC**(已装,Windows Terminal `profiles.defaults.font.face`)——盲文点阵/块条/圆环符号全覆盖.
+字体:为中文对齐和进度条显示,终端字体推荐 **Sarasa Term SC**(已装,Windows Terminal `profiles.defaults.font.face`).
 
 ## 验证
 
 ```sh
-cargo test                # 78 个测试:fixture 回放 + 内存 SQLite 构造 + 多帧 zstd + 聚合边界 + 盲文环弧形/大数字 + 双语切换 + 三页无头渲染
+cargo test                # fixture 回放 + 内存 SQLite 构造 + 多帧 zstd + 时间边界 + 图表点击 + 三页无头渲染
 cargo run --example ledger_smoke   # 对本机真实数据源跑一遍 ledger,打印汇总
 ```
 

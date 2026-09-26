@@ -45,6 +45,20 @@ pub struct AgentRow {
     pub models: Vec<(String, Agg)>,
 }
 
+/// 最近一小时按 Agent 汇总，仅代表本机记录到的活动。
+pub struct RecentAgentRow {
+    pub client: &'static str,
+    pub agg: Agg,
+    pub last_ts: i64,
+}
+
+/// 过去 24 小时连续的一小时桶，包含空桶。
+pub struct TrendBucket {
+    pub start_ms: i64,
+    pub agg: Agg,
+    pub per_client: Vec<(&'static str, Agg)>,
+}
+
 /// 热力图单日合计.
 pub struct DailyTotal {
     pub date: String,
@@ -78,6 +92,12 @@ pub struct LedgerReport {
     pub month: Agg,
     /// 近 30 天按 agent,总量降序,只含有数据的.
     pub by_agent: Vec<AgentRow>,
+    /// 最近一小时按 token 降序。
+    pub recent_by_agent: Vec<RecentAgentRow>,
+    /// 最后一条有时间戳的本机记录，可能早于一小时。
+    pub last_activity_ms: Option<i64>,
+    /// 过去 24 小时的连续滚动小时桶，旧 → 新。
+    pub trend_24h: Vec<TrendBucket>,
     /// 近 14 天,旧 → 新,空日也保留.
     pub by_day: Vec<DayRow>,
     /// 近 26 周每日合计,起点为周一(HEATMAP_WEEKS*7 天,旧 → 新,空日 tokens=0).
@@ -251,7 +271,12 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut hourly = [0i64; 24];
     let mut weekday = [0i64; 7];
     let mut recent60 = 0i64; // 近 60 分钟 token 合计(燃烧率)
-    let recent60_since = now.timestamp_millis() - 3_600_000;
+    let now_ms = now.timestamp_millis();
+    let recent60_since = now_ms - 3_600_000;
+    let trend_start = now_ms - 24 * 3_600_000;
+    let mut recent_raw: HashMap<&'static str, (Agg, i64)> = HashMap::new();
+    let mut last_activity_ms: Option<i64> = None;
+    let mut trend_raw: Vec<HashMap<&'static str, Agg>> = vec![HashMap::new(); 24];
     let mut session_raw: HashMap<(&'static str, String), (Agg, i64, Option<String>)> =
         HashMap::new();
     type ProjectEntry = (
@@ -271,9 +296,23 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         if date_str == today_str {
             today_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
         }
-        // 燃烧率:近 60 分钟
-        if r.ts_ms >= recent60_since {
+        if r.ts_ms <= now_ms {
+            last_activity_ms = Some(last_activity_ms.map_or(r.ts_ms, |last| last.max(r.ts_ms)));
+        }
+        // 滚动小时桶与最近一小时只接纳已发生的记录。
+        if r.ts_ms >= trend_start && r.ts_ms <= now_ms {
+            let bucket = ((r.ts_ms - trend_start) / 3_600_000).min(23) as usize;
+            trend_raw[bucket].entry(r.client).or_default().add(
+                &r.tokens,
+                r.cost,
+                r.cost_is_estimate,
+            );
+        }
+        if r.ts_ms >= recent60_since && r.ts_ms <= now_ms {
             recent60 += r.tokens.total();
+            let entry = recent_raw.entry(r.client).or_default();
+            entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
+            entry.1 = entry.1.max(r.ts_ms);
         }
         if date >= monday && date <= today {
             week_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
@@ -351,6 +390,41 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 agg,
                 models,
             })
+        })
+        .collect();
+
+    let mut recent_by_agent: Vec<RecentAgentRow> = recent_raw
+        .into_iter()
+        .map(|(client, (agg, last_ts))| RecentAgentRow {
+            client,
+            agg,
+            last_ts,
+        })
+        .collect();
+    recent_by_agent.sort_by(|a, b| {
+        b.agg
+            .total()
+            .cmp(&a.agg.total())
+            .then(b.last_ts.cmp(&a.last_ts))
+    });
+
+    let trend_24h: Vec<TrendBucket> = trend_raw
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut raw)| {
+            let per_client: Vec<(&'static str, Agg)> = CLIENTS
+                .iter()
+                .filter_map(|(client, _)| raw.remove(client).map(|agg| (*client, agg)))
+                .collect();
+            let mut agg = Agg::default();
+            for (_, value) in &per_client {
+                agg.merge(value);
+            }
+            TrendBucket {
+                start_ms: trend_start + i as i64 * 3_600_000,
+                agg,
+                per_client,
+            }
         })
         .collect();
 
@@ -441,6 +515,9 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         week: week_agg,
         month: month_agg,
         by_agent,
+        recent_by_agent,
+        last_activity_ms,
+        trend_24h,
         by_day,
         daily_totals,
         daily_detail,
@@ -741,6 +818,58 @@ mod tests {
             },
         );
         assert!(aggregate(vec![old], n).burn_rate.is_none());
+    }
+
+    #[test]
+    fn rolling_trend_and_recent_agents_use_real_time_boundaries() {
+        let n = now();
+        let at = n.timestamp_millis();
+        let mk = |client, ts_ms, input| {
+            rec(
+                client,
+                "m",
+                ts_ms,
+                TokenBreakdown {
+                    input,
+                    ..Default::default()
+                },
+            )
+        };
+        let rep = aggregate(
+            vec![
+                mk("omp", at - 24 * 3_600_000, 10),
+                mk("codex", at - 3_600_000, 60),
+                mk("omp", at - 5 * 60_000, 120),
+                mk("codex", at, 30),
+                mk("omp", at + 1, 999),
+            ],
+            n,
+        );
+        assert_eq!(rep.trend_24h.len(), 24);
+        assert_eq!(rep.trend_24h[0].agg.total(), 10);
+        assert!(rep.trend_24h[1..23].iter().all(|b| b.agg.total() == 0));
+        assert_eq!(rep.trend_24h[23].agg.total(), 210);
+        for bucket in &rep.trend_24h {
+            assert_eq!(
+                bucket
+                    .per_client
+                    .iter()
+                    .map(|(_, agg)| agg.total())
+                    .sum::<i64>(),
+                bucket.agg.total()
+            );
+        }
+        assert_eq!(
+            rep.recent_by_agent
+                .iter()
+                .map(|a| a.client)
+                .collect::<Vec<_>>(),
+            vec!["omp", "codex"]
+        );
+        assert_eq!(rep.recent_by_agent[0].agg.total(), 120);
+        assert_eq!(rep.recent_by_agent[1].agg.total(), 90);
+        assert_eq!(rep.last_activity_ms, Some(at));
+        assert_eq!(rep.burn_rate, Some(210.0 / 60.0));
     }
 
     #[test]

@@ -13,8 +13,9 @@ use ratatui::{
 };
 
 use crate::ledger::{LedgerReport, client_label, format_tokens, format_usd, types::Agg};
+use crate::model::{Card, ProviderId, Snapshot};
 
-use super::{HitRegions, ViewState};
+use super::{HitRegions, TrendMetric, TrendRange, ViewState, quota, trend};
 use crate::ui::i18n;
 use crate::ui::theme as t;
 
@@ -24,18 +25,15 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
         return;
     };
 
+    let top_h = if area.width >= 90 { 2 } else { 3 };
     let agent_rows_shown = ledger.by_agent.len().min(8);
-    let agent_h = agent_rows_shown as u16 + 2; // 表头 + 行 + 表头下留白
-    let detail_h = if st.sel_agent.is_some() || st.sel_day.is_some() {
-        6
-    } else {
-        0
-    };
+    let room_for_agents = area.height.saturating_sub(top_h + 1 + 1 + 4);
+    let agent_h = (agent_rows_shown as u16 + 1).min(room_for_agents).max(2);
 
     let main = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(top_h),
             Constraint::Length(1), // 维度标签行
             Constraint::Length(agent_h),
             Constraint::Length(1),
@@ -43,7 +41,7 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
         ])
         .split(area);
 
-    summary(frame, main[0], ledger);
+    right_now(frame, main[0], st, ledger);
     render_dim_tabs(frame, main[1], st.dim, hits);
 
     let agent_area = main[2];
@@ -56,7 +54,12 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
     // 源状态行(左) + 每日视图切换按钮(右)
     let src_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(14)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(11),
+            Constraint::Length(13),
+            Constraint::Length(9),
+        ])
         .split(main[3]);
     frame.render_widget(sources_line(ledger), src_cols[0]);
     let zh = i18n::lang() == i18n::Lang::Zh;
@@ -71,12 +74,7 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
     } else {
         "▁ Trend"
     };
-    let btn_rect = Rect {
-        x: src_cols[1].x,
-        y: src_cols[1].y,
-        width: src_cols[1].width,
-        height: 1,
-    };
+    let btn_rect = src_cols[1];
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             toggle_label,
@@ -88,18 +86,33 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
     );
     hits.chart_toggle = Some(btn_rect);
 
-    let day_area = if detail_h > 0 {
+    if st.chart_mode {
+        render_chart_controls(frame, src_cols[2], src_cols[3], st, hits);
+    }
+
+    let selected = st.sel_agent.is_some() || st.sel_day.is_some() || st.sel_trend.is_some();
+    let day_area = if selected && main[4].height >= 7 {
         let split = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(detail_h)])
+            .constraints([Constraint::Min(4), Constraint::Length(3)])
             .split(main[4]);
         render_detail(frame, split[1], ledger, st);
         split[0]
+    } else if selected {
+        render_detail(frame, main[4], ledger, st);
+        return;
     } else {
         main[4]
     };
     if st.chart_mode {
-        render_day_chart(frame, day_area, ledger, hits);
+        trend::render(
+            frame,
+            day_area,
+            ledger,
+            st.trend_range,
+            st.trend_metric,
+            hits,
+        );
     } else {
         render_day_table(frame, day_area, ledger, st.sel_day, hits);
     }
@@ -278,36 +291,251 @@ fn cost_span(agg: &Agg) -> Span<'static> {
     })
 }
 
-fn summary(frame: &mut Frame, area: Rect, ledger: &LedgerReport) {
+fn short_window(label: &str) -> &str {
+    let lower = label.to_ascii_lowercase();
+    if lower.contains("5h") || lower.contains("5 hour") {
+        "5h"
+    } else if lower.contains("7d") || lower.contains("7 day") || lower.contains("week") {
+        "7d"
+    } else if lower.contains("month") || lower.contains('月') {
+        if i18n::lang() == i18n::Lang::Zh {
+            "月"
+        } else {
+            "mo"
+        }
+    } else {
+        label
+    }
+}
+
+fn tightest_quota(snapshot: Option<&Snapshot>) -> Option<String> {
+    let now = chrono::Local::now();
+    let mut exhausted: Option<(f64, String)> = None;
+    let mut with_eta: Option<(i64, String)> = None;
+    let mut fallback: Option<(f64, String)> = None;
+    for card in &snapshot?.cards {
+        let Card::Live(report) = card else { continue };
+        if report.provider == ProviderId::Antigravity {
+            continue;
+        }
+        let name = report
+            .provider
+            .title()
+            .split(" ·")
+            .next()
+            .unwrap_or("Quota");
+        for limit in &report.limits {
+            let base = format!(
+                "{} {} {:.0}%",
+                name,
+                short_window(&limit.label),
+                limit.used_pct
+            );
+            if limit.used_pct >= 100.0
+                && exhausted
+                    .as_ref()
+                    .is_none_or(|(pct, _)| limit.used_pct > *pct)
+            {
+                exhausted = Some((limit.used_pct, base.clone()));
+            }
+            if fallback
+                .as_ref()
+                .is_none_or(|(pct, _)| limit.used_pct > *pct)
+            {
+                fallback = Some((limit.used_pct, base.clone()));
+            }
+            if let Some(secs) = quota::eta_seconds(limit, now)
+                && with_eta.as_ref().is_none_or(|(best, _)| secs < *best)
+            {
+                with_eta = Some((secs, base));
+            }
+        }
+    }
+    if let Some((_, base)) = exhausted {
+        Some(base)
+    } else if let Some((secs, base)) = with_eta {
+        let countdown = crate::model::format_countdown(secs.saturating_mul(1000));
+        Some(format!("{base} · ~{countdown}"))
+    } else {
+        fallback.map(|(_, text)| text)
+    }
+}
+
+fn right_now(frame: &mut Frame, area: Rect, st: &ViewState, ledger: &LedgerReport) {
+    if area.height == 0 {
+        return;
+    }
     let th = t::get();
-    let cells = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-        ])
-        .split(area);
-    for (i, (title, agg)) in [
+    let recent_total: i64 = ledger.recent_by_agent.iter().map(|a| a.agg.total()).sum();
+    let recent = if recent_total > 0 {
+        let top = &ledger.recent_by_agent[0];
+        if area.width < 60 {
+            format!(
+                "{} {} · {} {}",
+                i18n::t(i18n::K::Last60),
+                format_tokens(recent_total),
+                client_label(top.client),
+                format_tokens(top.agg.total())
+            )
+        } else {
+            format!(
+                "{} {} · {}/min · {} {}",
+                i18n::t(i18n::K::Last60),
+                format_tokens(recent_total),
+                format_tokens(ledger.burn_rate.unwrap_or(0.0).round() as i64),
+                client_label(top.client),
+                format_tokens(top.agg.total()),
+            )
+        }
+    } else if let Some(last) = ledger.last_activity_ms {
+        format!(
+            "{} {} · {} {}",
+            i18n::t(i18n::K::Last60),
+            i18n::t(i18n::K::Idle),
+            i18n::t(i18n::K::LastRecord),
+            i18n::rel(ledger.generated_at_ms.saturating_sub(last))
+        )
+    } else {
+        format!("{} {}", i18n::t(i18n::K::Last60), i18n::t(i18n::K::Idle))
+    };
+    let quota = format!(
+        "{} {}",
+        i18n::t(i18n::K::QuotaShort),
+        tightest_quota(st.snapshot).unwrap_or_else(|| "—".into())
+    );
+    let summary = [
         (i18n::t(i18n::K::SToday), &ledger.today),
         (i18n::t(i18n::K::SWeek), &ledger.week),
         (i18n::t(i18n::K::SMonth), &ledger.month),
     ]
     .into_iter()
-    .enumerate()
-    {
-        let p = Paragraph::new(vec![
-            Line::from(Span::styled(title, Style::default().fg(th.dim))),
-            Line::from(Span::styled(
-                format!("{} {}", format_tokens(agg.total()), "tok"),
-                Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(vec![
-                cost_span(agg),
-                Span::raw(format!(" · {} 条", agg.messages)),
-            ]),
-        ]);
-        frame.render_widget(p, cells[i]);
+    .map(|(title, agg)| {
+        if area.width < 65 {
+            return format!("{title} {}", format_tokens(agg.total()));
+        }
+        let cost = if agg.cost() > 0.0 {
+            format_usd(agg.cost())
+        } else {
+            "—".into()
+        };
+        format!("{title} {} {cost}", format_tokens(agg.total()))
+    })
+    .collect::<Vec<_>>()
+    .join("  ·  ");
+
+    let emphasis = Style::default().fg(th.accent).add_modifier(Modifier::BOLD);
+    if area.width >= 90 {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+            .split(area);
+        frame.render_widget(
+            Paragraph::new(recent).style(emphasis),
+            Rect {
+                height: 1,
+                ..cols[0]
+            },
+        );
+        frame.render_widget(
+            Paragraph::new(quota).style(Style::default().fg(th.dim)),
+            Rect {
+                height: 1,
+                ..cols[1]
+            },
+        );
+        if area.height > 1 {
+            frame.render_widget(
+                Paragraph::new(summary),
+                Rect {
+                    y: area.y + 1,
+                    height: 1,
+                    ..area
+                },
+            );
+        }
+    } else {
+        for (i, (text, style)) in [
+            (recent, emphasis),
+            (quota, Style::default().fg(th.dim)),
+            (summary, Style::default()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if i as u16 >= area.height {
+                break;
+            }
+            frame.render_widget(
+                Paragraph::new(text).style(style),
+                Rect {
+                    y: area.y + i as u16,
+                    height: 1,
+                    ..area
+                },
+            );
+        }
+    }
+}
+
+fn render_chart_controls(
+    frame: &mut Frame,
+    range_area: Rect,
+    metric_area: Rect,
+    st: &ViewState,
+    hits: &mut HitRegions,
+) {
+    let th = t::get();
+    let selected = Style::default()
+        .fg(th.accent)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let normal = Style::default().fg(th.dim);
+    let ranges = [
+        ("24h", TrendRange::H24, 0u16, 4u16),
+        ("14d", TrendRange::D14, 5, 4),
+    ];
+    for (label, value, offset, width) in ranges {
+        if offset + width > range_area.width {
+            continue;
+        }
+        let rect = Rect {
+            x: range_area.x + offset,
+            y: range_area.y,
+            width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(label).style(if st.trend_range == value {
+                selected
+            } else {
+                normal
+            }),
+            rect,
+        );
+        hits.trend_ranges.push((rect, value));
+    }
+    let metrics = [
+        ("Tok", TrendMetric::Tokens, 0u16, 4u16),
+        ("$", TrendMetric::Cost, 5, 2),
+    ];
+    for (label, value, offset, width) in metrics {
+        if offset + width > metric_area.width {
+            continue;
+        }
+        let rect = Rect {
+            x: metric_area.x + offset,
+            y: metric_area.y,
+            width,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(label).style(if st.trend_metric == value {
+                selected
+            } else {
+                normal
+            }),
+            rect,
+        );
+        hits.trend_metrics.push((rect, value));
     }
 }
 
@@ -442,20 +670,15 @@ fn render_agent_table(
 
 fn sources_line(ledger: &LedgerReport) -> Paragraph<'static> {
     let th = t::get();
-    let mut spans = vec![Span::styled("源:", Style::default().fg(th.dim))];
-    for (i, s) in ledger.sources.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled(" · ", Style::default().fg(th.dim)));
-        }
+    let mut spans = Vec::new();
+    for s in &ledger.sources {
         if let Some(e) = &s.error {
+            if !spans.is_empty() {
+                spans.push(Span::styled(" · ", Style::default().fg(th.dim)));
+            }
             spans.push(Span::styled(
                 format!("⚠ {}:{e}", client_label(s.client)),
                 Style::default().fg(th.err),
-            ));
-        } else {
-            spans.push(Span::styled(
-                format!("{} {}", client_label(s.client), s.records),
-                Style::default().fg(th.dim),
             ));
         }
     }
@@ -535,113 +758,18 @@ fn render_day_table(
     }
 }
 
-/// 8 级部分块 ramp(照抄 tokscale bar_chart,含 0 = 空格).
-const RAMP: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-
-/// 每日趋势柱状图:直接写 buffer,8 级 ramp 做亚行精度;
-/// 轴线用 ASCII '-'(U+2500 在 CJK locale 宽度歧义,tokscale 的教训)。
-fn render_day_chart(frame: &mut Frame, area: Rect, ledger: &LedgerReport, hits: &mut HitRegions) {
-    let th = t::get();
-    if area.width < 20 || area.height < 4 || ledger.by_day.is_empty() {
-        return;
-    }
-    let n = ledger.by_day.len();
-    let max = ledger
-        .by_day
-        .iter()
-        .map(|d| d.agg.total())
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    let y_label_w = format_tokens(max).chars().count() as u16 + 1; // "44M|"
-    let label_row = area.bottom() - 1;
-    let chart = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: area.height - 1, // 底行留给 X 标签
-    };
-    let axis_color = Style::default().fg(th.dim);
-    let bar_color = Style::default().fg(th.accent);
-
-    // Y 轴:顶部最大值、底部 0
-    let top = format!("{}|", format_tokens(max));
-    for (i, ch) in top.chars().enumerate() {
-        if (i as u16) < chart.width {
-            frame.buffer_mut()[(chart.x + i as u16, chart.y)]
-                .set_char(ch)
-                .set_style(axis_color);
-        }
-    }
-    for (i, ch) in "0|".chars().enumerate() {
-        if (i as u16) < chart.width {
-            frame.buffer_mut()[(chart.x + i as u16, label_row - 1)]
-                .set_char(ch)
-                .set_style(axis_color);
-        }
-    }
-
-    let plot_x = chart.x + y_label_w;
-    let plot_w = chart.width.saturating_sub(y_label_w);
-    let bw = (plot_w / n as u16).max(2);
-    let rows = chart.height.saturating_sub(1) as f64; // 顶行留给最大值标签
-    let plot_y = chart.y + 1;
-    let max_f = max as f64;
-
-    for (i, d) in ledger.by_day.iter().enumerate() {
-        let bx = plot_x + i as u16 * bw;
-        if bx + bw > plot_x + plot_w {
-            break; // 右截断
-        }
-        let v = d.agg.total() as f64;
-        for r in 0..rows as u16 {
-            let y = plot_y + r;
-            // 该行覆盖的值区间 (row_top, row_bottom]
-            let row_top = max_f * (rows - r as f64) / rows;
-            let row_bottom = max_f * (rows - r as f64 - 1.0) / rows;
-            let ch = if v >= row_top && row_top > 0.0 {
-                '█'
-            } else if v > row_bottom {
-                let frac = (v - row_bottom) / (row_top - row_bottom).max(1e-9);
-                RAMP[(frac * 8.0).floor().clamp(1.0, 8.0) as usize]
-            } else {
-                continue;
-            };
-            for c in 0..bw.max(1) {
-                let x = bx + c;
-                if x < plot_x + plot_w {
-                    frame.buffer_mut()[(x, y)].set_char(ch).set_style(bar_color);
-                }
-            }
-        }
-        // 命中区:整根柱子
-        hits.day_rows.push((
-            Rect {
-                x: bx,
-                y: plot_y,
-                width: bw,
-                height: rows as u16,
-            },
-            i,
-        ));
-        // X 标签:首/中/末
-        if i == 0 || i == n / 2 || i == n - 1 {
-            let label = &d.date[5..];
-            for (ci, ch) in label.chars().enumerate() {
-                let x = bx + ci as u16;
-                if x < plot_x + plot_w {
-                    frame.buffer_mut()[(x, label_row)]
-                        .set_char(ch)
-                        .set_style(axis_color);
-                }
-            }
-        }
-    }
-}
-
 fn render_detail(frame: &mut Frame, area: Rect, ledger: &LedgerReport, st: &ViewState) {
     let mut lines: Vec<Line> = Vec::new();
-    if let Some(i) = st.sel_agent
+    if let Some((heading, breakdown)) = st
+        .sel_trend
+        .and_then(|i| trend::detail(ledger, st.trend_range, st.trend_metric, i))
+    {
+        lines.push(Line::from(Span::styled(
+            heading,
+            Style::default().fg(t::get().accent),
+        )));
+        lines.push(Line::from(breakdown));
+    } else if let Some(i) = st.sel_agent
         && let Some(a) = ledger.by_agent.get(i)
     {
         lines.push(Line::from(Span::styled(
@@ -763,12 +891,14 @@ mod tests {
             ledger: Some(ledger),
             sel_agent: None,
             sel_day: None,
+            sel_trend: None,
             sel_heat: None,
-            quota_view: crate::ui::QuotaView::Cards,
-            ring_window: &[0, 0, 0],
             chart_mode: false,
+            trend_range: super::TrendRange::H24,
+            trend_metric: super::TrendMetric::Tokens,
             dim: 0,
             tick: 0,
+            show_help: false,
         }
     }
 
@@ -832,7 +962,118 @@ mod tests {
         let mut hits = HitRegions::default();
         let mut st = view(&ledger);
         st.sel_day = Some(0);
+        st.chart_mode = true;
         term.draw(|f| render(f, f.area(), &st, &mut hits)).unwrap();
+        let backend = TestBackend::new(60, 20);
+        let mut compact = Terminal::new(backend).unwrap();
+        st.sel_day = None;
+        compact
+            .draw(|f| crate::ui::render(f, &st, &mut hits))
+            .unwrap();
+    }
+
+    #[test]
+    fn recent_header_and_stacked_ranges_render_and_click() {
+        let ledger = fixture_ledger();
+        let backend = TestBackend::new(100, 32);
+        let mut term = Terminal::new(backend).unwrap();
+        let mut hits = HitRegions::default();
+        let mut st = view(&ledger);
+        st.chart_mode = true;
+        term.draw(|f| render(f, f.area(), &st, &mut hits)).unwrap();
+        let flat = |t: &Terminal<TestBackend>| {
+            t.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol().to_string())
+                .collect::<String>()
+        };
+        assert!(flat(&term).contains("60m"));
+        assert!(!flat(&term).contains("正在运行"));
+        assert_eq!(hits.trend_buckets.len(), 24);
+        let (rect, idx) = hits.trend_buckets[23];
+        assert!(
+            matches!(hits.hit(rect.x, rect.y), Some(super::super::Hit::TrendBucket(i)) if i == idx)
+        );
+        assert!(flat(&term).contains("Codex"));
+
+        st.trend_range = TrendRange::D14;
+        st.trend_metric = TrendMetric::Cost;
+        hits = HitRegions::default();
+        term.draw(|f| render(f, f.area(), &st, &mut hits)).unwrap();
+        assert_eq!(hits.trend_buckets.len(), 14);
+        let detail = trend::detail(&ledger, TrendRange::D14, TrendMetric::Cost, 13).unwrap();
+        assert!(detail.0.contains('$'));
+        assert!(detail.1.contains("Codex"));
+    }
+
+    #[test]
+    fn quota_teaser_excludes_antigravity_intensity() {
+        use crate::model::{Limit, Report, Status};
+        let snapshot = Snapshot {
+            generated_at_ms: 0,
+            cards: vec![
+                Card::Live(Report {
+                    provider: ProviderId::Antigravity,
+                    plan_type: "CPA".into(),
+                    limits: vec![Limit {
+                        label: "5 hours".into(),
+                        used_pct: 99.0,
+                        resets_in_ms: Some(9_000_000),
+                        status: Status::Warning,
+                    }],
+                }),
+                Card::Live(Report {
+                    provider: ProviderId::Codex,
+                    plan_type: "Plus".into(),
+                    limits: vec![Limit {
+                        label: "5 hours".into(),
+                        used_pct: 50.0,
+                        resets_in_ms: Some(9_000_000),
+                        status: Status::Ok,
+                    }],
+                }),
+            ],
+        };
+        let teaser = tightest_quota(Some(&snapshot)).unwrap();
+        assert!(teaser.contains("Codex"));
+        assert!(!teaser.contains("Antigravity"));
+        assert!(teaser.contains('~'));
+    }
+
+    #[test]
+    fn exhausted_real_quota_precedes_a_valid_eta() {
+        use crate::model::{Limit, Report, Status};
+        let snapshot = Snapshot {
+            generated_at_ms: 0,
+            cards: vec![
+                Card::Live(Report {
+                    provider: ProviderId::Codex,
+                    plan_type: "Plus".into(),
+                    limits: vec![Limit {
+                        label: "5 hours".into(),
+                        used_pct: 100.0,
+                        resets_in_ms: Some(1_000_000),
+                        status: Status::Exhausted,
+                    }],
+                }),
+                Card::Live(Report {
+                    provider: ProviderId::OpenCodeGo,
+                    plan_type: "Go".into(),
+                    limits: vec![Limit {
+                        label: "5 hours".into(),
+                        used_pct: 70.0,
+                        resets_in_ms: Some(9_000_000),
+                        status: Status::Ok,
+                    }],
+                }),
+            ],
+        };
+        let teaser = tightest_quota(Some(&snapshot)).unwrap();
+        assert!(teaser.contains("Codex"));
+        assert!(teaser.contains("100%"));
+        assert!(!teaser.contains("OpenCode"));
     }
 
     /// 会话/项目维度表渲染(带 dim 标签命中区).

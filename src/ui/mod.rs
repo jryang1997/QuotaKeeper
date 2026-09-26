@@ -1,20 +1,18 @@
-//! 壳:顶栏 + 左侧边栏(可点击)+ 右侧内容区 + 底栏.
+//! 壳:顶栏 + 响应式侧栏 + 内容区 + 底栏.
 //!
-//! 交互:鼠标左键点击侧栏切换页面、点击表格行/环/热力格切换明细、
-//! 顶栏右上 ⟳ 按钮切换配额视图;键盘 ↑↓/Tab/1·2·3/v/p 同步支持.
+//! 交互:鼠标点击侧栏切换页面、点击图表/热力格切换明细;
+//! 键盘 ↑↓/Tab/1·2·3 切页,? 显示帮助.
 //! 命中区由渲染时一并填充,主循环用同一份数据做点击判定.
 //! 颜色一律取自 theme(全局,`p` 循环).
 
-pub mod bigtext;
 pub mod heatmap;
 pub mod i18n;
 pub mod notify;
 pub mod quota;
-pub mod ring;
 pub mod theme;
+pub mod trend;
 pub mod usage;
 
-pub use ring::{Band, RingGauge};
 pub use theme::THEMES;
 
 use ratatui::{
@@ -22,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::ledger::LedgerReport;
@@ -45,21 +43,22 @@ pub enum Page {
     Heatmap,
 }
 
-/// 配额页两种视图:卡片 / 圆环.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuotaView {
-    Cards,
-    Rings,
+pub enum TrendRange {
+    H24,
+    D14,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrendMetric {
+    Tokens,
+    Cost,
 }
 
 /// 渲染时填充的点击命中区.主循环在 `Event::Mouse(Up(Left))` 时查这些矩形.
 #[derive(Default)]
 pub struct HitRegions {
     pub sidebar: Vec<(Rect, Page)>,
-    /// 配额页顶栏 ⟳ 视图切换按钮
-    pub view_toggle: Option<Rect>,
-    /// 圆环视图:第 i 个环 → 卡下标(点击把该卡焦点切到下一个窗口)
-    pub ring: Vec<(Rect, usize)>,
     /// usage 页"按 Agent"表行 → by_agent 下标
     pub agent_rows: Vec<(Rect, usize)>,
     /// usage 页"每日"表行 → by_day 下标
@@ -68,6 +67,9 @@ pub struct HitRegions {
     pub heat_cells: Vec<(Rect, String)>,
     /// usage 页 每日表/柱状图 切换按钮
     pub chart_toggle: Option<Rect>,
+    pub trend_ranges: Vec<(Rect, TrendRange)>,
+    pub trend_metrics: Vec<(Rect, TrendMetric)>,
+    pub trend_buckets: Vec<(Rect, usize)>,
     /// usage 页维度标签 → 维度下标(0 Agent / 1 会话 / 2 项目)
     pub dim_tabs: Vec<(Rect, usize)>,
 }
@@ -75,35 +77,41 @@ pub struct HitRegions {
 impl HitRegions {
     fn clear(&mut self) {
         self.sidebar.clear();
-        self.view_toggle = None;
-        self.ring.clear();
         self.agent_rows.clear();
         self.day_rows.clear();
         self.heat_cells.clear();
         self.chart_toggle = None;
+        self.trend_ranges.clear();
+        self.trend_metrics.clear();
+        self.trend_buckets.clear();
         self.dim_tabs.clear();
     }
 
     pub fn hit(&self, column: u16, row: u16) -> Option<Hit> {
         let pos = Position::new(column, row);
-        if let Some(rect) = &self.view_toggle
-            && rect.contains(pos)
-        {
-            return Some(Hit::ToggleView);
-        }
         if let Some(rect) = &self.chart_toggle
             && rect.contains(pos)
         {
             return Some(Hit::ToggleChart);
         }
+        for (rect, range) in &self.trend_ranges {
+            if rect.contains(pos) {
+                return Some(Hit::TrendRange(*range));
+            }
+        }
+        for (rect, metric) in &self.trend_metrics {
+            if rect.contains(pos) {
+                return Some(Hit::TrendMetric(*metric));
+            }
+        }
+        for (rect, idx) in &self.trend_buckets {
+            if rect.contains(pos) {
+                return Some(Hit::TrendBucket(*idx));
+            }
+        }
         for (rect, page) in &self.sidebar {
             if rect.contains(pos) {
                 return Some(Hit::Sidebar(*page));
-            }
-        }
-        for (rect, idx) in &self.ring {
-            if rect.contains(pos) {
-                return Some(Hit::Ring(*idx));
             }
         }
         for (rect, idx) in &self.agent_rows {
@@ -133,10 +141,11 @@ impl HitRegions {
 #[derive(Debug)]
 pub enum Hit {
     Sidebar(Page),
-    ToggleView,
     ToggleChart,
+    TrendRange(TrendRange),
+    TrendMetric(TrendMetric),
+    TrendBucket(usize),
     DimTab(usize),
-    Ring(usize),
     AgentRow(usize),
     DayRow(usize),
     HeatCell(String),
@@ -151,18 +160,18 @@ pub struct ViewState<'a> {
     pub ledger: Option<&'a LedgerReport>,
     pub sel_agent: Option<usize>,
     pub sel_day: Option<usize>,
+    pub sel_trend: Option<usize>,
     /// 热力图选中的日期
     pub sel_heat: Option<&'a str>,
-    /// 配额页当前视图
-    pub quota_view: QuotaView,
-    /// 每张卡圆环当前聚焦的窗口下标(5h/周/月)
-    pub ring_window: &'a [usize],
     /// 用量页每日:表格(false) / 柱状图(true)
     pub chart_mode: bool,
+    pub trend_range: TrendRange,
+    pub trend_metric: TrendMetric,
     /// 用量页维度:0 Agent / 1 会话 / 2 项目
     pub dim: usize,
     /// 刷新动画帧计数
     pub tick: u64,
+    pub show_help: bool,
 }
 
 pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
@@ -175,27 +184,36 @@ pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
             Constraint::Length(1),
         ])
         .split(frame.area());
-    header(frame, root[0], st, hits);
+    header(frame, root[0], st);
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(16), Constraint::Min(0)])
-        .split(root[1]);
-    sidebar(frame, body[0], st.page, hits);
+    let narrow = frame.area().width < 76;
+    let content = if narrow {
+        root[1]
+    } else {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(16), Constraint::Min(0)])
+            .split(root[1]);
+        sidebar(frame, body[0], st.page, hits);
+        body[1]
+    };
 
     match st.page {
-        Page::Quota => quota::render(frame, body[1], st, hits),
-        Page::Usage => usage::render(frame, body[1], st, hits),
-        Page::Heatmap => heatmap::render(frame, body[1], st, hits),
+        Page::Quota => quota::render(frame, content, st),
+        Page::Usage => usage::render(frame, content, st, hits),
+        Page::Heatmap => heatmap::render(frame, content, st, hits),
     }
 
     footer(frame, root[2], st);
+    if st.show_help {
+        help_overlay(frame, st.page);
+    }
 }
 
 /// 刷新中的盲文旋转动画帧.
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-fn header(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegions) {
+fn header(frame: &mut Frame, area: Rect, st: &ViewState) {
     let page = match st.page {
         Page::Quota => i18n::t(i18n::K::PageQuota),
         Page::Usage => i18n::t(i18n::K::PageTokens),
@@ -227,41 +245,10 @@ fn header(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegions) 
         )]));
     }
 
-    // 配额页:右上角视图切换按钮(显示的是点击后将切换到的视图)
-    if st.page == Page::Quota {
-        let label = match st.quota_view {
-            QuotaView::Cards => i18n::t(i18n::K::BtnRings),
-            QuotaView::Rings => i18n::t(i18n::K::BtnCards),
-        };
-        let btn_w = 10u16; // ⟳+空格 + 圆环/卡片/Rings(中英取宽)
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(btn_w)])
-            .split(area);
-        frame.render_widget(
-            Paragraph::new(lines).block(Block::default().borders(Borders::BOTTOM)),
-            cols[0],
-        );
-        let btn_rect = Rect {
-            x: cols[1].x,
-            y: cols[1].y,
-            width: btn_w,
-            height: 1,
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                label,
-                accent().add_modifier(Modifier::BOLD),
-            ))),
-            btn_rect,
-        );
-        hits.view_toggle = Some(btn_rect);
-    } else {
-        frame.render_widget(
-            Paragraph::new(lines).block(Block::default().borders(Borders::BOTTOM)),
-            area,
-        );
-    }
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::default().borders(Borders::BOTTOM)),
+        area,
+    );
 }
 
 const SIDEBAR_ITEMS: [(i18n::K, Page); 3] = [
@@ -319,10 +306,15 @@ fn sidebar(frame: &mut Frame, area: Rect, active: Page, hits: &mut HitRegions) {
 }
 
 fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
-    let _ = st.page;
+    let hint = match (i18n::lang(), st.page) {
+        (i18n::Lang::Zh, Page::Usage) => "↑↓ 页 · g 图 · t 时间 · c 金额 · ? 帮助",
+        (i18n::Lang::Zh, _) => "↑↓ 页 · r 刷新 · ? 帮助 · q 退出",
+        (i18n::Lang::En, Page::Usage) => "↑↓ page · g chart · t range · c cost · ? help",
+        (i18n::Lang::En, _) => "↑↓ page · r refresh · ? help · q quit",
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(i18n::t(i18n::K::FHints), dim()),
+            Span::styled(hint, dim()),
             Span::styled(
                 format!("   · {}", t::get().name),
                 Style::default().fg(t::get().border),
@@ -332,12 +324,62 @@ fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
     );
 }
 
+fn help_overlay(frame: &mut Frame, page: Page) {
+    let area = frame.area();
+    let width = area.width.saturating_sub(4).min(58);
+    let height = if page == Page::Usage { 9 } else { 7 };
+    let rect = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height: height.min(area.height),
+    };
+    let zh = i18n::lang() == i18n::Lang::Zh;
+    let mut lines = if zh {
+        vec![
+            "1/2/3  配额 / 用量 / 热力图",
+            "↑/k  上一页    ↓/j/Tab  下一页",
+            "r  刷新    p  主题    l  语言",
+            "Esc  关闭详情    q  退出",
+        ]
+    } else {
+        vec![
+            "1/2/3  Quota / Usage / Heatmap",
+            "↑/k  previous    ↓/j/Tab  next",
+            "r  refresh    p  theme    l  language",
+            "Esc  close detail    q  quit",
+        ]
+    };
+    if page == Page::Usage {
+        lines.push(if zh {
+            "g  图表    t  时间    c  金额    s  分类"
+        } else {
+            "g  chart    t  range    c  cost    s  group"
+        });
+    }
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines.join("\n")).block(
+            Block::default()
+                .title(if zh {
+                    " 快捷键 · ? 关闭 "
+                } else {
+                    " Keys · ? to close "
+                })
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(accent()),
+        ),
+        rect,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
 
-    fn view<'a>(page: Page, quota_view: QuotaView) -> ViewState<'a> {
+    fn view<'a>(page: Page) -> ViewState<'a> {
         ViewState {
             page,
             snapshot: None,
@@ -347,36 +389,32 @@ mod tests {
             ledger: None,
             sel_agent: None,
             sel_day: None,
+            sel_trend: None,
             sel_heat: None,
-            quota_view,
-            ring_window: &[0, 0, 0],
             chart_mode: false,
+            trend_range: TrendRange::H24,
+            trend_metric: TrendMetric::Tokens,
             dim: 0,
             tick: 0,
+            show_help: false,
         }
     }
 
     #[test]
-    fn sidebar_and_toggle_hit_regions() {
+    fn sidebar_hit_regions() {
         let backend = TestBackend::new(80, 24);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();
-        let st = view(Page::Quota, QuotaView::Cards);
+        let st = view(Page::Quota);
         term.draw(|f| render(f, &st, &mut hits)).unwrap();
         assert_eq!(hits.sidebar.len(), 3);
         // chips:每个高 3、间隔 1,内区从 x=1 起
         assert!(matches!(hits.hit(1, 4), Some(Hit::Sidebar(Page::Quota))));
         assert!(matches!(hits.hit(1, 8), Some(Hit::Sidebar(Page::Usage))));
         assert!(matches!(hits.hit(1, 12), Some(Hit::Sidebar(Page::Heatmap))));
-        let rect = hits.view_toggle.unwrap();
-        assert!(matches!(
-            hits.hit(rect.x + 1, rect.y),
-            Some(Hit::ToggleView)
-        ));
         let mut hits2 = HitRegions::default();
-        term.draw(|f| render(f, &view(Page::Usage, QuotaView::Cards), &mut hits2))
+        term.draw(|f| render(f, &view(Page::Usage), &mut hits2))
             .unwrap();
-        assert!(hits2.view_toggle.is_none());
     }
 
     #[test]
@@ -384,7 +422,7 @@ mod tests {
         let backend = TestBackend::new(100, 24);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();
-        term.draw(|f| render(f, &view(Page::Quota, QuotaView::Cards), &mut hits))
+        term.draw(|f| render(f, &view(Page::Quota), &mut hits))
             .unwrap();
         let text: String = term
             .backend()

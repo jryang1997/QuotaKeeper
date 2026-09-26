@@ -53,13 +53,15 @@ pub enum K {
     PageQuota,
     PageTokens,
     PageHeat,
-    BtnRings,
-    BtnCards,
     Syncing,
-    FHints,
     SToday,
     SWeek,
     SMonth,
+    Last60,
+    QuotaShort,
+    Idle,
+    LastRecord,
+    NoCost,
     HAgent,
     HIn,
     HOut,
@@ -131,20 +133,6 @@ pub fn t(k: K) -> &'static str {
                 "Heatmap"
             }
         }
-        K::BtnRings => {
-            if zh {
-                "⟳ 圆环"
-            } else {
-                "⟳ Rings"
-            }
-        }
-        K::BtnCards => {
-            if zh {
-                "⟳ 卡片"
-            } else {
-                "⟳ Cards"
-            }
-        }
         K::Syncing => {
             if zh {
                 "刷新中"
@@ -152,11 +140,39 @@ pub fn t(k: K) -> &'static str {
                 "syncing"
             }
         }
-        K::FHints => {
+        K::Last60 => {
             if zh {
-                "v 视图 · g 图表 · s 维度 · p 主题 · l 语言 · r 刷新 · q 退出"
+                "近60m"
             } else {
-                "v view · g chart · s dim · p theme · l lang · r refresh · q quit"
+                "Last 60m"
+            }
+        }
+        K::QuotaShort => {
+            if zh {
+                "额度"
+            } else {
+                "Quota"
+            }
+        }
+        K::Idle => {
+            if zh {
+                "无用量"
+            } else {
+                "idle"
+            }
+        }
+        K::LastRecord => {
+            if zh {
+                "最近"
+            } else {
+                "last"
+            }
+        }
+        K::NoCost => {
+            if zh {
+                "无金额数据"
+            } else {
+                "no cost data"
             }
         }
         K::SToday => {

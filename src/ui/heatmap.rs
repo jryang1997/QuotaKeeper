@@ -367,12 +367,14 @@ mod tests {
             ledger: Some(ledger),
             sel_agent: None,
             sel_day: None,
+            sel_trend: None,
             sel_heat: None,
-            quota_view: crate::ui::QuotaView::Cards,
-            ring_window: &[0, 0, 0],
             chart_mode: false,
+            trend_range: crate::ui::TrendRange::H24,
+            trend_metric: crate::ui::TrendMetric::Tokens,
             dim: 0,
             tick: 0,
+            show_help: false,
         }
     }
 

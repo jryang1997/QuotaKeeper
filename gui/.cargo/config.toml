@@ -1,0 +1,5 @@
+# GUI 外壳:必须 rust-lld。WinLibs GCC(ld)对 windows-result 的 api-set
+# raw-dylib 导入生成坏导入表,exe 启动即报 api-ms-win-core-winrt-error 缺失。
+# rust-lld 用工具链自带副本,无需装 LLVM。
+[target.x86_64-pc-windows-gnu]
+linker = "rust-lld"

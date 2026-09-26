@@ -1,0 +1,19 @@
+[package]
+name = "tui-token-monitor-gui"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tui-token-monitor-gui"
+path = "src/main.rs"
+
+[dependencies]
+tui-token-monitor = { path = ".." }
+wry = "0.53"
+tao = "0.34"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+include_dir = "0.7"
+anyhow = "1"
+# 与主 crate 一致:钉 0.4.38(0.4.40+ raw-dylib 在本机 GNU 工具链崩,见根 Cargo.toml 注释)
+chrono = "=0.4.38"
