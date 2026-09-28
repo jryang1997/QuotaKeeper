@@ -68,7 +68,7 @@ impl Pricing {
                 let _ = write_cache(&path, now_ms, &fresh);
                 fresh
             }
-            None => cached.map(|(_, p)| p).unwrap_or_default(),
+            None => cached.map(|(_, p)| p).unwrap_or_else(|| build(HashMap::new())),
         }
     }
 
@@ -164,10 +164,103 @@ fn fetch_one(url: &str) -> Option<Pricing> {
     Some(build(entries))
 }
 
+/// 补充 LiteLLM 缺失的官方或主流模型定价 (来源: OpenRouter / DeepInfra 官方公开定价 / 限免模型)
+/// 注意: 只作为 fallback 补齐; LiteLLM 原有条目具有优先权，不被覆盖。
+const SUPPLEMENT: &[(&str, ModelPrice)] = &[
+    // Xiaomi MiMo (来源: OpenRouter / DeepInfra 官方定盘价: 输入 $0.14/M, 输出 $0.28/M, 缓存读 $0.0028/M)
+    (
+        "mimo-v2.6-flash",
+        ModelPrice {
+            input: 1.4e-7,
+            output: 2.8e-7,
+            cache_read: Some(2.8e-9),
+            cache_write: None,
+        },
+    ),
+    (
+        "xiaomi/mimo-v2.6-flash",
+        ModelPrice {
+            input: 1.4e-7,
+            output: 2.8e-7,
+            cache_read: Some(2.8e-9),
+            cache_write: None,
+        },
+    ),
+    (
+        "mimo-v2.5",
+        ModelPrice {
+            input: 1.4e-7,
+            output: 2.8e-7,
+            cache_read: Some(2.8e-9),
+            cache_write: None,
+        },
+    ),
+    // 腾讯混元 3 (来源: DeepInfra tencent/Hy3: 输入 $0.13/M, 输出 $0.53/M, 缓存读 $0.033/M)
+    (
+        "hy3",
+        ModelPrice {
+            input: 1.3e-7,
+            output: 5.3e-7,
+            cache_read: Some(3.3e-8),
+            cache_write: None,
+        },
+    ),
+    (
+        "tencent/hy3",
+        ModelPrice {
+            input: 1.3e-7,
+            output: 5.3e-7,
+            cache_read: Some(3.3e-8),
+            cache_write: None,
+        },
+    ),
+    // OpenCode Zen / OpenRouter 限免与隐身模型 ($0.0 官方限免)
+    (
+        "big-pickle",
+        ModelPrice {
+            input: 0.0,
+            output: 0.0,
+            cache_read: Some(0.0),
+            cache_write: None,
+        },
+    ),
+    (
+        "space-bunny-free",
+        ModelPrice {
+            input: 0.0,
+            output: 0.0,
+            cache_read: Some(0.0),
+            cache_write: None,
+        },
+    ),
+    (
+        "space-bunny-alpha",
+        ModelPrice {
+            input: 0.0,
+            output: 0.0,
+            cache_read: Some(0.0),
+            cache_write: None,
+        },
+    ),
+    (
+        "mimo-v2.6-flash-free",
+        ModelPrice {
+            input: 0.0,
+            output: 0.0,
+            cache_read: Some(0.0),
+            cache_write: None,
+        },
+    ),
+];
+
 /// Index exact and unique suffix names only. LiteLLM contains many providers for
 /// the same model ID, often with different prices; choosing the first suffix
 /// encountered in a HashMap would make the estimate nondeterministic.
-fn build(entries: HashMap<String, ModelPrice>) -> Pricing {
+fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
+    for (name, price) in SUPPLEMENT {
+        entries.entry((*name).to_string()).or_insert(*price);
+    }
+
     let mut case_insensitive = HashMap::new();
     let mut ambiguous_names = HashSet::new();
     let mut unique_suffixes: HashMap<String, ModelPrice> = HashMap::new();
@@ -432,5 +525,56 @@ mod tests {
         };
 
         assert_eq!(p.estimate("OpenAI/GPT-6-SOL", &tokens), Some(2.0));
+    }
+
+    #[test]
+    fn supplement_prices_fill_missing_models() {
+        let p = build(HashMap::new());
+        let t = TokenBreakdown {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            ..Default::default()
+        };
+        // mimo-v2.6-flash: 1e6 * 1.4e-7 + 1e6 * 2.8e-7 + 1e6 * 2.8e-9 = 0.14 + 0.28 + 0.0028 = 0.4228
+        let cost_mimo = p.estimate("mimo-v2.6-flash", &t).unwrap();
+        assert!((cost_mimo - 0.4228).abs() < 1e-6);
+
+        // xiaomi/mimo-v2.6-flash 匹配
+        let cost_xiaomi = p.estimate("xiaomi/mimo-v2.6-flash", &t).unwrap();
+        assert!((cost_xiaomi - 0.4228).abs() < 1e-6);
+
+        // hy3: 1e6 * 1.3e-7 + 1e6 * 5.3e-7 + 1e6 * 3.3e-8 = 0.13 + 0.53 + 0.033 = 0.693
+        let cost_hy3 = p.estimate("hy3", &t).unwrap();
+        assert!((cost_hy3 - 0.693).abs() < 1e-6);
+
+        // 官方限免/隐身模型为 0 元
+        let cost_free = p.estimate("big-pickle", &t).unwrap();
+        assert_eq!(cost_free, 0.0);
+        let cost_bunny = p.estimate("space-bunny-free", &t).unwrap();
+        assert_eq!(cost_bunny, 0.0);
+
+        // 内部审查模型不入表，保持缺价
+        assert!(p.estimate("codex-auto-review", &t).is_none());
+    }
+
+    #[test]
+    fn supplement_does_not_override_existing_litellm_entry() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "mimo-v2.6-flash".to_string(),
+            ModelPrice {
+                input: 9.0,
+                output: 9.0,
+                ..Default::default()
+            },
+        );
+        let p = build(entries);
+        let t = TokenBreakdown {
+            input: 1_000_000,
+            ..Default::default()
+        };
+        let cost = p.estimate("mimo-v2.6-flash", &t).unwrap();
+        assert!((cost - 9_000_000.0).abs() < 1e-6);
     }
 }
