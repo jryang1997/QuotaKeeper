@@ -91,6 +91,14 @@ impl Pricing {
         if let Some(price) = self.entries.get(model) {
             return Some(price);
         }
+        // 原始名未命中时先试 canonical 名(别名表能补 deepseek-flash 等
+        // 目录缺名),再落回大小写/唯一后缀。
+        let canonical = crate::ledger::model_alias::canonical(model);
+        if canonical != model && canonical != "unknown" {
+            if let Some(price) = self.entries.get(&canonical) {
+                return Some(price);
+            }
+        }
         let lower = model.to_lowercase();
         if self.ambiguous_names.contains(&lower) {
             return None;
@@ -162,9 +170,13 @@ fn fetch_one(url: &str) -> Option<Pricing> {
 fn build(entries: HashMap<String, ModelPrice>) -> Pricing {
     let mut case_insensitive = HashMap::new();
     let mut ambiguous_names = HashSet::new();
-    let mut unique_suffixes = HashMap::new();
+    let mut unique_suffixes: HashMap<String, ModelPrice> = HashMap::new();
     let mut ambiguous_suffixes = HashSet::new();
 
+    // 后缀 → 同后缀全部条目;若多数价格一致(众数),取众数价而非判歧义。
+    // LiteLLM 里同一模型常被 6-9 家供应商收录且价格相同,歧义拒绝会把这些
+    // 模型整体挡在定价之外;众数在「少数渠道差异化定价」时仍取主流价。
+    let mut suffix_groups: HashMap<String, Vec<&ModelPrice>> = HashMap::new();
     for (name, price) in &entries {
         let lower = name.to_lowercase();
         if !ambiguous_names.contains(&lower) {
@@ -174,14 +186,36 @@ fn build(entries: HashMap<String, ModelPrice>) -> Pricing {
                 case_insensitive.insert(lower, *price);
             }
         }
-
         let suffix = name.rsplit('/').next().unwrap_or(name).to_lowercase();
-        if !ambiguous_suffixes.contains(&suffix) {
-            if unique_suffixes.remove(&suffix).is_some() {
-                ambiguous_suffixes.insert(suffix);
-            } else {
-                unique_suffixes.insert(suffix, *price);
-            }
+        suffix_groups.entry(suffix).or_default().push(price);
+    }
+
+    for (suffix, group) in suffix_groups {
+        if group.len() == 1 {
+            unique_suffixes.insert(suffix, *group[0]);
+            continue;
+        }
+        // 以 (input, output, cache_read, cache_write) 全等做众数统计
+        let key = |p: &ModelPrice| {
+            format!(
+                "{}/{}/{}/{}",
+                p.input.to_bits(),
+                p.output.to_bits(),
+                p.cache_read.map(|v| v.to_bits()).unwrap_or(0),
+                p.cache_write.map(|v| v.to_bits()).unwrap_or(0)
+            )
+        };
+        let mut counts: HashMap<String, (usize, ModelPrice)> = HashMap::new();
+        for price in &group {
+            let e = counts.entry(key(price)).or_insert((0, **price));
+            e.0 += 1;
+        }
+        if let Some((best_n, best_price)) = counts.values().max_by_key(|(n, _)| *n)
+            && best_n * 2 > group.len()
+        {
+            unique_suffixes.insert(suffix, *best_price);
+        } else {
+            ambiguous_suffixes.insert(suffix);
         }
     }
 
@@ -247,6 +281,58 @@ mod tests {
             p.estimate("totally-unknown-model", &TokenBreakdown::default())
                 .is_none()
         );
+    }
+
+    /// 目录缺名时经 canonical 别名表命中:deepseek-flash → deepseek-v4.1-flash。
+    #[test]
+    fn canonical_alias_recovers_missing_catalog_names() {
+        let p = pricing_with(&[("deepseek-v4.1-flash", 1.0, 2.0)]);
+        let cost = p
+            .estimate("deepseek-flash", &TokenBreakdown {
+                input: 1_000_000,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!((cost - 1_000_000.0).abs() < 1e-9);
+    }
+
+    /// 多家同后缀且多数同价 → 取众数价;少数派不拦。
+    #[test]
+    fn suffix_mode_price_wins_over_minority() {
+        let mut entries = HashMap::new();
+        for name in ["zai/glm-5.3-flash", "nebius/zai-org/GLM-5.3-Flash", "openrouter/z-ai/glm-5.3-flash"] {
+            entries.insert(
+                name.to_string(),
+                ModelPrice { input: 1.5e-7, output: 5e-7, ..Default::default() },
+            );
+        }
+        entries.insert(
+            "aihubmix/glm-5.3-flash".to_string(),
+            ModelPrice { input: 1.1268e-7, output: 3.9438e-7, ..Default::default() },
+        );
+        let p = build(entries);
+        let cost = p
+            .estimate("glm-5.3-flash", &TokenBreakdown {
+                input: 1_000_000,
+                output: 1_000_000,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!((cost - (0.15 + 0.5)).abs() < 1e-9);
+    }
+
+    /// 后缀多家价格彼此不同(无众数) → 仍判歧义拒绝。
+    #[test]
+    fn truly_ambiguous_suffix_still_rejected() {
+        let mut entries = HashMap::new();
+        for (i, name) in ["a/shared-model", "b/shared-model", "c/shared-model"].iter().enumerate() {
+            entries.insert(
+                name.to_string(),
+                ModelPrice { input: 1.0 + i as f64, output: 2.0, ..Default::default() },
+            );
+        }
+        let p = build(entries);
+        assert!(p.estimate("shared-model", &TokenBreakdown::default()).is_none());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike};
 pub mod claude;
 pub mod codex;
 pub mod dsh;
+pub mod model_alias;
 pub mod ompstats;
 pub mod opencode;
 pub mod pricing;
@@ -45,9 +46,12 @@ pub struct AgentRow {
     pub models: Vec<(String, Agg)>,
 }
 
-/// 近 30 天按模型汇总,总量降序;同名模型会合并,来源保留在 clients 中.
+/// 近 30 天按模型汇总,总量降序;同一模型的不同记录名(大小写/前缀/别名)
+/// 经 model_alias::canonical 合并到一行,model 存 canonical 名.
 pub struct ModelRow {
     pub model: String,
+    /// 合并前的原始记录名(去重,按出现序)。
+    pub aliases: Vec<String>,
     pub clients: Vec<&'static str>,
     pub agg: Agg,
 }
@@ -295,6 +299,8 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut month_agg = Agg::default();
     let mut month_by_client_raw: HashMap<&'static str, Agg> = HashMap::new();
     let mut by_agent_raw: HashMap<&'static str, (Agg, HashMap<String, Agg>)> = HashMap::new();
+    // canonical 模型名 → 30 天内的原始记录名(去重)
+    let mut model_aliases: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
     let mut by_day_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
     let mut hourly = [0i64; 24];
     let mut weekday = [0i64; 7];
@@ -365,9 +371,14 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         if date >= today - Duration::days(29) && date <= today {
             let entry = by_agent_raw.entry(r.client).or_default();
             entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
+            let canonical_model = model_alias::canonical(&r.model);
+            model_aliases
+                .entry(canonical_model.clone())
+                .or_default()
+                .insert(r.model.clone());
             entry
                 .1
-                .entry(r.model.clone())
+                .entry(canonical_model)
                 .or_default()
                 .add(&r.tokens, r.cost, r.cost_is_estimate);
             // 时段分布(本地小时 / 星期 / 星期×小时 punchcard)
@@ -450,13 +461,20 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     }
     let mut by_model: Vec<ModelRow> = by_model_raw
         .into_iter()
-        .map(|(model, (agg, clients))| ModelRow {
-            model,
-            clients: CLIENTS
-                .iter()
-                .filter_map(|(client, _)| clients.contains(client).then_some(*client))
-                .collect(),
-            agg,
+        .map(|(model, (agg, clients))| {
+            let aliases = model_aliases
+                .remove(&model)
+                .map(|set| set.into_iter().collect())
+                .unwrap_or_default();
+            ModelRow {
+                model,
+                aliases,
+                clients: CLIENTS
+                    .iter()
+                    .filter_map(|(client, _)| clients.contains(client).then_some(*client))
+                    .collect(),
+                agg,
+            }
         })
         .collect();
     by_model.sort_by(|a, b| {
