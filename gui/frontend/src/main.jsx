@@ -123,7 +123,7 @@ const STR = {
   title: ['Token 监控', 'Token Monitor'],
   nav_quota: ['配额', 'Quota'],
   nav_usage: ['Token 用量', 'Token Usage'],
-  nav_heat: ['热力图', 'Heatmap'],
+  nav_heat: ['面板', 'Panels'],
   nav_settings: ['设置', 'Settings'],
   refresh: ['刷新', 'Refresh'],
   refreshing: ['采集中…', 'Fetching…'],
@@ -197,6 +197,53 @@ const STR = {
   quota_all_clear: ['当前额度充足', 'Quotas look healthy'],
   quota_unavailable: ['暂无可用额度', 'No live quotas'],
   quota_used: ['已用', 'used'],
+  usage_sum_tokens: ['TOTAL TOKENS', 'TOTAL TOKENS'],
+  usage_sum_runs: ['TOTAL RUNS', 'TOTAL RUNS'],
+  usage_unit_tokens: ['tokens', 'tokens'],
+  usage_unit_runs: ['runs', 'runs'],
+  usage_sum_official: ['当前账期 · Command Code 官方', 'Current billing period · Command Code'],
+  usage_sum_local: ['本月 · 本机账本', 'This month · local ledger'],
+  usage_card_monthly: ['MONTHLY', 'MONTHLY'],
+  panels_add: ['添加图表', 'Add panel'],
+  panels_lock_all: ['全部锁定', 'Lock all'],
+  panels_unlock_all: ['全部解锁', 'Unlock all'],
+  panels_reset: ['重置布局', 'Reset layout'],
+  panel_heat: ['热力图', 'Heatmap · 26W'],
+  panel_punch: ['作息矩阵', 'Punchcard · 30D'],
+  panel_clock: ['编码时钟', 'Coding clock'],
+  panel_week: ['星期强度', 'Weekday load'],
+  panel_models: ['模型榜', 'Model board'],
+  panel_sources: ['来源占比', 'By source'],
+  panel_projects: ['项目榜', 'Project board'],
+  panel_alltime: ['一生总量', 'All-time'],
+  panel_streak: ['连击', 'Streak'],
+  panel_records: ['本机纪录', 'Records'],
+  panel_cache: ['缓存命中', 'Cache hit'],
+  panel_daily: ['近 30 天', 'Daily · 30D'],
+  catalog_heat: ['26 周每日强度', '26 weeks of daily intensity'],
+  catalog_punch: ['星期 × 小时作息', 'Weekday × hour rhythm'],
+  catalog_clock: ['24 小时放射分布', 'Radial 24-hour spread'],
+  catalog_week: ['周内哪天最狠', 'Heaviest weekday'],
+  catalog_models: ['按模型 token 排行', 'Tokens by model'],
+  catalog_sources: ['当月各来源份额', 'This month by source'],
+  catalog_projects: ['项目投入排行', 'Tokens by project'],
+  catalog_alltime: ['累计 token / 请求 / 成本', 'Total tokens, runs, cost'],
+  catalog_streak: ['连续编码天数', 'Consecutive active days'],
+  catalog_records: ['单日峰值 · 最长会话 · 最贵模型', 'Peak day, top session, priciest model'],
+  catalog_cache: ['命中率与五类 token 构成', 'Hit rate and token mix'],
+  catalog_daily: ['每日消耗柱状', 'Daily bars'],
+  panel_peak_hour: ['峰值', 'Peak'],
+  panel_active_days: ['活跃', 'Active'],
+  panel_current: ['当前', 'Current'],
+  panel_longest: ['最长', 'Longest'],
+  panel_busiest_day: ['单日峰值', 'Busiest day'],
+  panel_top_session: ['最长会话', 'Top session'],
+  panel_priciest_model: ['最贵模型', 'Priciest model'],
+  panel_per_request: ['/req', '/req'],
+  panel_cache_hit: ['命中率', 'Hit rate'],
+  panel_token_mix: ['token 构成', 'token mix'],
+  panel_cache_read: ['缓存读', 'cache read'],
+  panel_cache_write: ['缓存写', 'cache write'],
   quota_remaining: ['剩余', 'remaining'],
   quota_next_reset: ['最近重置', 'Next reset'],
   source_health: ['本机数据源', 'Local sources'],
@@ -414,6 +461,59 @@ function MiniBars({ agg }) {
   );
 }
 
+/* ---------------- 当月用量总览(Command Code 风格) ---------------- */
+
+function TrendBars({ values, color }) {
+  const max = Math.max(1, ...values);
+  return (
+    <div className="trend-bars" aria-hidden="true">
+      {values.map((v, i) => (
+        <span
+          key={i}
+          style={{
+            height: `${Math.max(4, (v / max) * 100)}%`,
+            background: color,
+            opacity: i === values.length - 1 ? 1 : 0.45,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function UsageSummaryRow({ ledger, goat, lang }) {
+  const t = (k) => STR[k][lang];
+  const zh = lang === 0;
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthDays = (ledger?.daily_totals || []).filter((d) => d.date.startsWith(monthPrefix));
+  const tokens = goat ? goat.tokens : ledger?.month.total ?? 0;
+  const requests = goat ? goat.requests : ledger?.month.messages ?? 0;
+  const caption = goat ? t('usage_sum_official') : t('usage_sum_local');
+  return (
+    <div className="usage-summary-row">
+      <div className="usage-summary-card">
+        <div className="usage-summary-head" style={{ color: 'var(--sum-purple)' }}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
+          <span>{t('usage_sum_tokens')}</span>
+        </div>
+        <div className="usage-summary-number">{fmtTokens(tokens)}<span>{t('usage_unit_tokens')}</span></div>
+        <TrendBars values={monthDays.map((d) => d.tokens)} color="var(--sum-purple)" />
+        <div className="usage-summary-caption">{caption}</div>
+      </div>
+      <div className="usage-summary-card">
+        <div className="usage-summary-head" style={{ color: 'var(--sum-orange)' }}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
+          <span>{t('usage_sum_runs')}</span>
+        </div>
+        <div className="usage-summary-number">{fmtInt(requests)}<span>{t('usage_unit_runs')}</span></div>
+        <TrendBars values={monthDays.map((d) => d.messages)} color="var(--sum-orange)" />
+        <div className="usage-summary-caption">{caption}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 配额卡片 ---------------- */
 
 const BAR_BLOCKS = 20;
@@ -447,7 +547,9 @@ function paceChipText(pace, lang) {
     : `${d}pt ${pace.delta >= 0 ? 'ahead' : 'behind'} · ${eta} to empty`;
 }
 
-function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, onTogglePin, onToggleHidden }) {
+const QUOTA_CLIENT_OF = { 'opencode-go': 'opencode', codex: 'codex' };
+
+function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden }) {
   const t = (k) => STR[k][lang];
   const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   return (
@@ -455,6 +557,14 @@ function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCa
       {ordered.filter((c) => !hiddenCards.includes(c.provider)).map((c) => {
         const accent = providerColors[c.provider] || PROVIDER_ACCENT[c.provider] || 'var(--color-text-primary)';
         const isActivity = c.method === 'activity_vs_average';
+        const monthlyTokens = c.kind !== 'Live' ? undefined
+          : c.provider === 'goat'
+            ? goatUsage?.tokens
+            : (() => {
+              const client = QUOTA_CLIENT_OF[c.provider];
+              const row = client && monthByClient.find((r) => r.client === client);
+              return row?.agg.total;
+            })();
         return (
           <Card key={c.provider} className={`quota-card${isActivity ? ' quota-card-activity' : ''}`} role="group" aria-label={c.title}>
             <div className="quota-head">
@@ -495,6 +605,12 @@ function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCa
                 <Text type="supporting" className="quota-missing-hint">{QUOTA_HINT[c.provider]?.[lang] || c.hint}</Text>
               </div>
             )}
+            {monthlyTokens != null && monthlyTokens > 0 && (
+              <div className="quota-monthly">
+                <span className="quota-monthly-label">{t('usage_card_monthly')}</span>
+                <span className="quota-monthly-value">{fmtTokens(monthlyTokens)} {t('usage_unit_tokens')}</span>
+              </div>
+            )}
           </Card>
         );
       })}
@@ -502,7 +618,7 @@ function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCa
   );
 }
 
-function QuotaPage({ cards, sources, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
+function QuotaPage({ cards, sources, ledger, goatUsage, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
   const t = (key) => STR[key][lang];
   const [selectedSource, setSelectedSource] = useState(null);
   const sourceDetail = sources?.find((source) => source.client === selectedSource);
@@ -529,7 +645,8 @@ function QuotaPage({ cards, sources, quotaFetchedAtMs, quotaStale, now, lang, pr
         <span>{t('quota_used')}</span>
       </div>
     </section>
-    <QuotaCards cards={currentCards} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={preferences.hiddenCards} providerColors={preferences.providerColors} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} />
+    <UsageSummaryRow ledger={ledger} goat={goatUsage} lang={lang} />
+    <QuotaCards cards={currentCards} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={preferences.hiddenCards} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} />
     {preferences.hiddenCards.length > 0 && <button className="quota-hidden-link" type="button" onClick={onOpenSettings}>{lang === 0 ? `已隐藏 ${preferences.hiddenCards.length} 张卡片 · 在设置中恢复` : `${preferences.hiddenCards.length} hidden cards · restore in Settings`}</button>}
     {sources?.length > 0 && <section className="source-section" aria-label={t('source_health')}>
       <div className="source-heading"><h2>{t('source_health')}</h2></div>
@@ -611,19 +728,19 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
       <Suspense fallback={<Card className="analysis-panel"><Text type="supporting">{t('loading')}</Text></Card>}><AnalysisPanel ledger={ledger} lang={lang} /></Suspense>
       <Card className="now-card">
         <div className="now-main">
-          <Text type="supporting">{t('now')} · {t('recent_hour')}</Text>
+          <Text type="supporting" className="mono-label">{t('now')} · {t('recent_hour')}</Text>
           <strong>{recent ? `${recent.label} ${fmtTokens(recent.agg.total)}` : t('no_data')}</strong>
           <span className="now-sub">{ledger.burn_rate != null ? `${Math.round(ledger.burn_rate)} ${t('burn_unit')}` : '—'}</span>
         </div>
         <div className="now-quota">
-          <Text type="supporting">{t('quota')}</Text>
+          <Text type="supporting" className="mono-label">{t('quota')}</Text>
           <strong>{quota ? `${quota.provider} ${Math.round(quota.used_pct)}%` : '—'}</strong>
           <span className="now-sub">{quota?.label || ''}</span>
         </div>
       </Card>
       <div className="stat-row">
         <Card className="stat-card">
-          <Text type="supporting">{t('today')}</Text>
+          <Text type="supporting" className="mono-label">{t('today')}</Text>
           <ObservedDotMatrix value={ledger.today.total} typeface={typeface} />
           <div className="stat-sub">
             <span>{fmtCost(ledger.today.cost)}</span>
@@ -633,14 +750,14 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
           <MiniBars agg={ledger.today} />
         </Card>
         <Card className="stat-card">
-          <Text type="supporting">{t('week')}</Text>
+          <Text type="supporting" className="mono-label">{t('week')}</Text>
           <ObservedDotMatrix value={ledger.week.total} typeface={typeface} />
           <div className="stat-sub">
             <span>{fmtCost(ledger.week.cost)}</span>
           </div>
         </Card>
         <Card className="stat-card">
-          <Text type="supporting">{t('month')}</Text>
+          <Text type="supporting" className="mono-label">{t('month')}</Text>
           <ObservedDotMatrix value={ledger.month.total} typeface={typeface} />
           <div className="stat-sub monthly-value-sub">
             {monthlyValue ? (
@@ -670,7 +787,7 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
 
       <Card className="trend-card">
         <div className="trend-toolbar">
-          <Text weight="medium">{range === '24h' ? t('range_24h') : t('range_14d')}</Text>
+          <Text weight="medium" className="mono-label">{range === '24h' ? t('range_24h') : t('range_14d')}</Text>
           <div className="trend-controls">
             <SegmentedControl
               size="sm"
@@ -738,7 +855,7 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
       <div className="usage-columns">
         <Card className="dim-card">
           <div className="trend-toolbar">
-            <Text weight="medium">
+            <Text weight="medium" className="mono-label">
               {dim === 'agent' ? t('by_agent') : dim === 'session' ? t('by_session') : dim === 'project' ? t('by_project') : t('by_model')} · 30d
             </Text>
             <SegmentedControl
@@ -755,26 +872,26 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
           </div>
           <div className="dim-rows">
             {dimRows.length === 0 ? <Text type="supporting">{t('no_data')}</Text> : dimRows.map((r) => (
-              <div key={r.key} className="dim-row">
-                <span className="dim-dot" style={{ background: r.color }} />
-                <span
-                  className="dim-label"
-                  title={r.isModel ? `${r.label} · ${(r.clients || []).join(', ')}` : r.label}
-                  aria-label={r.isModel ? `${r.label}, ${(r.clients || []).join(', ')}` : r.label}
-                >{r.label}</span>
-                <div className="dim-bar">
-                  <div className="dim-bar-fill" style={{ width: `${(r.agg.total / dimTotal) * 100}%`, background: r.color }} />
+                <div key={r.key} className="dim-row">
+                  <span className="dim-dot" style={{ background: r.color }} />
+                  <span
+                    className="dim-label"
+                    title={r.isModel ? `${r.label} · ${(r.clients || []).join(', ')}` : r.label}
+                    aria-label={r.isModel ? `${r.label}, ${(r.clients || []).join(', ')}` : r.label}
+                  >{r.label}</span>
+                  <div className="dim-bar">
+                    <BlockBar pct={(r.agg.total / dimTotal) * 100} color={r.color} />
+                  </div>
+                  <span className={`dim-value${r.isModel ? ' dim-model-value' : ''}`} title={r.isModel ? `${fmtInt(r.agg.total)} tokens` : undefined}>
+                    {r.isModel ? fmtInt(r.agg.total) : fmtTokens(r.agg.total)}
+                  </span>
                 </div>
-                <span className={`dim-value${r.isModel ? ' dim-model-value' : ''}`} title={r.isModel ? `${fmtInt(r.agg.total)} tokens` : undefined}>
-                  {r.isModel ? fmtInt(r.agg.total) : fmtTokens(r.agg.total)}
-                </span>
-              </div>
             ))}
           </div>
         </Card>
 
         <Card className="recent-card">
-          <Text weight="medium">{t('recent_hour')}</Text>
+          <Text weight="medium" className="mono-label">{t('recent_hour')}</Text>
           {ledger.recent_by_agent.length === 0 ? (
             <Text type="supporting">{t('no_data')}</Text>
           ) : (
@@ -793,24 +910,6 @@ function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface
       </div>
     </div>
   );
-}
-
-/* ---------------- 热力图页 ---------------- */
-
-const HEAT_LEVELS = [
-  'var(--color-border)',
-  'var(--heat-1)',
-  'var(--heat-2)',
-  'var(--heat-3)',
-  'var(--heat-4)',
-];
-
-function heatLevel(tokens) {
-  if (tokens <= 0) return 0;
-  if (tokens < 100e3) return 1;
-  if (tokens < 400e3) return 2;
-  if (tokens < 1.5e6) return 3;
-  return 4;
 }
 
 function SettingsChoice({ label, value, onChange, options }) {
@@ -1087,71 +1186,671 @@ function SettingsPage({ lang, preferences, onPreferenceChange, onResetAppearance
   );
 }
 
-function HeatmapPage({ ledger, lang }) {
-  const t = (k) => STR[k][lang];
+/* ---------------- 面板仪表板 ---------------- */
+
+const PANEL_COLS = 12;
+const PANEL_ROW_H = 84;
+const PANEL_GAP = 14;
+const PANELS_KEY = 'token-monitor.panels.v1';
+const PANELS_MAX = 14;
+
+const PANEL_CATALOG = [
+  { id: 'heat', w: 12, h: 4 },
+  { id: 'alltime', w: 4, h: 1 },
+  { id: 'streak', w: 4, h: 1 },
+  { id: 'records', w: 4, h: 1 },
+  { id: 'cache', w: 4, h: 2 },
+  { id: 'punch', w: 8, h: 2 },
+  { id: 'clock', w: 4, h: 3 },
+  { id: 'week', w: 4, h: 2 },
+  { id: 'daily', w: 4, h: 3 },
+  { id: 'models', w: 4, h: 3 },
+  { id: 'sources', w: 4, h: 2 },
+  { id: 'projects', w: 4, h: 3 },
+];
+const DEFAULT_PANELS = [
+  { id: 'heat', x: 0, y: 0, w: 12, h: 4, locked: false },
+  { id: 'alltime', x: 0, y: 4, w: 4, h: 1, locked: false },
+  { id: 'streak', x: 4, y: 4, w: 4, h: 1, locked: false },
+  { id: 'records', x: 8, y: 4, w: 4, h: 1, locked: false },
+  { id: 'cache', x: 0, y: 5, w: 4, h: 2, locked: false },
+  { id: 'punch', x: 4, y: 5, w: 8, h: 2, locked: false },
+  { id: 'clock', x: 0, y: 7, w: 4, h: 3, locked: false },
+  { id: 'week', x: 4, y: 7, w: 4, h: 2, locked: false },
+  { id: 'daily', x: 8, y: 7, w: 4, h: 3, locked: false },
+  { id: 'models', x: 4, y: 9, w: 4, h: 3, locked: false },
+  { id: 'sources', x: 8, y: 9, w: 4, h: 2, locked: false },
+  { id: 'projects', x: 0, y: 10, w: 4, h: 3, locked: false },
+];
+
+const panelOverlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const panelOverlapArea = (a, b) =>
+  Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
+  Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+/* 锁定卡是钉子,其余自由卡按原序落到不重叠的最小行 */
+function compactPanels(panels) {
+  const locked = panels.filter((p) => p.locked);
+  const free = panels.filter((p) => !p.locked).sort((a, b) => a.y - b.y || a.x - b.x);
+  const placed = [...locked];
+  for (const p of free) {
+    let y = 0;
+    while (y < 400 && placed.some((q) => panelOverlap({ ...p, y }, q))) y++;
+    placed.push({ ...p, y });
+  }
+  return placed.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+function resolvePanelMove(panels, id, target) {
+  const origin = panels.find((p) => p.id === id);
+  const others = panels.filter((p) => p.id !== id);
+  const overlapping = others.filter((p) => panelOverlap(target, p) && !p.locked);
+  if (overlapping.length === 0) return compactPanels([target, ...others]);
+  const first = overlapping.reduce((best, p) => (panelOverlapArea(target, p) > panelOverlapArea(target, best) ? p : best), overlapping[0]);
+  const swapped = { ...first, x: origin.x, y: origin.y };
+  const rest = others.filter((p) => p.id !== first.id);
+  return compactPanels([target, swapped, ...rest]);
+}
+
+function resolvePanelResize(panels, id, target) {
+  const others = panels.filter((p) => p.id !== id);
+  let { w, h } = target;
+  while (w > 1 && others.some((p) => panelOverlap({ ...target, w }, p))) w--;
+  while (h > 1 && others.some((p) => panelOverlap({ ...target, w, h }, p))) h--;
+  return { ...target, w, h };
+}
+void resolvePanelResize;
+
+function collectAlignLines(panels, id, nx, ny) {
+  const v = [];
+  const h = [];
+  panels.forEach((p) => {
+    if (p.id === id) return;
+    if (p.x === nx) v.push(p.x);
+    if (p.x + p.w === nx) v.push(p.x + p.w);
+    if (p.y === ny) h.push(p.y);
+    if (p.y + p.h === ny) h.push(p.y + p.h);
+  });
+  return { v: [...new Set(v)], h: [...new Set(h)] };
+}
+
+function readPanelState() {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(PANELS_KEY) || 'null');
+    if (!raw || !Array.isArray(raw.panels) || !Array.isArray(raw.enabled)) return null;
+    const ok = raw.panels.filter((p) => PANEL_CATALOG.some((c) => c.id === p.id) && Number.isFinite(p.x) && Number.isFinite(p.y) && p.w >= 1 && p.h >= 1);
+    const enabled = raw.enabled.filter((id) => PANEL_CATALOG.some((c) => c.id === id));
+    return { panels: ok, enabled };
+  } catch {
+    return null;
+  }
+}
+
+const WEEKDAY_ZH = ['一', '二', '三', '四', '五', '六', '日'];
+const WEEKDAY_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function HeatPanel({ ledger, lang }) {
+  const totals = ledger?.daily_totals || [];
   const [sel, setSel] = useState(null);
-  if (!ledger) return null;
-  const weeks = [];
-  const totals = ledger.daily_totals;
-  // 末尾对齐:最后一天为终点,往前切 26 周,起点对齐周一
   const days = [...totals];
   while (days.length % 7 !== 0) days.unshift({ date: '', tokens: 0, cost: 0, empty: true });
+  const weeks = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
-  const detail = sel ? (ledger.daily_detail?.[sel] || null) : null;
+  const maxDay = Math.max(1, ...totals.map((d) => d.tokens));
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const level = (v) => (v <= 0 ? 0 : Math.min(6, Math.ceil((v / maxDay) * 6)));
+  const monthOf = (w) => (w[0]?.date ? Number(w[0].date.slice(5, 7)) : null);
+  const detail = sel ? ledger?.daily_detail?.[sel] : null;
   const selTotal = totals.find((d) => d.date === sel);
-
+  const dayNames = lang === 0 ? WEEKDAY_ZH : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   return (
-    <div className="heat-page">
-      {totals.every((day) => day.tokens <= 0) ? <Card className="heat-empty empty-card"><Text type="supporting">{t('no_data')}</Text></Card> : <Card className="heat-card">
-        <div className="heat-weeks" role="group" aria-label={t('nav_heat')} style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}>
-          {weeks.map((w, wi) => (
-            <div key={wi} className="heat-col">
-              {w.map((d, di) =>
-                d.empty || !d.date ? (
-                  <div key={di} className="heat-cell heat-cell-empty" />
-                ) : (
+    <>
+      <div className="heat-wrap">
+        <div className="heat-days">{dayNames.map((d, i) => <span key={i}>{d}</span>)}</div>
+        <div className="heat-flex">
+          <div className="heat-months">{weeks.map((w, wi) => {
+            const m = monthOf(w);
+            const prev = wi > 0 ? monthOf(weeks[wi - 1]) : null;
+            const label = m == null || m === prev ? '' : lang === 0 ? `${m}月` : MONTH_EN[m - 1];
+            return <span key={wi}>{label}</span>;
+          })}</div>
+          <div className="heat-cols">
+            {weeks.map((w, wi) => (
+              <div className="heat-col" key={wi}>
+                {w.map((d, di) => d.empty || !d.date ? <div key={di} className="heat-cell is-empty" /> : (
                   <Tooltip key={di} content={`${d.date} · ${fmtTokens(d.tokens)} / ${fmtCost(d.cost)}`}>
                     <button
                       type="button"
-                      className={`heat-cell${sel === d.date ? ' heat-cell-sel' : ''}`}
-                      style={{ background: HEAT_LEVELS[heatLevel(d.tokens)] }}
+                      className={`heat-cell${sel === d.date ? ' is-sel' : ''}${d.date === todayStr ? ' is-today' : ''}`}
+                      style={d.tokens > 0 ? { background: `color-mix(in srgb, var(--color-text-blue) ${Math.round(level(d.tokens) * 15)}%, transparent)` } : undefined}
                       onClick={() => setSel((s) => (s === d.date ? null : d.date))}
-                      aria-label={`${d.date} · ${fmtTokens(d.tokens)} · ${fmtCost(d.cost)}`}
+                      aria-label={`${d.date} · ${fmtTokens(d.tokens)}`}
                       aria-pressed={sel === d.date}
                     />
                   </Tooltip>
-                ),
-              )}
-            </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="heat-foot">
+        <div className="heat-legend">{[1, 2, 3, 4, 5, 6].map((lv) => <i key={lv} style={{ background: `color-mix(in srgb, var(--color-text-blue) ${lv * 15}%, transparent)` }} />)}</div>
+        {selTotal && <span className="heat-sel">{selTotal.date} · {fmtTokens(selTotal.tokens)} · {fmtCost(selTotal.cost)}</span>}
+      </div>
+      {sel && detail && (
+        <div className="heat-drill">
+          {detail.map(([c, g]) => (
+            <span key={c} className="heat-drill-row"><i style={{ background: CLIENT_COLORS[c] || 'var(--color-text-secondary)' }} />{c}<b>{fmtTokens(g.total)}</b></span>
           ))}
         </div>
-        <div className="heat-legend">
-          <span>{t('by_day')}</span>
-          {HEAT_LEVELS.map((c, i) => <span key={i} className="heat-legend-cell" style={{ background: c }} />)}
-        </div>
-      </Card>}
-      {sel && (
-        <Card className="heat-detail">
-          <div className="trend-toolbar">
-            <Text weight="medium">{sel}</Text>
-            {selTotal && <Text type="supporting">{fmtTokens(selTotal.tokens)} · {fmtCost(selTotal.cost)}</Text>}
-          </div>
-          {detail ? (
-            <div className="dim-rows">
-              {detail.map(([c, g]) => (
-                <div key={c} className="dim-row">
-                  <span className="dim-dot" style={{ background: CLIENT_COLORS[c] || 'var(--color-text-secondary)' }} />
-                  <span className="dim-label">{c}</span>
-                  <span className="dim-value">{fmtTokens(g.total)}</span>
-                  <span className="dim-sub">{fmtCost(g.cost)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Text type="supporting">{t('no_data')}</Text>
-          )}
-        </Card>
       )}
+    </>
+  );
+}
+
+function PunchPanel({ ledger, lang }) {
+  const wh = ledger?.weekday_hour || Array.from({ length: 7 }, () => Array(24).fill(0));
+  const max = Math.max(1, ...wh.flat());
+  const dayNames = lang === 0 ? WEEKDAY_ZH : WEEKDAY_EN;
+  const dayFull = lang === 0 ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] : WEEKDAY_EN;
+  return (
+    <div className="punch">
+      <div className="punch-row punch-row-head">
+        <span className="punch-day" />
+        {Array.from({ length: 24 }, (_, h) => <span key={h} className="punch-hour">{h % 6 === 0 ? h : ''}</span>)}
+      </div>
+      {wh.map((row, di) => (
+        <div className="punch-row" key={di}>
+          <span className="punch-day">{dayNames[di]}</span>
+          {row.map((v, hi) => (
+            <Tooltip key={hi} content={`${dayFull[di]} ${String(hi).padStart(2, '0')}:00 · ${fmtTokens(v)}`}>
+              <i className="punch-cell" style={v > 0 ? { background: `color-mix(in srgb, var(--color-text-purple) ${Math.round(14 + Math.ceil((v / max) * 5) * 17)}%, transparent)` } : undefined} />
+            </Tooltip>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function clockArc(r0, r1, a0, a1) {
+  const rad = (a) => (a * Math.PI) / 180;
+  const p = (r, a) => `${(r * Math.cos(rad(a))).toFixed(2)} ${(r * Math.sin(rad(a))).toFixed(2)}`;
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M ${p(r0, a0)} L ${p(r1, a0)} A ${r1} ${r1} 0 ${large} 1 ${p(r1, a1)} L ${p(r0, a1)} A ${r0} ${r0} 0 ${large} 0 ${p(r0, a0)} Z`;
+}
+
+function ClockPanel({ ledger }) {
+  const hourly = ledger?.hourly || Array(24).fill(0);
+  const max = Math.max(1, ...hourly);
+  const peak = hourly.indexOf(Math.max(...hourly));
+  return (
+    <div className="clock">
+      <svg viewBox="-60 -60 120 120" role="img" aria-label="hourly distribution">
+        {hourly.map((v, h) => {
+          if (v <= 0) return null;
+          const a0 = -90 + h * 15 + 1.2;
+          const a1 = -90 + (h + 1) * 15 - 1.2;
+          const len = 26 + (v / max) * 28;
+          return <path key={h} d={clockArc(26, len, a0, a1)} fill="var(--color-text-blue)" opacity={0.3 + (v / max) * 0.7} />;
+        })}
+        {[0, 6, 12, 18].map((h) => {
+          const rad = ((-90 + h * 15 + 7.5) * Math.PI) / 180;
+          return <text key={h} x={57 * Math.cos(rad)} y={57 * Math.sin(rad) + 3} textAnchor="middle" fontSize="7">{h}</text>;
+        })}
+        <text className="clock-peak" x="0" y="-2" textAnchor="middle" fontSize="12">{max > 1 ? `${String(peak).padStart(2, '0')}:00` : '—'}</text>
+        <text x="0" y="10" textAnchor="middle" fontSize="6.5">PEAK</text>
+      </svg>
+    </div>
+  );
+}
+
+function BoardPanel({ rows, color = 'var(--color-text-blue)', showRank = false }) {
+  const top = rows.slice(0, 6);
+  const topV = top[0]?.v || 1;
+  if (top.length === 0) return <div className="board-empty">—</div>;
+  return (
+    <div className="board">
+      {top.map((r, i) => (
+        <div className="board-row" key={r.key}>
+          {showRank && <span className="board-rank">{String(i + 1).padStart(2, '0')}</span>}
+          <span className="board-label" title={r.label}>{r.label}</span>
+          <BlockBar pct={(r.v / topV) * 100} color={r.color || color} />
+          <span className="board-value">{fmtTokens(r.v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WeekPanel({ ledger, lang }) {
+  const weekday = ledger?.weekday || Array(7).fill(0);
+  const max = Math.max(1, ...weekday);
+  const peak = weekday.indexOf(Math.max(...weekday));
+  const names = lang === 0 ? WEEKDAY_ZH : WEEKDAY_EN;
+  return (
+    <div className="board">
+      {weekday.map((v, i) => (
+        <div className="board-row" key={i}>
+          <span className="board-label">{names[i]}</span>
+          <BlockBar pct={(v / max) * 100} color={i === peak && v > 0 ? 'var(--sum-orange)' : 'var(--color-text-blue)'} />
+          <span className="board-value">{fmtTokens(v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ModelsPanel({ ledger }) {
+  const rows = [...(ledger?.by_model || [])]
+    .sort((a, b) => b.agg.total - a.agg.total)
+    .slice(0, 6)
+    .map((m) => ({ key: m.model, label: m.model, v: m.agg.total }));
+  return <BoardPanel rows={rows} color="var(--color-text-purple)" showRank />;
+}
+
+function SourcesPanel({ ledger }) {
+  const rows = ledger?.month_by_client || [];
+  const total = rows.reduce((s, r) => s + r.agg.total, 0) || 1;
+  return (
+    <div className="share">
+      <div className="share-track">
+        {rows.map((r) => (
+          <div key={r.client} style={{ flexGrow: Math.max(1, r.agg.total), background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} title={`${r.client} ${fmtTokens(r.agg.total)}`} />
+        ))}
+      </div>
+      <div className="share-legend">
+        {rows.map((r) => (
+          <span key={r.client}><i style={{ background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} />{r.client} {Math.round((r.agg.total / total) * 100)}%</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectsPanel({ ledger }) {
+  const rows = [...(ledger?.by_project || [])]
+    .sort((a, b) => b.agg.total - a.agg.total)
+    .slice(0, 6)
+    .map((p) => ({ key: p.project, label: p.project || '—', v: p.agg.total, sub: p.sessions }));
+  const topV = rows[0]?.v || 1;
+  if (rows.length === 0) return <div className="board-empty">—</div>;
+  return (
+    <div className="board">
+      {rows.map((r, i) => (
+        <div className="board-row" key={r.key}>
+          <span className="board-rank">{String(i + 1).padStart(2, '0')}</span>
+          <span className="board-label" title={r.label}>{r.label}</span>
+          <BlockBar pct={(r.v / topV) * 100} color="var(--sum-orange)" />
+          <span className="board-value">{fmtTokens(r.v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AllTimePanel({ ledger }) {
+  const days = ledger?.daily_totals || [];
+  const sum = (f) => days.reduce((s, d) => s + (f(d) || 0), 0);
+  const active = days.filter((d) => d.tokens > 0).length;
+  const cells = [
+    [fmtTokens(sum((d) => d.tokens)), 'TOKENS'],
+    [fmtInt(sum((d) => d.messages)), 'RUNS'],
+    [`~${fmtCost(sum((d) => d.cost))}`, 'COST'],
+    [String(active), 'DAYS'],
+  ];
+  return (
+    <div className="big4">
+      {cells.map(([v, label]) => <div key={label}><b>{v}</b><span>{label}</span></div>)}
+    </div>
+  );
+}
+
+function StreakPanel({ ledger }) {
+  const days = ledger?.daily_totals || [];
+  let cur = 0;
+  for (let i = days.length - 1; i >= 0 && days[i].tokens > 0; i--) cur++;
+  let best = 0;
+  let run = 0;
+  for (const d of days) {
+    run = d.tokens > 0 ? run + 1 : 0;
+    best = Math.max(best, run);
+  }
+  const active = days.filter((d) => d.tokens > 0).length;
+  return (
+    <div className="big4">
+      <div><b>{cur}<i className="big4-unit">d</i></b><span>{'CURRENT'}</span></div>
+      <div><b>{best}<i className="big4-unit">d</i></b><span>{'LONGEST'}</span></div>
+      <div><b>{active}</b><span>{'ACTIVE'}</span></div>
+      <div><b>{fmtTokens(days.reduce((s, d) => s + d.tokens, 0))}</b><span>{'26W'}</span></div>
+    </div>
+  );
+}
+
+function RecordsPanel({ ledger }) {
+  const days = ledger?.daily_totals || [];
+  const maxDay = days.reduce((m, d) => (d.tokens > (m?.tokens || 0) ? d : m), null);
+  const topSession = (ledger?.by_session || [])[0];
+  const priciest = (ledger?.by_model || [])
+    .filter((m) => m.agg.messages > 0)
+    .reduce((best, m) => {
+      const r = m.agg.cost / m.agg.messages;
+      return !best || r > best.r ? { label: m.model, r } : best;
+    }, null);
+  return (
+    <div className="records">
+      <div className="records-row"><span className="records-label">BUSIEST DAY</span><span className="records-value">{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
+      <div className="records-row"><span className="records-label">TOP SESSION</span><span className="records-value">{topSession ? topSession.session.slice(0, 18) : '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
+      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value">{priciest ? priciest.label : '—'}</span><span className="records-sub">{priciest ? `$${priciest.r.toFixed(4)}/req` : ''}</span></div>
+    </div>
+  );
+}
+
+function CachePanel({ ledger, lang }) {
+  const m = ledger?.month;
+  const hit = m && m.input + m.cache_read > 0 ? (m.cache_read / (m.input + m.cache_read)) * 100 : 0;
+  const mix = m ? [
+    ['input', m.input, 'var(--color-text-blue)'],
+    ['output', m.output, 'var(--color-text-green)'],
+    [STR.panel_cache_read[lang], m.cache_read, 'var(--color-text-purple)'],
+    [STR.panel_cache_write[lang], m.cache_write, 'var(--color-text-orange)'],
+    ['reasoning', m.reasoning, 'var(--color-text-secondary)'],
+  ] : [];
+  const mixTotal = mix.reduce((s, [, v]) => s + v, 0) || 1;
+  return (
+    <div className="cache">
+      <div className="cache-hit"><b>{hit.toFixed(1)}<i className="big4-unit">%</i></b><span>{'CACHE HIT'}</span></div>
+      <div className="cache-mix">
+        <div className="cache-track">
+          {mix.map(([k, v, color]) => <div key={k} style={{ flexGrow: Math.max(1, v), background: color }} title={`${k} ${fmtTokens(v)}`} />)}
+        </div>
+        <div className="share-legend">
+          {mix.map(([k, v, color]) => <span key={k}><i style={{ background: color }} />{k} {Math.round((v / mixTotal) * 100)}%</span>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DailyPanel({ ledger }) {
+  const last30 = (ledger?.daily_totals || []).slice(-30);
+  const max = Math.max(1, ...last30.map((d) => d.tokens));
+  return (
+    <div className="daily">
+      <div className="daily-bars">
+        {last30.map((d) => (
+          <Tooltip key={d.date} content={`${d.date} · ${fmtTokens(d.tokens)} / ${fmtCost(d.cost)}`}>
+            <div className="daily-bar" style={{ height: `${Math.max(2, (d.tokens / max) * 100)}%` }} />
+          </Tooltip>
+        ))}
+      </div>
+      <div className="daily-axis">
+        <span>{last30[0]?.date?.slice(5) || ''}</span>
+        <span>{last30[last30.length - 1]?.date?.slice(5) || ''}</span>
+      </div>
+    </div>
+  );
+}
+
+const PANEL_BODIES = {
+  heat: HeatPanel,
+  punch: PunchPanel,
+  clock: ClockPanel,
+  week: WeekPanel,
+  models: ModelsPanel,
+  sources: SourcesPanel,
+  projects: ProjectsPanel,
+  alltime: AllTimePanel,
+  streak: StreakPanel,
+  records: RecordsPanel,
+  cache: CachePanel,
+  daily: DailyPanel,
+};
+
+class PanelErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) return <div className="panel-error">PANEL ERROR · {String(this.state.err?.message || this.state.err).slice(0, 160)}</div>;
+    return this.props.children;
+  }
+}
+
+function panelMeta(id, ledger, lang) {
+  const L = ledger;
+  if (!L) return '';
+  switch (id) {
+    case 'heat': {
+      const total = (L.daily_totals || []).reduce((s, d) => s + d.tokens, 0);
+      return fmtTokens(total);
+    }
+    case 'punch': {
+      const flat = (L.weekday_hour || []).flat();
+      const max = Math.max(0, ...flat);
+      return max > 0 ? fmtTokens(max) : '';
+    }
+    case 'clock': {
+      const peak = (L.hourly || []).indexOf(Math.max(0, ...(L.hourly || [0])));
+      return Math.max(0, ...(L.hourly || [0])) > 0 ? `${String(peak).padStart(2, '0')}:00` : '';
+    }
+    case 'week': {
+      const names = lang === 0 ? WEEKDAY_ZH : WEEKDAY_EN;
+      const idx = (L.weekday || []).indexOf(Math.max(0, ...(L.weekday || [0])));
+      return (L.weekday || [0]).some((v) => v > 0) ? names[idx] : '';
+    }
+    case 'models': {
+      const top = [...(L.by_model || [])].sort((a, b) => b.agg.total - a.agg.total)[0];
+      return top?.model || '';
+    }
+    case 'sources': return `${(L.month_by_client || []).length}`;
+    case 'projects': {
+      const top = [...(L.by_project || [])].sort((a, b) => b.agg.total - a.agg.total)[0];
+      return top?.project ? top.project.slice(0, 16) : '';
+    }
+    case 'alltime': return fmtTokens((L.daily_totals || []).reduce((s, d) => s + d.tokens, 0));
+    case 'streak': {
+      let cur = 0;
+      const days = L.daily_totals || [];
+      for (let i = days.length - 1; i >= 0 && days[i].tokens > 0; i--) cur++;
+      return `${cur}d`;
+    }
+    case 'records': {
+      const maxDay = (L.daily_totals || []).reduce((m, d) => (d.tokens > (m?.tokens || 0) ? d : m), null);
+      return maxDay ? maxDay.date.slice(5) : '';
+    }
+    case 'cache': {
+      const m = L.month;
+      return m && m.input + m.cache_read > 0 ? `${Math.round((m.cache_read / (m.input + m.cache_read)) * 100)}%` : '';
+    }
+    case 'daily': return fmtTokens((L.daily_totals || []).slice(-30).reduce((s, d) => s + d.tokens, 0));
+    default: return '';
+  }
+}
+
+function PanelsPage({ ledger, lang }) {
+  const t = (k) => STR[k][lang];
+  const gridRef = useRef(null);
+  const panelsRef = useRef(null);
+  const dragRef = useRef(null);
+  const [panels, setPanels] = useState(() => readPanelState()?.panels || DEFAULT_PANELS.map((p) => ({ ...p })));
+  const [enabled, setEnabled] = useState(() => readPanelState()?.enabled || PANEL_CATALOG.map((c) => c.id));
+  const [drag, setDrag] = useState(null);
+  const [align, setAlign] = useState({ v: [], h: [] });
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => { panelsRef.current = panels; }, [panels]);
+  useEffect(() => {
+    try { window.localStorage.setItem(PANELS_KEY, JSON.stringify({ panels, enabled })); } catch { /* local only */ }
+  }, [panels, enabled]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menuOpen]);
+
+  const startDrag = (e, id, mode) => {
+    const list = panelsRef.current || [];
+    const panel = list.find((p) => p.id === id);
+    if (!panel || (mode === 'move' && panel.locked)) return;
+    e.preventDefault();
+    const grid = gridRef.current?.getBoundingClientRect();
+    if (!grid) return;
+    const colW = (grid.width - (PANEL_COLS - 1) * PANEL_GAP) / PANEL_COLS;
+    dragRef.current = { id, mode, panel, startX: e.clientX, startY: e.clientY, colW, stepY: PANEL_ROW_H + PANEL_GAP };
+    setDrag({ id, mode, dx: 0, dy: 0, swapWith: null, w: panel.w, h: panel.h, nx: panel.x, ny: panel.y });
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const list = panelsRef.current || [];
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if (d.mode === 'move') {
+        // 指针所在格位;拖拽卡跟手浮起,其余卡不动,仅当重叠时让一张卡平移到原位(iOS 式让位)
+        const nx = Math.max(0, Math.min(PANEL_COLS - d.panel.w, d.panel.x + Math.round(dx / (d.colW + PANEL_GAP))));
+        const ny = Math.max(0, d.panel.y + Math.round(dy / d.stepY));
+        const target = { ...d.panel, x: nx, y: ny };
+        const overlapping = list.filter((p) => p.id !== d.id && !p.locked && panelOverlap(target, p));
+        const swapWith = overlapping.length ? overlapping.reduce((best, p) => (panelOverlapArea(target, p) > panelOverlapArea(target, best) ? p : best), overlapping[0]).id : null;
+        setAlign(collectAlignLines(list, d.id, nx, ny));
+        setDrag((cur) => (cur ? { ...cur, dx, dy, nx, ny, swapWith } : cur));
+      } else {
+        const nw = Math.max(1, Math.min(PANEL_COLS - d.panel.x, d.panel.w + Math.round(dx / (d.colW + PANEL_GAP))));
+        const nh = Math.max(1, Math.min(10, d.panel.h + Math.round(dy / d.stepY)));
+        setDrag((cur) => (cur ? { ...cur, w: nw, h: nh } : cur));
+      }
+    };
+    const onUp = () => {
+      const d = dragRef.current;
+      const cur = drag;
+      if (d && cur) {
+        const list = panelsRef.current || [];
+        if (d.mode === 'move') {
+          const target = { ...d.panel, x: cur.nx, y: cur.ny };
+          setPanels(resolvePanelMove(list, d.id, target));
+        } else {
+          setPanels(compactPanels(list.map((p) => (p.id === d.id ? { ...p, w: cur.w, h: cur.h } : p))));
+        }
+      }
+      dragRef.current = null;
+      setDrag(null);
+      setAlign({ v: [], h: [] });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [drag]);
+
+  const removePanel = (id) => {
+    setEnabled((es) => es.filter((x) => x !== id));
+    setPanels((ps) => ps.filter((p) => p.id !== id));
+  };
+  const addPanel = (id) => {
+    if (enabled.includes(id)) { removePanel(id); return; }
+    if (enabled.length >= PANELS_MAX) return;
+    setEnabled((es) => [...es, id]);
+    const cat = PANEL_CATALOG.find((c) => c.id === id);
+    const maxBottom = Math.max(0, ...(panelsRef.current || []).map((p) => p.y + p.h));
+    setPanels((ps) => compactPanels([...ps.filter((p) => p.id !== id), { id, x: 0, y: maxBottom, w: cat.w, h: cat.h, locked: false }]));
+  };
+  const toggleLock = (id) => setPanels((ps) => ps.map((p) => (p.id === id ? { ...p, locked: !p.locked } : p)));
+  const allLocked = panels.length > 0 && panels.every((p) => p.locked);
+  const toggleAllLock = () => setPanels((ps) => ps.map((p) => ({ ...p, locked: !allLocked })));
+  const resetLayout = () => {
+    setPanels(DEFAULT_PANELS.map((p) => ({ ...p })));
+    setEnabled(PANEL_CATALOG.map((c) => c.id));
+  };
+
+  const origin = drag ? panels.find((p) => p.id === drag.id) : null;
+  const renderList = panels
+    .filter((p) => enabled.includes(p.id))
+    .map((p) => {
+      if (drag?.mode === 'move' && drag.swapWith && p.id === drag.swapWith && origin) {
+        return { ...p, x: origin.x, y: origin.y };
+      }
+      if (drag?.mode === 'resize' && p.id === drag.id) {
+        return { ...p, w: drag.w, h: drag.h };
+      }
+      return p;
+    });
+  const bottomPanels = drag?.mode === 'move' && origin ? renderList.filter((p) => p.id !== drag.id) : renderList;
+  const maxBottom = Math.max(3, ...renderList.map((p) => p.y + p.h));
+  const lockTitle = lang === 0 ? '锁定/解锁拖拽' : 'Lock/unlock';
+  const removeTitle = lang === 0 ? '移除面板' : 'Remove panel';
+  const posStyle = (p) => ({
+    '--x': p.x, '--y': p.y, '--w': p.w, '--h': p.h,
+  });
+  return (
+    <div className="panel-page">
+      <div className="panel-tools">
+        <span className="panel-hint">{`${renderList.length}/${PANELS_MAX}`}</span>
+        <button type="button" className="panel-tool" onClick={toggleAllLock}>{allLocked ? t('panels_unlock_all') : t('panels_lock_all')}</button>
+        <button type="button" className="panel-tool" onClick={resetLayout}>{t('panels_reset')}</button>
+        <div className="panel-add" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="panel-tool panel-tool-primary" onClick={() => setMenuOpen((o) => !o)}>+ {t('panels_add')}</button>
+          {menuOpen && (
+            <div className="panel-menu">
+              {PANEL_CATALOG.map((c) => {
+                const on = enabled.includes(c.id);
+                return (
+                  <button key={c.id} type="button" className={`panel-menu-item${on ? ' is-on' : ''}`} onClick={() => addPanel(c.id)} disabled={!on && enabled.length >= PANELS_MAX}>
+                    <span className="panel-menu-copy"><b>{t(`panel_${c.id}`)}</b><small>{t(`catalog_${c.id}`)}</small></span>
+                    <i className={`panel-menu-dot${on ? ' is-on' : ''}`} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      <div ref={gridRef} className="panel-grid" style={{ height: maxBottom * PANEL_ROW_H + (maxBottom - 1) * PANEL_GAP }}>
+        {align.v.map((v, i) => <i key={`v${i}`} className="panel-align-v" style={{ left: `calc(${(v / PANEL_COLS) * 100}% + ${v * PANEL_GAP}px)` }} />)}
+        {align.h.map((y, i) => <i key={`h${i}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
+        <PanelErrorBoundary>
+          {drag?.mode === 'move' && origin && <div className="panel-ghost" style={posStyle(origin)} />}
+          {bottomPanels.map((p) => {
+            const Body = PANEL_BODIES[p.id];
+            return (
+              <div key={p.id} className={`panel-card${drag?.mode === 'resize' && drag.id === p.id ? ' is-resizing' : ''}${p.locked ? ' is-locked' : ''}`} style={posStyle(p)}>
+                <div className="panel-head" onPointerDown={(e) => startDrag(e, p.id, 'move')}>
+                  <span className="panel-title">{t(`panel_${p.id}`)}</span>
+                  <span className="panel-meta">{panelMeta(p.id, ledger, lang)}</span>
+                  <span className="panel-head-btns" onPointerDown={(e) => e.stopPropagation()}>
+                    <button type="button" className={`panel-btn${p.locked ? ' is-on' : ''}`} onClick={() => toggleLock(p.id)} title={lockTitle} aria-label={lockTitle}>
+                      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    </button>
+                    <button type="button" className="panel-btn" onClick={() => removePanel(p.id)} title={removeTitle} aria-label={removeTitle}>×</button>
+                  </span>
+                </div>
+                <div className="panel-body">{ledger ? <Body ledger={ledger} lang={lang} /> : null}</div>
+                <div className="panel-resize" onPointerDown={(e) => startDrag(e, p.id, 'resize')} aria-hidden="true" />
+              </div>
+            );
+          })}
+          {drag && origin && (() => {
+            const Body = PANEL_BODIES[origin.id];
+            return (
+              <div className={`panel-card is-dragging${drag.mode === 'resize' ? ' is-resizing' : ''}`} style={{ ...posStyle(origin), transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.025)` }}>
+                <div className="panel-head">
+                  <span className="panel-title">{t(`panel_${origin.id}`)}</span>
+                  <span className="panel-meta">{panelMeta(origin.id, ledger, lang)}</span>
+                </div>
+                <div className="panel-body">{ledger ? <Body ledger={ledger} lang={lang} /> : null}</div>
+              </div>
+            );
+          })()}
+          {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
+        </PanelErrorBoundary>
+      </div>
     </div>
   );
 }
@@ -1409,9 +2108,9 @@ function App() {
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
       {page === 'usage' && <UsagePage ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} typeface={preferences.typeface} onOpenSettings={() => setPage('settings')} />}
-      {page === 'heat' && <HeatmapPage ledger={data.ledger} lang={lang} />}
+      {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} />}
     </>
   ) : null;
 
@@ -1476,5 +2175,12 @@ function App() {
     </div>
   );
 }
+
+window.addEventListener('error', (e) => {
+  document.title = `E ${String(e.message).slice(0, 90)} @${e.lineno}:${e.colno}`;
+});
+window.addEventListener('unhandledrejection', () => {
+  document.title = 'E promise';
+});
 
 createRoot(document.getElementById('root')).render(<App />);

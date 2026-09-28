@@ -60,7 +60,7 @@ export default function AnalysisPanel({ ledger, lang }) {
 
   return <section className="analysis-panel" aria-label={zh ? '区间分析' : 'Range analysis'}>
     <div className="analysis-heading">
-      <div><strong>{zh ? '区间分析' : 'Range analysis'}</strong></div>
+      <div><strong className="mono-label">{zh ? '区间分析' : 'Range analysis'}</strong></div>
       <div className="usage-export-actions">
         <button type="button" disabled={!validRange} onClick={() => requestExport('csv')}>CSV</button>
         <button type="button" disabled={!validRange} onClick={() => requestExport('json')}>JSON</button>
@@ -74,9 +74,9 @@ export default function AnalysisPanel({ ledger, lang }) {
     </div>
     {!validRange && <p className="settings-form-error" role="alert">{zh ? '日期无效' : 'Invalid dates'}</p>}
     <div className="analysis-summary">
-      <div><span>Tokens</span><strong>{compact(currentTotal.tokens)}</strong><small>{diff(currentTotal.tokens, previousTotal.tokens)} · {zh ? '上期' : 'prior'} {compact(previousTotal.tokens)}</small></div>
-      <div><span>{zh ? '已知成本' : 'Known cost'}{currentTotal.unpriced > 0 ? (zh ? ' · 部分汇总' : ' · partial') : ''}</span><strong>{usd(currentTotal.reported + currentTotal.estimated)}</strong><small>{diff(currentTotal.reported + currentTotal.estimated, previousTotal.reported + previousTotal.estimated)} · {zh ? '上期' : 'prior'} {usd(previousTotal.reported + previousTotal.estimated)}</small></div>
-      <div><span>{zh ? '请求数' : 'Messages'}</span><strong>{compact(currentTotal.messages)}</strong><small>{diff(currentTotal.messages, previousTotal.messages)} · {zh ? '上期' : 'prior'} {compact(previousTotal.messages)}</small></div>
+      <div><span className="mono-label">Tokens</span><strong>{compact(currentTotal.tokens)}</strong><small>{diff(currentTotal.tokens, previousTotal.tokens)} · {zh ? '上期' : 'prior'} {compact(previousTotal.tokens)}</small></div>
+      <div><span className="mono-label">{zh ? '已知成本' : 'Known cost'}{currentTotal.unpriced > 0 ? (zh ? ' · 部分汇总' : ' · partial') : ''}</span><strong>{usd(currentTotal.reported + currentTotal.estimated)}</strong><small>{diff(currentTotal.reported + currentTotal.estimated, previousTotal.reported + previousTotal.estimated)} · {zh ? '上期' : 'prior'} {usd(previousTotal.reported + previousTotal.estimated)}</small></div>
+      <div><span className="mono-label">{zh ? '请求数' : 'Messages'}</span><strong>{compact(currentTotal.messages)}</strong><small>{diff(currentTotal.messages, previousTotal.messages)} · {zh ? '上期' : 'prior'} {compact(previousTotal.messages)}</small></div>
     </div>
     {exportStatus && <p role="status" className="analysis-provenance">{{ saved: zh ? '文件已保存' : 'File saved', error: zh ? '导出失败' : 'Export failed', unavailable: zh ? '暂无数据' : 'No data' }[exportStatus]}</p>}
     <details className="analysis-detail"><summary>{zh ? `逐日明细（${byDay.length} 天有记录）` : `Daily detail (${byDay.length} days with data)`}</summary>
