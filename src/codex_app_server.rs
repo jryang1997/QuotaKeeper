@@ -107,13 +107,17 @@ pub fn fetch_report() -> Result<Report> {
     let mut child = candidates
         .into_iter()
         .find_map(|program| {
-            Command::new(program)
-                .arg("app-server")
+            let mut cmd = Command::new(program);
+            cmd.arg("app-server")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok()
+                .stderr(Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: 避免 app-server 后台闪烁控制台
+            }
+            cmd.spawn().ok()
         })
         .ok_or_else(|| anyhow!("Codex 官方 app-server 未安装或无法启动"))?;
     let result = (|| -> Result<Report> {

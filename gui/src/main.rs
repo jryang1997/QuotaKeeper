@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! wry + tao 外壳:内嵌前端、自定义协议加载、IPC 推送与命令回传。
 //!
 //! 架构:tao 事件循环为主线程;采集线程经 mpsc 发 Refreshed;主循环收到后

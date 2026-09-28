@@ -571,11 +571,16 @@ fn codex_native_quota_report() -> anyhow::Result<Report> {
 }
 
 fn run_omp(exe: &str) -> anyhow::Result<String> {
-    let mut child = Command::new(exe)
-        .args(["usage", "--json"])
+    let mut cmd = Command::new(exe);
+    cmd.args(["usage", "--json"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: 避免子进程弹黑框/改写主控台标题
+    }
+    let mut child = cmd.spawn()?;
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
