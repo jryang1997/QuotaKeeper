@@ -151,6 +151,8 @@ pub struct AgentRowDto {
 #[derive(Serialize)]
 pub struct ModelRowDto {
     pub model: String,
+    /// 合并进该模型的原始记录名(排除 canonical 名自身)。
+    pub aliases: Vec<String>,
     pub clients: Vec<&'static str>,
     pub agg: AggDto,
 }
@@ -337,6 +339,12 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
             .iter()
             .map(|m| ModelRowDto {
                 model: m.model.clone(),
+                aliases: m
+                    .aliases
+                    .iter()
+                    .filter(|alias| alias.as_str() != m.model.as_str())
+                    .cloned()
+                    .collect(),
                 clients: m
                     .clients
                     .iter()

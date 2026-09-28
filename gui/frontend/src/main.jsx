@@ -1417,7 +1417,7 @@ function BoardPanel({ rows, color = 'var(--color-text-blue)', showRank = false }
       {top.map((r, i) => (
         <div className="board-row" key={r.key}>
           {showRank && <span className="board-rank">{String(i + 1).padStart(2, '0')}</span>}
-          <span className="board-label" title={r.label}>{r.label}</span>
+          <span className="board-label" title={r.title || r.label}>{r.label}</span>
           <BlockBar pct={(r.v / topV) * 100} color={r.color || color} />
           <span className="board-value">{fmtTokens(r.v)}</span>
         </div>
@@ -1448,7 +1448,12 @@ function ModelsPanel({ ledger }) {
   const rows = [...(ledger?.by_model || [])]
     .sort((a, b) => b.agg.total - a.agg.total)
     .slice(0, 6)
-    .map((m) => ({ key: m.model, label: m.model, v: m.agg.total }));
+    .map((m) => ({
+      key: m.model,
+      label: m.model,
+      v: m.agg.total,
+      title: m.aliases?.length ? `${m.model} ← ${m.aliases.join(', ')}` : undefined,
+    }));
   return <BoardPanel rows={rows} color="var(--color-text-purple)" showRank />;
 }
 
