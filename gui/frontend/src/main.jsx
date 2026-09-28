@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
@@ -10,8 +10,12 @@ import { Text } from '@astryxdesign/core/Text';
 import { Button } from '@astryxdesign/core/Button';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { SegmentedControl } from '@astryxdesign/core/SegmentedControl';
+import { SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { Toast } from '@astryxdesign/core/Toast';
+
+const PageTransition = lazy(() => import('./PageTransition.jsx'));
+const AnalysisPanel = lazy(() => import('./AnalysisPanel.jsx'));
 
 /* ---------------- 常量(与 Rust ipc.rs 对齐) ---------------- */
 
@@ -36,6 +40,82 @@ const CLIENT_COLORS = {
   dsh: '#3b82f6',
   claude: '#ef6c4d',
 };
+const PROVIDER_COLOR_DEFAULTS = {
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9',
+};
+const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity'];
+const PROVIDER_LOGOS = {
+  'opencode-go': 'logos/opencode-go.svg',
+  codex: 'logos/codex.svg',
+  goat: 'logos/commandcode.svg',
+  antigravity: 'logos/antigravity.png',
+};
+
+const SOURCE_PATHS = {
+  codex: '~/.codex/sessions/',
+  omp: '~/.omp/stats.db',
+  opencode: '~/.local/share/opencode/opencode.db',
+  zcode: '~/.zcode/cli/db/db.sqlite',
+  dsh: '~/.dsh/sessions/',
+  claude: '~/.claude/projects/',
+};
+const SOURCE_REPAIR = {
+  codex: ['先在 Codex 中运行一次会话，再检查 ~/.codex/sessions/ 下是否有 rollout 日志。', 'Run a Codex session, then check for rollout logs under ~/.codex/sessions/.'],
+  omp: ['启动 OMP 并完成登录；运行 omp usage --json 检查额度，stats.db 用于本机用量。', 'Start OMP and sign in. Run omp usage --json for quotas; stats.db holds local usage.'],
+  opencode: ['在 OpenCode 中运行一次会话；确认本机数据库已生成。', 'Run an OpenCode session and check that its local database exists.'],
+  zcode: ['在 ZCode 中运行一次会话；确认本机数据库已生成。', 'Run a ZCode session and check that its local database exists.'],
+  dsh: ['在 DeepSeek Harness 中运行一次会话；检查压缩会话日志。', 'Run a DeepSeek Harness session and check its compressed session logs.'],
+  claude: ['在 Claude Code 中运行一次会话；检查 ~/.claude/projects/ 下的 JSONL 日志。', 'Run a Claude Code session and check JSONL logs under ~/.claude/projects/.'],
+};
+const QUOTA_REPAIR = {
+  'opencode-go': ['在设置页保存 Go API key，或设置 OPENCODE_GO_API_KEY；也可读取 OpenCode 登录态。', 'Save your Go API key in Settings, set OPENCODE_GO_API_KEY, or use an OpenCode login.'],
+  codex: ['登录 Codex 官方程序后刷新；应用通过 app-server 读取限额。', 'Sign in to the official Codex app and refresh; quotas come from app-server.'],
+  goat: ['在设置页保存 Command Code API key，或配置 COMMAND_CODE_API_KEY；也可使用 cmdc 登录态。', 'Save a Command Code API key in Settings, set COMMAND_CODE_API_KEY, or use a cmdc login.'],
+  antigravity: ['启动本机 CPA，并将管理密钥放在 ~/.tui-token-monitor/cpa-key；应用会通过 CPA 代查 Google 上游配额。', 'Start local CPA and place the management key in ~/.tui-token-monitor/cpa-key. The app reads upstream Google quotas through CPA.'],
+};
+const QUOTA_HINT = {
+  'opencode-go': ['未连接 · 保存 Go API key 或登录 OpenCode', 'Not connected · save a Go API key or sign in to OpenCode'],
+  codex: ['未连接 · 登录 Codex 后刷新', 'Not connected · sign in to Codex and refresh'],
+  goat: ['未连接 · 保存 Command Code key 或登录 cmdc', 'Not connected · save a Command Code key or use cmdc login'],
+  antigravity: ['未连接 · 启动 CPA 并放置管理密钥', 'Not connected · start CPA with its management key'],
+};
+
+const NAV_ITEMS = ['quota', 'usage', 'heat', 'settings'];
+
+function NavIcon({ page }) {
+  if (page === 'quota') {
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15a8 8 0 1 1 16 0" /><path d="m12 12 4-4" /><path d="M8 19h8" /></svg>;
+  }
+  if (page === 'usage') {
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-7" /></svg>;
+  }
+  if (page === 'settings') {
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>;
+  }
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="5" height="5" rx="1" /><rect x="10" y="4" width="5" height="5" rx="1" /><rect x="16" y="4" width="5" height="5" rx="1" /><rect x="4" y="10" width="5" height="5" rx="1" /><rect x="10" y="10" width="5" height="5" rx="1" /><rect x="16" y="10" width="5" height="5" rx="1" /><rect x="4" y="16" width="5" height="5" rx="1" /><rect x="10" y="16" width="5" height="5" rx="1" /><rect x="16" y="16" width="5" height="5" rx="1" /></svg>;
+}
+
+function PrimaryNav({ lang, page, onNavigate, variant }) {
+  return (
+    <nav className={`primary-nav primary-nav-${variant}`} aria-label={lang === 0 ? '主导航' : 'Main navigation'}>
+      {NAV_ITEMS.map((key) => {
+        const active = page === key;
+        return (
+          <button
+            key={key}
+            className={`nav-item${active ? ' nav-item-active' : ''}`}
+            onClick={() => onNavigate(key)}
+            aria-current={active ? 'page' : undefined}
+          >
+            {active && <span className="nav-active-indicator" aria-hidden="true" />}
+            <NavIcon page={key} />
+            <span className="nav-label">{STR[`nav_${key}`][lang]}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 /* ---------------- 双语 ---------------- */
 
@@ -44,10 +124,11 @@ const STR = {
   nav_quota: ['配额', 'Quota'],
   nav_usage: ['Token 用量', 'Token Usage'],
   nav_heat: ['热力图', 'Heatmap'],
+  nav_settings: ['设置', 'Settings'],
   refresh: ['刷新', 'Refresh'],
   refreshing: ['采集中…', 'Fetching…'],
   updated: ['更新于', 'Updated'],
-  quota_error: ['配额采集失败(用量页不受影响)', 'Quota fetch failed (usage pages unaffected)'],
+  quota_error: ['额度读取失败', 'Quota fetch failed'],
   today: ['今日', 'Today'],
   week: ['本周', 'This week'],
   month: ['本月', 'This month'],
@@ -64,8 +145,6 @@ const STR = {
   messages: ['次请求', 'msgs'],
   cost_est: ['~$', '~$'],
   no_data: ['暂无数据', 'No data'],
-  theme: ['主题', 'Theme'],
-  lang: ['语言', 'Lang'],
   loading: ['正在读取…', 'Loading…'],
   empty_quota: ['暂无配额数据', 'No quota data'],
   empty_trend: ['这段时间暂无用量', 'No usage in this range'],
@@ -79,8 +158,108 @@ const STR = {
   dim_agent: ['Agent', 'Agent'],
   dim_session: ['会话', 'Session'],
   dim_project: ['项目', 'Project'],
+  dim_model: ['模型', 'Model'],
   sources: ['数据源', 'Sources'],
   missing: ['未接入', 'Not connected'],
+  settings_kicker: ['偏好设置', 'PREFERENCES'],
+  settings_appearance: ['外观', 'Appearance'],
+  settings_language: ['界面语言', 'Language'],
+  settings_theme: ['主题', 'Theme'],
+  settings_theme_hint: ['跟随 Windows 外观', 'Follows your Windows look'],
+  theme_system: ['跟随系统', 'System'],
+  theme_light: ['浅色', 'Light'],
+  theme_dark: ['深色', 'Dark'],
+  theme_ink: ['深海', 'Midnight'],
+  theme_sand: ['暖纸', 'Warm paper'],
+  theme_quick: ['切换主题', 'Switch theme'],
+  settings_type: ['字体与布局', 'Type & layout'],
+  settings_font: ['字体风格', 'Typeface'],
+  font_plex: ['Plex 现代终端', 'Plex modern terminal'],
+  font_pixel: ['复古像素', 'Retro pixel'],
+  font_system: ['清晰字体', 'Clear type'],
+  settings_density: ['信息密度', 'Density'],
+  density_comfortable: ['舒展', 'Comfortable'],
+  density_compact: ['紧凑', 'Compact'],
+  settings_motion: ['动态效果', 'Motion'],
+  motion_system: ['跟随系统', 'Follow system'],
+  motion_reduce: ['减少动态', 'Reduce motion'],
+  settings_plan: ['套餐基准', 'Plan benchmark'],
+  settings_plan_hint: ['非实际省下的钱', 'Not actual cash saved'],
+  settings_monthly: ['每月套餐费用', 'Monthly plan cost'],
+  settings_default: ['默认基准', 'Default benchmark'],
+  settings_save: ['保存', 'Save'],
+  settings_saved: ['已保存', 'Saved'],
+  settings_invalid_price: ['请输入 0.01 到 1,000,000 美元之间的金额。', 'Enter an amount from $0.01 to $1,000,000.'],
+  settings_font_sample: ['用量一目了然', 'Usage at a glance'],
+  settings_reset_all: ['恢复外观默认值', 'Reset appearance'],
+  quota_overview: ['额度总览', 'Quota overview'],
+  quota_attention: ['需要关注', 'Needs attention'],
+  quota_all_clear: ['当前额度充足', 'Quotas look healthy'],
+  quota_unavailable: ['暂无可用额度', 'No live quotas'],
+  quota_used: ['已用', 'used'],
+  quota_remaining: ['剩余', 'remaining'],
+  quota_next_reset: ['最近重置', 'Next reset'],
+  source_health: ['本机数据源', 'Local sources'],
+  source_ready: ['有记录', 'Active'],
+  source_idle: ['暂无记录', 'No records'],
+  source_error: ['读取失败', 'Read failed'],
+  freshness_quota: ['服务额度', 'Service quotas'],
+  freshness_local: ['本机用量', 'Local usage'],
+  freshness_waiting: ['等待首次读取', 'Waiting for first read'],
+  freshness_stale: ['数据已过期', 'Data is stale'],
+  freshness_last_success: ['上次成功', 'Last success'],
+  activity_vs_average: ['7 日均值', '7-day avg'],
+  activity_at_least_average: ['≥ 7 日均值', '≥ 7-day avg'],
+  activity_today: ['本机今日活动', 'Local activity today'],
+  settings_desktop: ['桌面常驻', 'Desktop presence'],
+  settings_desktop_hint: ['关闭后驻留系统托盘', 'Keeps running in the tray'],
+  settings_quit: ['退出应用', 'Quit app'],
+  settings_notifications: ['额度通知', 'Quota alerts'],
+  settings_notifications_hint: ['80% / 100% / 重置时通知', 'Alerts at 80%, 100% and reset'],
+  settings_pace_alerts: ['耗尽预测提醒', 'Pace forecast alerts'],
+  settings_pace_alerts_hint: ['预测将提前耗尽时提醒', 'Alerts when a forecast turns early-exhaust'],
+  settings_close_behavior: ['关闭窗口时', 'When closing the window'],
+  settings_close_tray: ['留在托盘', 'Stay in tray'],
+  settings_close_exit: ['退出应用', 'Quit app'],
+  settings_shortcut: ['全局显隐快捷键', 'Global show/hide shortcut'],
+  settings_shortcut_hint: ['Ctrl+Alt+U 全局呼出', 'Toggle from anywhere with Ctrl+Alt+U'],
+  settings_autostart: ['登录 Windows 时启动', 'Start when signing into Windows'],
+  settings_autostart_hint: ['为当前 Windows 用户添加启动项', 'Adds a startup entry for this Windows user'],
+  settings_go_key: ['OpenCode Go 直连', 'OpenCode Go direct access'],
+  settings_go_key_hint: ['密钥存入 Windows 凭据管理器', 'Stored in Windows Credential Manager'],
+  settings_go_key_stored: ['已保存专用密钥', 'Dedicated key saved'],
+  settings_go_key_missing: ['未保存密钥 · 可用环境变量或登录态', 'No key saved · env vars or a login may work'],
+  settings_go_key_placeholder: ['粘贴 Go API key', 'Paste Go API key'],
+  settings_go_key_remove: ['移除密钥', 'Remove key'],
+  settings_go_key_failed: ['Windows 凭据管理器操作失败', 'Windows Credential Manager operation failed'],
+  settings_go_key_invalid: ['请输入不含空格的 API key', 'Enter an API key without spaces'],
+  settings_goat_key: ['Command Code GOAT 直连', 'Command Code GOAT direct access'],
+  settings_goat_key_hint: ['密钥存入 Windows 凭据管理器', 'Stored in Windows Credential Manager'],
+  settings_alerts_on: ['开启', 'On'],
+  settings_alerts_off: ['关闭', 'Off'],
+  settings_quiet_hours: ['夜间静默', 'Quiet hours'],
+  settings_quiet_hours_hint: ['22:00–08:00 不弹通知', 'No alerts from 22:00 to 08:00'],
+  source_location: ['默认读取位置', 'Default read location'],
+  source_diagnostic: ['采集状态', 'Collection status'],
+  source_ok_detail: ['本次读取成功', 'Read succeeded'],
+  source_no_records: ['无本机记录', 'No local records'],
+  export_title: ['导出本机账本', 'Export local ledger'],
+  export_hint: ['导出当前筛选下的逐日数据', 'Exports daily rows for the current filters'],
+  export_saved: ['文件已保存', 'File saved'],
+  export_error: ['导出失败，请重试', 'Export failed, please retry'],
+  export_unavailable: ['暂无可导出的数据', 'No data to export yet'],
+  cards_custom: ['配额卡片', 'Quota cards'],
+  cards_custom_hint: ['固定重要卡片、隐藏无关卡片，并调整各来源颜色', 'Pin key cards, hide irrelevant cards, and set provider colors'],
+  card_pin: ['固定', 'Pin'],
+  card_unpin: ['取消固定', 'Unpin'],
+  card_hide: ['隐藏', 'Hide'],
+  card_show: ['显示', 'Show'],
+  cards_restore: ['恢复卡片默认设置', 'Reset cards'],
+  welcome_title: ['欢迎使用 Token Monitor', 'Welcome to Token Monitor'],
+  welcome_intro: ['已检测本机来源与服务额度。', 'Local sources and service quotas have been checked.'],
+  welcome_done: ['开始使用', 'Get started'],
+  welcome_reopen: ['重新检测来源', 'Review sources'],
+  welcome_repair: ['查看修复方法', 'How to fix'],
 };
 
 /* ---------------- 工具 ---------------- */
@@ -136,7 +315,7 @@ function fmtClock(ms) {
 
 /* ---------------- 大数字点阵 ---------------- */
 
-function DotMatrix({ text, size = 42 }) {
+function DotMatrix({ text, size = 42, className = '' }) {
   // 5x7 点阵数字,方块字符用 CSS 网格渲染,保持 █░ 的审美
   const GLYPHS = {
     '0': ['01110','10001','10011','10101','11001','10001','01110'],
@@ -157,7 +336,7 @@ function DotMatrix({ text, size = 42 }) {
   const chars = String(text).split('');
   const cell = size / 7;
   return (
-    <div className="dotmatrix" style={{ '--cell': `${cell}px` }}>
+    <div className={`dotmatrix${className ? ` ${className}` : ''}`} style={{ '--cell': `${cell}px` }} role="img" aria-label={text}>
       {chars.map((ch, i) => {
         const g = GLYPHS[ch] || GLYPHS['0'];
         return (
@@ -171,6 +350,44 @@ function DotMatrix({ text, size = 42 }) {
         );
       })}
     </div>
+  );
+}
+
+function quotaPace(limit) {
+  const label = limit.label.toLowerCase();
+  const now = new Date();
+  let totalMs;
+  if (/5\s*h|5\s*hour|5\s*小时/.test(label)) totalMs = 5 * 3600_000;
+  else if (/7\s*d|7\s*day|week|周/.test(label)) totalMs = 7 * 86400_000;
+  else if (/month|月/.test(label)) totalMs = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime() - new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  else return null;
+  const resetMs = limit.resets_in_ms;
+  if (resetMs == null || resetMs <= 0 || resetMs >= totalMs || limit.used_pct < 5) return null;
+  const elapsed = totalMs - resetMs;
+  if (elapsed < totalMs * 0.1) return null;
+  if (limit.used_pct >= 100) return { eta: 'exhausted', delta: limit.used_pct - elapsed / totalMs * 100 };
+  const eta = elapsed * (100 - limit.used_pct) / limit.used_pct;
+  if (!Number.isFinite(eta) || eta <= 0) return null;
+  return { eta: eta < resetMs ? eta : 'sustainable', delta: limit.used_pct - elapsed / totalMs * 100 };
+}
+
+function ObservedDotMatrix({ value, size = 34, typeface = 'system' }) {
+  const previousValue = useRef(value);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (previousValue.current === value) return;
+    previousValue.current = value;
+    setRevision((current) => current + 1);
+  }, [value]);
+
+  if (typeface !== 'pixel') return <div className="stat-number">{fmtTokens(value)}</div>;
+  return (
+    <DotMatrix
+      key={revision}
+      text={fmtTokens(value)}
+      size={size}
+      className={revision > 0 ? 'dotmatrix-update' : ''}
+    />
   );
 }
 
@@ -199,47 +416,83 @@ function MiniBars({ agg }) {
 
 /* ---------------- 配额卡片 ---------------- */
 
-function QuotaCards({ cards, lang }) {
+const BAR_BLOCKS = 20;
+
+function BlockBar({ pct, color }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = clamped > 0 ? Math.max(1, Math.round(clamped / 100 * BAR_BLOCKS)) : 0;
+  return (
+    <div className="block-bar" style={{ '--bar-tone': color }} aria-hidden="true">
+      {Array.from({ length: BAR_BLOCKS }, (_, i) => (
+        <span key={i} className={`block-bar-cell${i < filled ? ' is-filled' : ''}`} />
+      ))}
+    </div>
+  );
+}
+
+function ProviderLogo({ provider }) {
+  const src = PROVIDER_LOGOS[provider];
+  if (!src) return <span className="quota-logo quota-logo-fallback" aria-hidden="true" />;
+  return <img className="quota-logo" src={src} alt="" aria-hidden="true" draggable="false" />;
+}
+
+function paceChipText(pace, lang) {
+  const zh = lang === 0;
+  if (pace.eta === 'sustainable') return zh ? '可撑到重置' : 'lasts to reset';
+  if (pace.eta === 'exhausted') return zh ? '已耗尽' : 'exhausted';
+  const d = Math.abs(pace.delta).toFixed(0);
+  const eta = `≈${fmtCountdown(pace.eta)}`;
+  return zh
+    ? `${pace.delta >= 0 ? '快' : '慢'} ${d}pt · ${eta} 后耗尽`
+    : `${d}pt ${pace.delta >= 0 ? 'ahead' : 'behind'} · ${eta} to empty`;
+}
+
+function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, onTogglePin, onToggleHidden }) {
   const t = (k) => STR[k][lang];
+  const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   return (
     <div className="quota-grid">
-      {cards.map((c) => {
-        const accent = PROVIDER_ACCENT[c.provider] || 'var(--color-text-primary)';
+      {ordered.filter((c) => !hiddenCards.includes(c.provider)).map((c) => {
+        const accent = providerColors[c.provider] || PROVIDER_ACCENT[c.provider] || 'var(--color-text-primary)';
+        const isActivity = c.method === 'activity_vs_average';
         return (
-          <Card key={c.provider} className="quota-card" role="group" aria-label={c.title}>
+          <Card key={c.provider} className={`quota-card${isActivity ? ' quota-card-activity' : ''}`} role="group" aria-label={c.title}>
             <div className="quota-head">
-              <span className="quota-dot" style={{ background: accent }} />
+              <ProviderLogo provider={c.provider} />
               <Text weight="medium" className="quota-title">{c.title}</Text>
+              <span className="quota-plan-type" title={c.kind === 'Live' && c.plan_type ? c.plan_type : undefined}>{c.kind === 'Live' ? c.plan_type || '' : ''}</span>
+              <div className="quota-card-actions">
+                <button type="button" aria-label={`${pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} ${c.title}`} title={pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} onClick={() => onTogglePin?.(c.provider)}>{pinnedCards.includes(c.provider) ? '◆' : '◇'}</button>
+                <button type="button" aria-label={`${t('card_hide')} ${c.title}`} title={t('card_hide')} onClick={() => onToggleHidden?.(c.provider)}>×</button>
+              </div>
             </div>
             {c.kind === 'Live' ? (
               <div className="quota-limits">
-                {c.limits.map((l) => (
+                {c.limits.length === 0 && <Text type="supporting" className="quota-missing-hint">{lang === 0 ? '暂无额度窗口' : 'No quota windows'}</Text>}
+                {c.limits.map((l) => {
+                  const pace = allowPace && !isActivity ? quotaPace(l) : null;
+                  const pct = Math.round(l.used_pct);
+                  return (
                   <div key={l.label} className="quota-limit">
                     <div className="quota-limit-row">
                       <span className="quota-limit-label">{l.label}</span>
-                      <span className="quota-limit-pct" style={{ color: STATUS_COLOR[l.status] }}>
-                        {l.used_pct >= 100 ? '100%' : `${Math.round(l.used_pct)}%`}
+                      <span className="quota-limit-pct" style={{ color: isActivity ? accent : STATUS_COLOR[l.status] }}>
+                        {isActivity
+                          ? (l.used_pct >= 100 ? t('activity_at_least_average') : `${pct}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}`)
+                          : l.used_pct >= 100 ? '100%' : `${pct}%`}
                       </span>
                     </div>
-                    <div className="quota-bar">
-                      <div
-                        className="quota-bar-fill"
-                        style={{
-                          width: `${Math.min(100, l.used_pct)}%`,
-                          background: STATUS_COLOR[l.status],
-                          transition: 'width 700ms cubic-bezier(0.22,1,0.36,1)',
-                        }}
-                      />
-                    </div>
+                    <BlockBar pct={l.used_pct} color={isActivity ? accent : STATUS_COLOR[l.status]} />
                     <div className="quota-limit-sub">
-                      {l.resets_in_ms != null ? `${t('resets_in')} ${fmtCountdown(l.resets_in_ms)}` : ' '}
+                      <span>{isActivity ? t('activity_today') : l.resets_in_ms != null ? `${t('resets_in')} ${fmtCountdown(l.resets_in_ms)}` : ' '}</span>
+                      {pace != null && <span className={`quota-pace${pace.eta !== 'sustainable' ? ' quota-pace-warning' : ''}`}>{paceChipText(pace, lang)}</span>}
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             ) : (
               <div className="quota-missing">
-                <Text variant="supporting" className="quota-missing-hint">{c.hint}</Text>
+                <Text type="supporting" className="quota-missing-hint">{QUOTA_HINT[c.provider]?.[lang] || c.hint}</Text>
               </div>
             )}
           </Card>
@@ -249,16 +502,64 @@ function QuotaCards({ cards, lang }) {
   );
 }
 
+function QuotaPage({ cards, sources, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
+  const t = (key) => STR[key][lang];
+  const [selectedSource, setSelectedSource] = useState(null);
+  const sourceDetail = sources?.find((source) => source.client === selectedSource);
+  const elapsed = quotaFetchedAtMs ? Math.max(0, now - quotaFetchedAtMs) : 0;
+  const currentCards = cards.map((card) => card.kind === 'Live' ? {
+    ...card,
+    limits: card.limits.map((limit) => ({ ...limit, resets_in_ms: limit.resets_in_ms == null ? null : Math.max(0, limit.resets_in_ms - elapsed) })),
+  } : card);
+  const live = currentCards.filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average' && !preferences.hiddenCards.includes(card.provider));
+  const limits = live.flatMap((card) => card.limits.map((limit) => ({ ...limit, provider: card.title.split(' ·')[0] })));
+  const tightest = limits.reduce((best, current) => !best || current.used_pct > best.used_pct ? current : best, null);
+  const nextReset = limits.filter((limit) => limit.resets_in_ms > 0).sort((a, b) => a.resets_in_ms - b.resets_in_ms)[0];
+  const attention = limits.filter((limit) => limit.status !== 'ok').length;
+  const pct = tightest ? Math.max(0, Math.min(100, tightest.used_pct)) : 0;
+  return <div className="quota-page">
+    <section className="quota-overview" aria-label={t('quota_overview')}>
+      <div className="quota-overview-copy">
+        <span className="eyebrow">// {t('quota_overview')}</span>
+        <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
+        <p>{tightest ? `${attention ? `${attention} ${t('quota_attention')}` : t('quota_all_clear')} · ${nextReset ? `${t('quota_next_reset')} ${fmtCountdown(nextReset.resets_in_ms)}` : '—'}` : t('empty_quota')}</p>
+      </div>
+      <div className="quota-overview-meter" style={{ '--quota-pct': `${pct}%`, '--quota-tone': STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)' }} aria-label={tightest ? `${Math.round(pct)}% ${t('quota_used')}` : undefined}>
+        <strong>{tightest ? `${Math.round(pct)}%` : '—'}</strong>
+        <span>{t('quota_used')}</span>
+      </div>
+    </section>
+    <QuotaCards cards={currentCards} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={preferences.hiddenCards} providerColors={preferences.providerColors} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} />
+    {preferences.hiddenCards.length > 0 && <button className="quota-hidden-link" type="button" onClick={onOpenSettings}>{lang === 0 ? `已隐藏 ${preferences.hiddenCards.length} 张卡片 · 在设置中恢复` : `${preferences.hiddenCards.length} hidden cards · restore in Settings`}</button>}
+    {sources?.length > 0 && <section className="source-section" aria-label={t('source_health')}>
+      <div className="source-heading"><h2>{t('source_health')}</h2></div>
+      <div className="source-grid">{sources.map((source) => {
+        const state = source.error ? 'error' : source.records > 0 ? 'ready' : 'idle';
+        return <button type="button" className={`source-item${selectedSource === source.client ? ' is-selected' : ''}`} key={source.client} onClick={() => setSelectedSource((current) => current === source.client ? null : source.client)} aria-expanded={selectedSource === source.client}>
+          <span className={`source-indicator source-indicator-${state}`} />
+          <span className="source-name">{source.label}</span>
+          <span className="source-count">{source.error ? t('source_error') : source.records > 0 ? `${fmtInt(source.records)} ${t('source_ready')}` : t('source_idle')}</span>
+        </button>;
+      })}</div>
+      {sourceDetail && <div className="source-detail" role="status">
+        <strong>{sourceDetail.label}</strong>
+        <span>{t('source_location')} · <code>{SOURCE_PATHS[sourceDetail.client] || '—'}</code></span>
+        <span>{t('source_diagnostic')} · {sourceDetail.error || (sourceDetail.records ? t('source_ok_detail') : t('source_no_records'))}</span>
+      </div>}
+    </section>}
+  </div>;
+}
+
 /* ---------------- 用量页 ---------------- */
 
 function tightestQuota(cards) {
   const limits = cards
-    .filter((card) => card.kind === 'Live' && card.provider !== 'antigravity')
+    .filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average')
     .flatMap((card) => card.limits.map((limit) => ({ provider: card.title.split(' ·')[0], ...limit })));
   return limits.sort((a, b) => b.used_pct - a.used_pct)[0] || null;
 }
 
-function UsagePage({ ledger, cards, lang }) {
+function UsagePage({ ledger, cards, monthlyValue, lang, onOpenSettings, typeface }) {
   const t = (k) => STR[k][lang];
   const [range, setRange] = useState('24h');
   const [metric, setMetric] = useState('tokens');
@@ -274,34 +575,56 @@ function UsagePage({ ledger, cards, lang }) {
   const periodLabel = (b) => range === '24h' ? fmtClock(b?.start_ms) : (b?.date?.slice(5) || '—');
   const quota = tightestQuota(cards || []);
   const recent = ledger.recent_by_agent?.[0];
+  const planBenchmark = monthlyValue?.list_price_benchmark_usd
+    ?? monthlyValue?.default_list_price_benchmark_usd
+    ?? 40;
+  const planBenchmarkIsCustom = monthlyValue?.benchmark_is_custom ?? false;
+  const planMultiple = monthlyValue && planBenchmark > 0
+    ? monthlyValue.month_api_equivalent_usd / planBenchmark
+    : 0;
+  const planLabel = planBenchmarkIsCustom
+    ? (lang === 0 ? '我的月费' : 'my plan/mo')
+    : (lang === 0 ? '月基准' : 'list/mo');
+  const monthUnpriced = monthlyValue && ledger.month.total > 0 && monthlyValue.month_api_equivalent_usd <= 0;
+  const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const monthUnpricedCount = (ledger.analysis_rows || []).filter((row) => row.date.startsWith(currentMonth)).reduce((count, row) => count + row.unpriced_messages, 0);
   const selected = !hasTrend || selectedBucket == null ? null : series[selectedBucket];
   const legend = [...new Set(series.flatMap((b) => (b.per_client || []).map(([client]) => client)))];
 
   const dimRows =
     dim === 'agent' ? ledger.by_agent.map((a) => ({ label: a.label, color: CLIENT_COLORS[a.client] || 'var(--color-text-secondary)', agg: a.agg, key: a.client }))
     : dim === 'session' ? ledger.by_session.map((s) => ({ label: s.session, color: CLIENT_COLORS[s.client] || 'var(--color-text-secondary)', agg: s.agg, key: `${s.client}:${s.session}` }))
+    : dim === 'model' ? ledger.by_model.map((m) => ({
+      label: m.model,
+      clients: m.clients || [],
+      color: 'var(--color-text-blue)',
+      agg: m.agg,
+      key: m.model,
+      isModel: true,
+    }))
     : ledger.by_project.map((p) => ({ label: p.project, color: 'var(--color-text-secondary)', agg: p.agg, key: p.project }));
 
   const dimTotal = dimRows.reduce((s, r) => s + r.agg.total, 0) || 1;
 
   return (
     <div className="usage-page">
+      <Suspense fallback={<Card className="analysis-panel"><Text type="supporting">{t('loading')}</Text></Card>}><AnalysisPanel ledger={ledger} lang={lang} /></Suspense>
       <Card className="now-card">
         <div className="now-main">
-          <Text variant="supporting">{t('now')} · {t('recent_hour')}</Text>
+          <Text type="supporting">{t('now')} · {t('recent_hour')}</Text>
           <strong>{recent ? `${recent.label} ${fmtTokens(recent.agg.total)}` : t('no_data')}</strong>
           <span className="now-sub">{ledger.burn_rate != null ? `${Math.round(ledger.burn_rate)} ${t('burn_unit')}` : '—'}</span>
         </div>
         <div className="now-quota">
-          <Text variant="supporting">{t('quota')}</Text>
+          <Text type="supporting">{t('quota')}</Text>
           <strong>{quota ? `${quota.provider} ${Math.round(quota.used_pct)}%` : '—'}</strong>
           <span className="now-sub">{quota?.label || ''}</span>
         </div>
       </Card>
       <div className="stat-row">
         <Card className="stat-card">
-          <Text variant="supporting">{t('today')}</Text>
-          <DotMatrix text={fmtTokens(ledger.today.total)} size={34} />
+          <Text type="supporting">{t('today')}</Text>
+          <ObservedDotMatrix value={ledger.today.total} typeface={typeface} />
           <div className="stat-sub">
             <span>{fmtCost(ledger.today.cost)}</span>
             <span>·</span>
@@ -310,18 +633,38 @@ function UsagePage({ ledger, cards, lang }) {
           <MiniBars agg={ledger.today} />
         </Card>
         <Card className="stat-card">
-          <Text variant="supporting">{t('week')}</Text>
-          <DotMatrix text={fmtTokens(ledger.week.total)} size={34} />
+          <Text type="supporting">{t('week')}</Text>
+          <ObservedDotMatrix value={ledger.week.total} typeface={typeface} />
           <div className="stat-sub">
             <span>{fmtCost(ledger.week.cost)}</span>
           </div>
         </Card>
         <Card className="stat-card">
-          <Text variant="supporting">{t('month')}</Text>
-          <DotMatrix text={fmtTokens(ledger.month.total)} size={34} />
-          <div className="stat-sub">
-            <span>{fmtCost(ledger.month.cost)}</span>
+          <Text type="supporting">{t('month')}</Text>
+          <ObservedDotMatrix value={ledger.month.total} typeface={typeface} />
+          <div className="stat-sub monthly-value-sub">
+            {monthlyValue ? (
+              <>
+                <span className="monthly-value-readout">
+                  {monthUnpriced
+                    ? `API— · —×${fmtCost(planBenchmark)} ${planLabel}`
+                    : `API≈${fmtCost(monthlyValue.month_api_equivalent_usd)} · ${planMultiple.toFixed(2)}×${fmtCost(planBenchmark)} ${planLabel}`}
+                </span>
+                <button
+                  className="plan-benchmark-edit"
+                  type="button"
+                  onClick={onOpenSettings}
+                  aria-label={lang === 0 ? '打开设置修改每月套餐费用' : 'Open settings to edit monthly plan cost'}
+                  title={lang === 0 ? '在设置中修改月费' : 'Edit monthly cost in Settings'}
+                >
+                  {lang === 0 ? '设置' : 'Settings'}
+                </button>
+              </>
+            ) : <span>{fmtCost(ledger.month.cost)}</span>}
           </div>
+          {monthlyValue && monthUnpricedCount > 0 && <div className="price-provenance">
+            <span className="cost-partial">{lang === 0 ? `${monthUnpricedCount} 条缺价` : `${monthUnpricedCount} unpriced`}</span>
+          </div>}
         </Card>
       </div>
 
@@ -330,26 +673,26 @@ function UsagePage({ ledger, cards, lang }) {
           <Text weight="medium">{range === '24h' ? t('range_24h') : t('range_14d')}</Text>
           <div className="trend-controls">
             <SegmentedControl
-              size="small"
+              size="sm"
+              label={lang === 0 ? '趋势时间范围' : 'Trend range'}
               value={range}
               onChange={(next) => { setRange(next); setSelectedBucket(null); }}
-              options={[
-                { label: t('range_24h'), value: '24h' },
-                { label: t('range_14d'), value: '14d' },
-              ]}
-            />
+            >
+              <SegmentedControlItem label={t('range_24h')} value="24h" />
+              <SegmentedControlItem label={t('range_14d')} value="14d" />
+            </SegmentedControl>
             <SegmentedControl
-              size="small"
+              size="sm"
+              label={lang === 0 ? '趋势数值' : 'Trend metric'}
               value={metric}
               onChange={(next) => { setMetric(next); setSelectedBucket(null); }}
-              options={[
-                { label: t('metric_tokens'), value: 'tokens' },
-                { label: t('metric_cost'), value: 'cost' },
-              ]}
-            />
+            >
+              <SegmentedControlItem label={t('metric_tokens')} value="tokens" />
+              <SegmentedControlItem label={t('metric_cost')} value="cost" />
+            </SegmentedControl>
           </div>
         </div>
-        {!hasTrend ? <Text variant="supporting">{metric === 'cost' ? t('no_data') : t('empty_trend')}</Text> : <div className="trend-chart">
+        {!hasTrend ? <Text type="supporting">{metric === 'cost' ? t('no_data') : t('empty_trend')}</Text> : <div className="trend-chart">
           {series.map((b, i) => {
             const v = value(b);
             const h = Math.max(v > 0 ? 3 : 0, (v / maxV) * 100);
@@ -385,7 +728,7 @@ function UsagePage({ ledger, cards, lang }) {
         {hasTrend && metric === 'tokens' && legend.length > 0 && <div className="trend-legend">
           {legend.map((client) => <span key={client}><i style={{ background: CLIENT_COLORS[client] || 'var(--color-text-secondary)' }} />{client}</span>)}
         </div>}
-        {hasTrend && metric === 'cost' && <Text variant="supporting">{t('aggregate')}</Text>}
+        {hasTrend && metric === 'cost' && <Text type="supporting">{t('aggregate')}</Text>}
         {selected && <div className="trend-detail">
           <strong>{periodLabel(selected)} · {metric === 'tokens' ? fmtTokens(selected.agg.total) : fmtCost(selected.agg.cost)}</strong>
           <span>{(selected.per_client || []).slice(0, 3).map(([client, agg]) => `${client} ${metric === 'tokens' ? fmtTokens(agg.total) : fmtCost(agg.cost)}`).join(' · ')}</span>
@@ -395,27 +738,36 @@ function UsagePage({ ledger, cards, lang }) {
       <div className="usage-columns">
         <Card className="dim-card">
           <div className="trend-toolbar">
-            <Text weight="medium">{t('by_agent')} · 30d</Text>
+            <Text weight="medium">
+              {dim === 'agent' ? t('by_agent') : dim === 'session' ? t('by_session') : dim === 'project' ? t('by_project') : t('by_model')} · 30d
+            </Text>
             <SegmentedControl
-              size="small"
+              size="sm"
+              label={lang === 0 ? '用量拆分维度' : 'Usage dimension'}
               value={dim}
               onChange={setDim}
-              options={[
-                { label: t('dim_agent'), value: 'agent' },
-                { label: t('dim_session'), value: 'session' },
-                { label: t('dim_project'), value: 'project' },
-              ]}
-            />
+            >
+              <SegmentedControlItem label={t('dim_agent')} value="agent" />
+              <SegmentedControlItem label={t('dim_session')} value="session" />
+              <SegmentedControlItem label={t('dim_project')} value="project" />
+              <SegmentedControlItem label={t('dim_model')} value="model" />
+            </SegmentedControl>
           </div>
           <div className="dim-rows">
-            {dimRows.slice(0, 12).map((r) => (
+            {dimRows.length === 0 ? <Text type="supporting">{t('no_data')}</Text> : dimRows.map((r) => (
               <div key={r.key} className="dim-row">
                 <span className="dim-dot" style={{ background: r.color }} />
-                <span className="dim-label" title={r.label}>{r.label}</span>
+                <span
+                  className="dim-label"
+                  title={r.isModel ? `${r.label} · ${(r.clients || []).join(', ')}` : r.label}
+                  aria-label={r.isModel ? `${r.label}, ${(r.clients || []).join(', ')}` : r.label}
+                >{r.label}</span>
                 <div className="dim-bar">
                   <div className="dim-bar-fill" style={{ width: `${(r.agg.total / dimTotal) * 100}%`, background: r.color }} />
                 </div>
-                <span className="dim-value">{fmtTokens(r.agg.total)}</span>
+                <span className={`dim-value${r.isModel ? ' dim-model-value' : ''}`} title={r.isModel ? `${fmtInt(r.agg.total)} tokens` : undefined}>
+                  {r.isModel ? fmtInt(r.agg.total) : fmtTokens(r.agg.total)}
+                </span>
               </div>
             ))}
           </div>
@@ -424,7 +776,7 @@ function UsagePage({ ledger, cards, lang }) {
         <Card className="recent-card">
           <Text weight="medium">{t('recent_hour')}</Text>
           {ledger.recent_by_agent.length === 0 ? (
-            <Text variant="supporting">{t('no_data')}</Text>
+            <Text type="supporting">{t('no_data')}</Text>
           ) : (
             <div className="dim-rows">
               {ledger.recent_by_agent.map((r) => (
@@ -461,6 +813,280 @@ function heatLevel(tokens) {
   return 4;
 }
 
+function SettingsChoice({ label, value, onChange, options }) {
+  return (
+    <div className={`settings-choice${options.length > 3 ? ' settings-choice-many' : ''}`} role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          className={`settings-choice-option${value === option.value ? ' is-selected' : ''}`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.icon && <span className={`settings-choice-icon ${option.icon}`} aria-hidden="true" />}
+          <span>{option.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SettingsSection({ title, hint, children, className = '' }) {
+  return (
+    <section className={`settings-card ${className}`}>
+      <header className="settings-card-heading">
+        <div>
+          <h2>{title}</h2>
+          {hint && <p>{hint}</p>}
+        </div>
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function SettingsRow({ title, hint, children, className = '' }) {
+  return (
+    <div className={`settings-row ${className}`}>
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{title}</div>
+        {hint && <div className="settings-row-hint">{hint}</div>}
+      </div>
+      <div className="settings-row-control">{children}</div>
+    </div>
+  );
+}
+
+function SettingsPage({ lang, preferences, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey }) {
+  const t = (key) => STR[key][lang];
+  const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
+  const [benchmarkOverride, setBenchmarkOverride] = useState(null);
+  const [planDraft, setPlanDraft] = useState(initialBenchmark.toFixed(2));
+  const [planError, setPlanError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [goKeyDraft, setGoKeyDraft] = useState('');
+  const [goKeyError, setGoKeyError] = useState('');
+  const [goatKeyDraft, setGoatKeyDraft] = useState('');
+  const [goatKeyError, setGoatKeyError] = useState('');
+  const saveGoKey = (event) => {
+    event.preventDefault();
+    const key = goKeyDraft.trim();
+    if (!key || /\s/.test(key)) { setGoKeyError(t('settings_go_key_invalid')); return; }
+    onSaveGoKey(key);
+    setGoKeyDraft('');
+    setGoKeyError('');
+  };
+  const saveGoatKey = (event) => {
+    event.preventDefault();
+    const key = goatKeyDraft.trim();
+    if (!key || /\s/.test(key)) { setGoatKeyError(t('settings_go_key_invalid')); return; }
+    onSaveGoatKey(key);
+    setGoatKeyDraft('');
+    setGoatKeyError('');
+  };
+  useEffect(() => {
+    setBenchmarkOverride(null);
+    setPlanDraft(initialBenchmark.toFixed(2));
+  }, [initialBenchmark]);
+
+  const benchmark = benchmarkOverride?.amount ?? initialBenchmark;
+  const isCustom = benchmarkOverride?.isCustom ?? monthlyValue?.benchmark_is_custom ?? false;
+  const saveBenchmark = (event) => {
+    event.preventDefault();
+    const amount = Number(planDraft);
+    if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) {
+      setPlanError(t('settings_invalid_price'));
+      setSaved(false);
+      return;
+    }
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setPlanBenchmark', amount }));
+    setBenchmarkOverride({ amount, isCustom: true });
+    setPlanError('');
+    setSaved(true);
+  };
+  const resetBenchmark = () => {
+    const amount = monthlyValue?.default_list_price_benchmark_usd ?? 40;
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'resetPlanBenchmark' }));
+    setBenchmarkOverride({ amount, isCustom: false });
+    setPlanDraft(amount.toFixed(2));
+    setPlanError('');
+    setSaved(true);
+  };
+
+  return (
+    <div className="settings-page">
+      <header className="settings-intro">
+        <Text type="supporting" className="settings-kicker">{t('settings_kicker')}</Text>
+        <h1>{t('nav_settings')}</h1>
+      </header>
+
+      <div className="settings-grid">
+        <SettingsSection title={t('settings_appearance')} className="settings-appearance">
+          <SettingsRow title={t('settings_language')}>
+            <SettingsChoice
+              label={t('settings_language')}
+              value={lang}
+              onChange={(value) => onPreferenceChange('lang', value)}
+              options={[{ value: 0, label: '中文' }, { value: 1, label: 'English' }]}
+            />
+          </SettingsRow>
+          <SettingsRow title={t('settings_theme')} hint={t('settings_theme_hint')}>
+            <SettingsChoice
+              label={t('settings_theme')}
+              value={preferences.theme}
+              onChange={(value) => onPreferenceChange('theme', value)}
+              options={[
+                { value: 'system', label: t('theme_system'), icon: 'theme-icon-system' },
+                { value: 'light', label: t('theme_light'), icon: 'theme-icon-light' },
+                { value: 'dark', label: t('theme_dark'), icon: 'theme-icon-dark' },
+                { value: 'ink', label: t('theme_ink'), icon: 'theme-icon-ink' },
+                { value: 'sand', label: t('theme_sand'), icon: 'theme-icon-sand' },
+              ]}
+            />
+          </SettingsRow>
+          <div className="settings-theme-preview" aria-hidden="true">
+            <span className="settings-preview-window"><i /><i /><i /><b /><b /><b /></span>
+            <span className="settings-preview-copy"><strong>{t('settings_font_sample')}</strong><small>12,480 tokens · $3.84</small></span>
+            <span className="settings-preview-spark" />
+          </div>
+        </SettingsSection>
+
+        <div className="settings-column">
+          <SettingsSection title={t('settings_go_key')} hint={t('settings_go_key_hint')} className="settings-go-key">
+            <p className="settings-go-key-status">{goKeyStored ? t('settings_go_key_stored') : t('settings_go_key_missing')}</p>
+            <form className="settings-go-key-form" onSubmit={saveGoKey}>
+              <input type="password" autoComplete="off" spellCheck="false" value={goKeyDraft} onChange={(event) => { setGoKeyDraft(event.target.value); setGoKeyError(''); }} placeholder={t('settings_go_key_placeholder')} aria-label={t('settings_go_key_placeholder')} />
+              <button className="settings-save" type="submit">{t('settings_save')}</button>
+              <button className="settings-reset" type="button" disabled={!goKeyStored} onClick={onDeleteGoKey}>{t('settings_go_key_remove')}</button>
+            </form>
+            {(goKeyError || goKeyFeedback) && <p className="settings-form-error" role="status">{goKeyError || goKeyFeedback}</p>}
+          </SettingsSection>
+          <SettingsSection title={t('settings_goat_key')} hint={t('settings_goat_key_hint')} className="settings-go-key">
+            <p className="settings-go-key-status">{goatKeyStored ? t('settings_go_key_stored') : (lang === 0 ? '尚未保存专用密钥；仍可读取环境变量或 cmdc 登录态。' : 'No dedicated key saved; an environment variable or cmdc login may still work.')}</p>
+            <form className="settings-go-key-form" onSubmit={saveGoatKey}>
+              <input type="password" autoComplete="off" spellCheck="false" value={goatKeyDraft} onChange={(event) => { setGoatKeyDraft(event.target.value); setGoatKeyError(''); }} placeholder="Command Code API key" aria-label={`${t('settings_goat_key')} API key`} />
+              <button className="settings-save" type="submit">{t('settings_save')}</button>
+              <button className="settings-reset" type="button" disabled={!goatKeyStored} onClick={onDeleteGoatKey}>{t('settings_go_key_remove')}</button>
+            </form>
+            {(goatKeyError || goatKeyFeedback) && <p className="settings-form-error" role="status">{goatKeyError || goatKeyFeedback}</p>}
+          </SettingsSection>
+          <SettingsSection title={t('settings_type')} className="settings-type">
+            <SettingsRow title={t('settings_font')}>
+              <SettingsChoice
+                label={t('settings_font')}
+                value={preferences.typeface}
+                onChange={(value) => onPreferenceChange('typeface', value)}
+                options={[
+                  { value: 'plex', label: t('font_plex') },
+                  { value: 'system', label: t('font_system') },
+                  { value: 'pixel', label: t('font_pixel') },
+                ]}
+              />
+            </SettingsRow>
+            <div className={`settings-font-sample${preferences.typeface === 'pixel' ? ' is-pixel' : preferences.typeface === 'plex' ? ' is-plex' : ''}`}>
+              <span className="settings-font-sample-label">TYPE SPECIMEN · 16</span>
+              <div className="settings-font-sample-en">Token usage, at a glance</div>
+              <div className="settings-font-sample-zh">令牌用量，一目了然</div>
+              <div className="settings-font-sample-numbers">12,480 tokens · $3.84</div>
+            </div>
+            <SettingsRow title={t('settings_density')}>
+              <SettingsChoice
+                label={t('settings_density')}
+                value={preferences.density}
+                onChange={(value) => onPreferenceChange('density', value)}
+                options={[
+                  { value: 'comfortable', label: t('density_comfortable') },
+                  { value: 'compact', label: t('density_compact') },
+                ]}
+              />
+            </SettingsRow>
+            <SettingsRow title={t('settings_motion')}>
+              <SettingsChoice
+                label={t('settings_motion')}
+                value={preferences.motion}
+                onChange={(value) => onPreferenceChange('motion', value)}
+                options={[
+                  { value: 'system', label: t('motion_system') },
+                  { value: 'reduced', label: t('motion_reduce') },
+                ]}
+              />
+            </SettingsRow>
+          </SettingsSection>
+
+          <SettingsSection title={t('settings_plan')} hint={t('settings_plan_hint')} className="settings-plan">
+            <form className="settings-plan-form" onSubmit={saveBenchmark}>
+              <label htmlFor="settings-plan-input">{t('settings_monthly')}</label>
+              <div className="settings-plan-input-wrap">
+                <span>$</span>
+                <input
+                  id="settings-plan-input"
+                  type="number"
+                  min="0.01"
+                  max="1000000"
+                  step="0.01"
+                  required
+                  value={planDraft}
+                  onChange={(event) => { setPlanDraft(event.target.value); setSaved(false); setPlanError(''); }}
+                  aria-label={`${t('settings_monthly')} (USD)`}
+                />
+                <span className="settings-plan-period">/ mo</span>
+              </div>
+              <div className="settings-plan-actions">
+                <button className="settings-save" type="submit">{saved ? t('settings_saved') : t('settings_save')}</button>
+                <button className="settings-reset" type="button" onClick={resetBenchmark} disabled={!isCustom}>{t('settings_default')}</button>
+              </div>
+              {planError && <p className="settings-form-error" role="alert">{planError}</p>}
+            </form>
+            <div className="settings-plan-note">
+              <span className="settings-plan-note-dot" />
+              {isCustom ? `${t('settings_monthly')}: ${fmtCost(benchmark)}` : `${t('settings_default')}: ${fmtCost(benchmark)}`}
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title={t('settings_desktop')} hint={t('settings_desktop_hint')} className="settings-desktop">
+            <SettingsRow title={t('settings_close_behavior')}>
+              <SettingsChoice label={t('settings_close_behavior')} value={preferences.closeBehavior} onChange={(value) => onPreferenceChange('closeBehavior', value)} options={[{ value: 'tray', label: t('settings_close_tray') }, { value: 'exit', label: t('settings_close_exit') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_shortcut')} hint={t('settings_shortcut_hint')}>
+              <SettingsChoice label={t('settings_shortcut')} value={preferences.globalShortcut} onChange={(value) => onPreferenceChange('globalShortcut', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_autostart')} hint={t('settings_autostart_hint')}>
+              <SettingsChoice label={t('settings_autostart')} value={preferences.autostart} onChange={(value) => onPreferenceChange('autostart', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            {nativeError && <p className="settings-form-error" role="alert">{nativeError}</p>}
+            <SettingsRow title={t('settings_notifications')} hint={t('settings_notifications_hint')}>
+              <SettingsChoice label={t('settings_notifications')} value={preferences.notifications} onChange={(value) => onPreferenceChange('notifications', value)} options={[{ value: 'on', label: t('settings_alerts_on') }, { value: 'off', label: t('settings_alerts_off') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_pace_alerts')} hint={t('settings_pace_alerts_hint')}>
+              <SettingsChoice label={t('settings_pace_alerts')} value={preferences.paceAlerts} onChange={(value) => onPreferenceChange('paceAlerts', value)} options={[{ value: true, label: t('settings_alerts_on') }, { value: false, label: t('settings_alerts_off') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_quiet_hours')} hint={t('settings_quiet_hours_hint')}>
+              <SettingsChoice label={t('settings_quiet_hours')} value={preferences.quietHours} onChange={(value) => onPreferenceChange('quietHours', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            <button type="button" className="settings-quit" onClick={() => window.ipc?.postMessage?.(JSON.stringify({ cmd: 'quit' }))}>{t('settings_quit')}</button>
+          </SettingsSection>
+
+          <SettingsSection title={t('cards_custom')} hint={t('cards_custom_hint')} className="settings-cards">
+            {PROVIDERS.map((provider) => <div className="settings-provider-row" key={provider}>
+              <span>{provider}</span>
+              <label><span>{lang === 0 ? '颜色' : 'Color'}</span><input type="color" aria-label={`${provider} ${lang === 0 ? '颜色' : 'color'}`} value={preferences.providerColors[provider] || PROVIDER_COLOR_DEFAULTS[provider]} onChange={(event) => onPreferenceChange('providerColors', { ...preferences.providerColors, [provider]: event.target.value })} /></label>
+              <button type="button" onClick={() => onPreferenceChange('pinnedCards', preferences.pinnedCards.includes(provider) ? preferences.pinnedCards.filter((item) => item !== provider) : [...preferences.pinnedCards, provider])}>{preferences.pinnedCards.includes(provider) ? t('card_unpin') : t('card_pin')}</button>
+              <button type="button" onClick={() => onPreferenceChange('hiddenCards', preferences.hiddenCards.includes(provider) ? preferences.hiddenCards.filter((item) => item !== provider) : [...preferences.hiddenCards, provider])}>{preferences.hiddenCards.includes(provider) ? t('card_show') : t('card_hide')}</button>
+            </div>)}
+            <div className="settings-card-footer"><button type="button" onClick={onResetCards}>{t('cards_restore')}</button><button type="button" onClick={onShowWelcome}>{t('welcome_reopen')}</button></div>
+          </SettingsSection>
+
+          <div className="settings-footer">
+            <span>Token Monitor <span className="settings-footer-dot">·</span> v0.1</span>
+            <button type="button" onClick={onResetAppearance}>{t('settings_reset_all')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HeatmapPage({ ledger, lang }) {
   const t = (k) => STR[k][lang];
   const [sel, setSel] = useState(null);
@@ -476,8 +1102,8 @@ function HeatmapPage({ ledger, lang }) {
 
   return (
     <div className="heat-page">
-      {totals.every((day) => day.tokens <= 0) ? <Card className="empty-card"><Text variant="supporting">{t('no_data')}</Text></Card> : <Card className="heat-card">
-        <div className="heat-weeks" role="group" aria-label={t('nav_heat')}>
+      {totals.every((day) => day.tokens <= 0) ? <Card className="heat-empty empty-card"><Text type="supporting">{t('no_data')}</Text></Card> : <Card className="heat-card">
+        <div className="heat-weeks" role="group" aria-label={t('nav_heat')} style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}>
           {weeks.map((w, wi) => (
             <div key={wi} className="heat-col">
               {w.map((d, di) =>
@@ -508,7 +1134,7 @@ function HeatmapPage({ ledger, lang }) {
         <Card className="heat-detail">
           <div className="trend-toolbar">
             <Text weight="medium">{sel}</Text>
-            {selTotal && <Text variant="supporting">{fmtTokens(selTotal.tokens)} · {fmtCost(selTotal.cost)}</Text>}
+            {selTotal && <Text type="supporting">{fmtTokens(selTotal.tokens)} · {fmtCost(selTotal.cost)}</Text>}
           </div>
           {detail ? (
             <div className="dim-rows">
@@ -522,7 +1148,7 @@ function HeatmapPage({ ledger, lang }) {
               ))}
             </div>
           ) : (
-            <Text variant="supporting">{t('no_data')}</Text>
+            <Text type="supporting">{t('no_data')}</Text>
           )}
         </Card>
       )}
@@ -532,27 +1158,211 @@ function HeatmapPage({ ledger, lang }) {
 
 /* ---------------- App ---------------- */
 
+function SourceWelcome({ data, lang, onDone }) {
+  const t = (key) => STR[key][lang];
+  const firstButton = useRef(null);
+  useEffect(() => { firstButton.current?.focus(); }, []);
+  const sources = data.ledger?.sources || [];
+  const cards = data.cards || [];
+  return <div className="welcome-backdrop"><section className="welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div className="welcome-head"><div><span className="eyebrow">TOKEN MONITOR</span><h1 id="welcome-title">{t('welcome_title')}</h1><p>{t('welcome_intro')}</p></div><button ref={firstButton} type="button" onClick={onDone} aria-label={t('welcome_done')}>×</button></div>
+    <h2>{t('freshness_quota')}</h2>
+    <div className="welcome-source-list">{cards.map((card) => <div className="welcome-source" key={card.provider}>
+      <div><span className={`source-indicator source-indicator-${card.kind === 'Live' ? 'ready' : 'error'}`} /><strong>{card.title}</strong><span>{card.kind === 'Live' ? t('source_ready') : t('missing')}</span></div>
+      <a href={`#repair-quota-${card.provider}`} className="welcome-repair-link" onClick={(event) => { event.preventDefault(); event.currentTarget.nextElementSibling.open = true; }}>{t('welcome_repair')}</a>
+      <details id={`repair-quota-${card.provider}`}><summary>{lang === 0 ? '修复步骤' : 'Repair steps'}</summary><p>{QUOTA_REPAIR[card.provider]?.[lang] || card.hint}</p></details>
+    </div>)}</div>
+    <h2>{t('freshness_local')}</h2>
+    <div className="welcome-source-list">{sources.map((source) => <div className="welcome-source" key={source.client}>
+      <div><span className={`source-indicator source-indicator-${source.error ? 'error' : source.records > 0 ? 'ready' : 'idle'}`} /><strong>{source.label}</strong><span>{source.error ? t('source_error') : source.records ? `${source.records} ${t('source_ready')}` : t('source_idle')}</span></div>
+      <small>{SOURCE_PATHS[source.client]}</small>
+      <a href={`#repair-local-${source.client}`} className="welcome-repair-link" onClick={(event) => { event.preventDefault(); event.currentTarget.nextElementSibling.open = true; }}>{t('welcome_repair')}</a>
+      <details id={`repair-local-${source.client}`}><summary>{lang === 0 ? '修复步骤' : 'Repair steps'}</summary><p>{SOURCE_REPAIR[source.client]?.[lang]}</p>{source.error && <p>{source.error}</p>}</details>
+    </div>)}</div>
+    <button className="welcome-done" type="button" onClick={onDone}>{t('welcome_done')}</button>
+  </section></div>;
+}
+
+const GUI_PREFERENCES_KEY = 'token-monitor.gui-preferences.v1';
+const WELCOME_DONE_KEY = 'token-monitor.welcome-done.v1';
+const THEME_ORDER = ['system', 'light', 'dark', 'ink', 'sand'];
+const DEFAULT_GUI_PREFERENCES = {
+  lang: 0,
+  theme: 'system',
+  typeface: 'plex',
+  density: 'comfortable',
+  motion: 'system',
+  notifications: 'on',
+  paceAlerts: false,
+  quietHours: false,
+  closeBehavior: 'tray',
+  globalShortcut: false,
+  autostart: false,
+  pinnedCards: [],
+  hiddenCards: [],
+  providerColors: {},
+};
+
+function readGuiPreferences() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(GUI_PREFERENCES_KEY) || '{}');
+    return {
+      lang: stored.lang === 1 ? 1 : 0,
+      theme: THEME_ORDER.includes(stored.theme) ? stored.theme : DEFAULT_GUI_PREFERENCES.theme,
+      typeface: ['plex', 'pixel', 'system'].includes(stored.typeface) ? stored.typeface : DEFAULT_GUI_PREFERENCES.typeface,
+      density: ['comfortable', 'compact'].includes(stored.density) ? stored.density : DEFAULT_GUI_PREFERENCES.density,
+      motion: ['system', 'reduced'].includes(stored.motion) ? stored.motion : DEFAULT_GUI_PREFERENCES.motion,
+      notifications: ['on', 'off'].includes(stored.notifications) ? stored.notifications : DEFAULT_GUI_PREFERENCES.notifications,
+      paceAlerts: stored.paceAlerts === true,
+      quietHours: stored.quietHours === true,
+      closeBehavior: ['tray', 'exit'].includes(stored.closeBehavior) ? stored.closeBehavior : 'tray',
+      globalShortcut: stored.globalShortcut === true,
+      autostart: stored.autostart === true,
+      pinnedCards: Array.isArray(stored.pinnedCards) ? stored.pinnedCards.filter((item) => PROVIDERS.includes(item)) : [],
+      hiddenCards: Array.isArray(stored.hiddenCards) ? stored.hiddenCards.filter((item) => PROVIDERS.includes(item)) : [],
+      providerColors: Object.fromEntries(Object.entries(stored.providerColors || {}).filter(([key, value]) => PROVIDERS.includes(key) && /^#[0-9a-fA-F]{6}$/.test(value))),
+    };
+  } catch {
+    return DEFAULT_GUI_PREFERENCES;
+  }
+}
+
 function App() {
-  const [lang, setLang] = useState(0);
+  const [preferences, setPreferences] = useState(readGuiPreferences);
+  const [showWelcome, setShowWelcome] = useState(() => { try { return window.localStorage.getItem(WELCOME_DONE_KEY) !== '1'; } catch { return true; } });
+  const [nativeError, setNativeError] = useState('');
+  const [goKeyStored, setGoKeyStored] = useState(false);
+  const [goKeyFeedback, setGoKeyFeedback] = useState('');
+  const [goatKeyStored, setGoatKeyStored] = useState(false);
+  const [goatKeyFeedback, setGoatKeyFeedback] = useState('');
+  const lang = preferences.lang;
   const [page, setPage] = useState('quota');
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(Date.now);
   const dataRef = useRef(null);
+  const refreshRequestedAt = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     window.__onPush = (payload) => {
       dataRef.current = payload;
       setData(payload);
-      setRefreshing(false);
+      if (!refreshRequestedAt.current || (payload.fetched_at_ms >= refreshRequestedAt.current && payload.quota_checked_at_ms >= refreshRequestedAt.current)) {
+        refreshRequestedAt.current = 0;
+        setRefreshing(false);
+      }
     };
-    return () => { delete window.__onPush; };
+    window.__showSettings = () => setPage('settings');
+    window.__onNativeState = (state) => {
+      setGoKeyStored(!!state.goKeyStored);
+      setGoatKeyStored(!!state.goatKeyStored);
+      setPreferences((current) => {
+        const next = { ...current, autostart: !!state.autostart };
+        try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* local preference only */ }
+        return next;
+      });
+    };
+    window.__onAutostartResult = (success) => {
+      if (!success) {
+        setNativeError('Windows 启动项写入失败 / Failed to update Windows startup');
+        window.ipc?.postMessage?.(JSON.stringify({ cmd: 'queryNativePreferences' }));
+      } else setNativeError('');
+    };
+    window.__onGoKeyResult = ({ success, stored }) => {
+      setGoKeyStored(!!stored);
+      setGoKeyFeedback(success ? '' : STR.settings_go_key_failed[readGuiPreferences().lang]);
+    };
+    window.__onGoatKeyResult = ({ success, stored }) => {
+      setGoatKeyStored(!!stored);
+      setGoatKeyFeedback(success ? '' : STR.settings_go_key_failed[readGuiPreferences().lang]);
+    };
+    window.__onShortcutStatus = (available) => {
+      if (!available) {
+        setNativeError('Ctrl+Alt+U 已被其他应用占用 / Ctrl+Alt+U is already in use');
+        setPreferences((current) => {
+          const next = { ...current, globalShortcut: false };
+          try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* local preference only */ }
+          return next;
+        });
+      } else setNativeError('');
+    };
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'queryNativePreferences' }));
+    return () => { delete window.__onPush; delete window.__showSettings; delete window.__onNativeState; delete window.__onAutostartResult; delete window.__onGoKeyResult; delete window.__onGoatKeyResult; delete window.__onShortcutStatus; };
   }, []);
 
   const refresh = useCallback(() => {
+    refreshRequestedAt.current = Date.now();
     setRefreshing(true);
     // wry 在 WebView2 上注入 window.ipc.postMessage(见 wry webview2/mod.rs 注入脚本)
     window.ipc?.postMessage?.(JSON.stringify({ cmd: 'refresh' }));
   }, []);
+
+  const updatePreference = useCallback((key, value) => {
+    if (key === 'autostart') window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setAutostart', autostart: value }));
+    setPreferences((current) => {
+      const next = { ...current, [key]: value };
+      try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* Preferences stay available for this session. */ }
+      return next;
+    });
+  }, []);
+
+  const resetAppearance = useCallback(() => {
+    setPreferences((current) => {
+      const next = { ...DEFAULT_GUI_PREFERENCES, notifications: current.notifications, paceAlerts: current.paceAlerts, quietHours: current.quietHours, closeBehavior: current.closeBehavior, globalShortcut: current.globalShortcut, autostart: current.autostart, pinnedCards: current.pinnedCards, hiddenCards: current.hiddenCards, providerColors: current.providerColors };
+      try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* Preferences stay available for this session. */ }
+      return next;
+    });
+  }, []);
+
+  const resetCards = useCallback(() => {
+    setPreferences((current) => {
+      const next = { ...current, pinnedCards: [], hiddenCards: [], providerColors: {} };
+      try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* local preference only */ }
+      return next;
+    });
+  }, []);
+
+  const dismissWelcome = useCallback(() => {
+    setShowWelcome(false);
+    try { window.localStorage.setItem(WELCOME_DONE_KEY, '1'); } catch { /* session only */ }
+  }, []);
+
+  const toggleCard = useCallback((key, provider) => {
+    setPreferences((current) => {
+      const values = current[key].includes(provider) ? current[key].filter((item) => item !== provider) : [...current[key], provider];
+      const next = { ...current, [key]: values };
+      try { window.localStorage.setItem(GUI_PREFERENCES_KEY, JSON.stringify(next)); } catch { /* local preference only */ }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setNotifications', enabled: preferences.notifications === 'on', paceAlerts: preferences.paceAlerts, quietHours: preferences.quietHours, lang: preferences.lang }));
+  }, [preferences.notifications, preferences.paceAlerts, preferences.quietHours, preferences.lang]);
+
+  useEffect(() => {
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setCloseBehavior', closeBehavior: preferences.closeBehavior }));
+  }, [preferences.closeBehavior]);
+
+  useEffect(() => {
+    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setGlobalShortcut', globalShortcut: preferences.globalShortcut }));
+  }, [preferences.globalShortcut]);
+
+  const cycleTheme = useCallback(() => {
+    const index = THEME_ORDER.indexOf(preferences.theme);
+    updatePreference('theme', THEME_ORDER[(index + 1) % THEME_ORDER.length]);
+  }, [preferences.theme, updatePreference]);
+
+  useLayoutEffect(() => {
+    if (preferences.theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = ['dark', 'ink'].includes(preferences.theme) ? 'dark' : 'light';
+    document.documentElement.lang = lang === 0 ? 'zh-CN' : 'en';
+  }, [preferences.theme, lang]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -561,49 +1371,70 @@ function App() {
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
       else if (event.key === '3') setPage('heat');
+      else if (event.key === '4') setPage('settings');
       else if (event.key.toLowerCase() === 'r' && !refreshing) refresh();
+      else if (event.key.toLowerCase() === 'p') cycleTheme();
       else return;
       event.preventDefault();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [refresh, refreshing]);
+  }, [refresh, refreshing, cycleTheme]);
 
   const t = useCallback((k) => STR[k][lang], [lang]);
 
-  const now = Date.now();
   const age = data ? Math.floor((now - data.fetched_at_ms) / 1000) : null;
+  const quotaAge = data?.quota_fetched_at_ms ? now - data.quota_fetched_at_ms : null;
+  const ledgerAge = data?.fetched_at_ms ? now - data.fetched_at_ms : null;
+  const quotaStale = data && (data.quotaError || quotaAge == null || quotaAge > 120_000);
+  const ledgerStale = data && (ledgerAge == null || ledgerAge > 20_000);
+  const pageContent = page === 'settings' ? (
+    <SettingsPage
+      lang={lang}
+      preferences={preferences}
+      onPreferenceChange={updatePreference}
+      onResetAppearance={resetAppearance}
+      onResetCards={resetCards}
+      onShowWelcome={() => setShowWelcome(true)}
+      nativeError={nativeError}
+      goKeyStored={goKeyStored}
+      goKeyFeedback={goKeyFeedback}
+      onSaveGoKey={(goApiKey) => { setGoKeyFeedback(''); window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setGoApiKey', goApiKey })); }}
+      onDeleteGoKey={() => { setGoKeyFeedback(''); window.ipc?.postMessage?.(JSON.stringify({ cmd: 'deleteGoApiKey' })); }}
+      goatKeyStored={goatKeyStored}
+      goatKeyFeedback={goatKeyFeedback}
+      onSaveGoatKey={(goatApiKey) => { setGoatKeyFeedback(''); window.ipc?.postMessage?.(JSON.stringify({ cmd: 'setGoatApiKey', goatApiKey })); }}
+      onDeleteGoatKey={() => { setGoatKeyFeedback(''); window.ipc?.postMessage?.(JSON.stringify({ cmd: 'deleteGoatApiKey' })); }}
+      monthlyValue={data?.monthly_value}
+    />
+  ) : data ? (
+    <>
+      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'usage' && <UsagePage ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} typeface={preferences.typeface} onOpenSettings={() => setPage('settings')} />}
+      {page === 'heat' && <HeatmapPage ledger={data.ledger} lang={lang} />}
+    </>
+  ) : null;
 
   return (
-    <div className="app" data-astryx-theme="neutral">
+    <div
+      className="app"
+      data-astryx-theme="neutral"
+      data-language={lang === 0 ? 'zh' : 'en'}
+      data-typeface={preferences.typeface}
+      data-palette={preferences.theme}
+      data-density={preferences.density}
+      data-motion={preferences.motion}
+    >
       <aside className="sidebar">
         <div className="sidebar-title">
           <span className="logo-block" />
           <Text weight="medium">{t('title')}</Text>
         </div>
-        <nav className="sidebar-nav">
-          {[
-            ['quota', t('nav_quota')],
-            ['usage', t('nav_usage')],
-            ['heat', t('nav_heat')],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              className={`nav-item${page === k ? ' nav-item-active' : ''}`}
-              onClick={() => setPage(k)}
-              aria-current={page === k ? 'page' : undefined}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="desktop" />
         <div className="sidebar-foot">
-          <Button size="small" variant="secondary" onClick={() => setLang((l) => 1 - l)}>
-            {lang === 0 ? 'EN' : '中文'}
-          </Button>
           <div className="sidebar-status">
             {refreshing ? (
-              <><Spinner size="small" /> <span>{t('refreshing')}</span></>
+              <><Spinner size="sm" /> <span>{t('refreshing')}</span></>
             ) : (
               <span className="sidebar-age">
                 {t('updated')} {age != null ? fmtRel(age * 1000) : '—'}
@@ -615,23 +1446,33 @@ function App() {
 
       <main className="main">
         <div className="main-toolbar">
-          <Text weight="medium" className="page-title">{t(page === 'quota' ? 'nav_quota' : page === 'usage' ? 'nav_usage' : 'nav_heat')}</Text>
+          <Text weight="medium" className="page-title">{t(page === 'quota' ? 'nav_quota' : page === 'usage' ? 'nav_usage' : page === 'heat' ? 'nav_heat' : 'nav_settings')}</Text>
           <div className="main-toolbar-spacer" />
-          <Button size="small" onClick={refresh} disabled={refreshing}>
+          <button className="toolbar-theme" type="button" onClick={cycleTheme} title={`${t('theme_quick')} (P)`} aria-label={`${t('theme_quick')}: ${t(`theme_${preferences.theme}`)}`}>
+            <span className={`toolbar-theme-swatch toolbar-theme-${preferences.theme}`} aria-hidden="true" />
+            <span>{t(`theme_${preferences.theme}`)}</span>
+          </button>
+          <Button size="sm" onClick={refresh} disabled={refreshing}>
             {t('refresh')}
           </Button>
         </div>
-        {data?.quotaError && (
+        {page !== 'settings' && data && <div className="freshness-strip" role="status">
+          <span className={quotaStale ? 'freshness-badge is-stale' : 'freshness-badge'} title={data.quota_fetched_at_ms ? new Date(data.quota_fetched_at_ms).toLocaleString() : undefined}><i />{t('freshness_quota')} · {quotaStale && `${t('freshness_stale')} · `}{quotaAge == null ? t('freshness_waiting') : `${t('freshness_last_success')} ${fmtRel(quotaAge)}`}</span>
+          <span className={ledgerStale ? 'freshness-badge is-stale' : 'freshness-badge'} title={data.fetched_at_ms ? new Date(data.fetched_at_ms).toLocaleString() : undefined}><i />{t('freshness_local')} · {ledgerStale && `${t('freshness_stale')} · `}{ledgerAge == null ? t('freshness_waiting') : `${t('freshness_last_success')} ${fmtRel(ledgerAge)}`}</span>
+        </div>}
+        {page !== 'settings' && data?.quotaError && (
           <div className="banner-error">
             <Toast kind="error">{t('quota_error')}: {data.quotaError}</Toast>
           </div>
         )}
-        {!data ? <Card className="empty-card" role="status"><Spinner size="small" /> <Text variant="supporting">{t('loading')}</Text></Card> : <>
-          {page === 'quota' && (data.cards?.length ? <QuotaCards cards={data.cards} lang={lang} /> : <Card className="empty-card"><Text variant="supporting">{t('empty_quota')}</Text></Card>)}
-          {page === 'usage' && <UsagePage ledger={data.ledger} cards={data.cards} lang={lang} />}
-          {page === 'heat' && <HeatmapPage ledger={data.ledger} lang={lang} />}
-        </>}
+        {page !== 'settings' && !data ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (
+          <Suspense fallback={<div className="page-content">{pageContent}</div>}>
+            <PageTransition page={page} reduceMotion={preferences.motion === 'reduced'}>{pageContent}</PageTransition>
+          </Suspense>
+        )}
       </main>
+      <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="mobile" />
+      {showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome data={data} lang={lang} onDone={dismissWelcome} />}
     </div>
   );
 }
