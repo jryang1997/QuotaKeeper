@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use tui_token_monitor::ledger::{self, Agg};
 use tui_token_monitor::model::{self, Card, Snapshot};
+use tui_token_monitor::settings;
 
 #[derive(Serialize)]
 pub struct AggDto {
@@ -54,12 +55,16 @@ pub enum CardDto {
         provider: &'static str,
         title: &'static str,
         plan_type: String,
+        source: &'static str,
+        method: &'static str,
         limits: Vec<LimitDto>,
     },
     Missing {
         provider: &'static str,
         title: &'static str,
         hint: &'static str,
+        source: &'static str,
+        method: &'static str,
     },
 }
 
@@ -79,6 +84,17 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                 provider: provider_slug(r.provider),
                 title: r.provider.title(),
                 plan_type: r.plan_type.clone(),
+                source: r.source.label(),
+                method: match r.provider {
+                    model::ProviderId::OpenCodeGo | model::ProviderId::Codex => "provider_fraction",
+                    model::ProviderId::Goat => "goat_credits",
+                    model::ProviderId::Antigravity
+                        if r.source == model::QuotaSource::CpaGoogleQuota =>
+                    {
+                        "provider_fraction"
+                    }
+                    model::ProviderId::Antigravity => "activity_vs_average",
+                },
                 limits: r
                     .limits
                     .iter()
@@ -94,6 +110,13 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                 provider: provider_slug(*provider),
                 title: provider.title(),
                 hint: provider.missing_hint(),
+                source: match provider {
+                    model::ProviderId::OpenCodeGo => "OpenCode Go 官方 usage API · 可选 OMP 兜底",
+                    model::ProviderId::Codex => "Codex 官方 app-server · 可选旧接口/OMP 兜底",
+                    model::ProviderId::Goat => "Command Code billing API",
+                    model::ProviderId::Antigravity => "CPA 管理接口 · 可代查 Google 上游配额",
+                },
+                method: "unavailable",
             },
         })
         .collect()
@@ -122,6 +145,13 @@ pub struct AgentRowDto {
     pub label: &'static str,
     pub agg: AggDto,
     pub models: Vec<(String, AggDto)>,
+}
+
+#[derive(Serialize)]
+pub struct ModelRowDto {
+    pub model: String,
+    pub clients: Vec<&'static str>,
+    pub agg: AggDto,
 }
 
 #[derive(Serialize)]
@@ -154,6 +184,15 @@ pub struct DailyTotalDto {
 }
 
 #[derive(Serialize)]
+pub struct AnalysisRowDto {
+    pub date: String,
+    pub client: &'static str,
+    pub project: Option<String>,
+    pub agg: AggDto,
+    pub unpriced_messages: u64,
+}
+
+#[derive(Serialize)]
 pub struct SessionRowDto {
     pub client: &'static str,
     pub label: &'static str,
@@ -178,12 +217,14 @@ pub struct LedgerDto {
     pub week: AggDto,
     pub month: AggDto,
     pub by_agent: Vec<AgentRowDto>,
+    pub by_model: Vec<ModelRowDto>,
     pub recent_by_agent: Vec<RecentAgentDto>,
     pub last_activity_ms: Option<i64>,
     pub trend_24h: Vec<TrendBucketDto>,
     pub by_day: Vec<DayRowDto>,
     pub daily_totals: Vec<DailyTotalDto>,
     pub daily_detail: HashMap<String, Vec<(&'static str, AggDto)>>,
+    pub analysis_rows: Vec<AnalysisRowDto>,
     pub hourly: Vec<i64>,
     pub weekday: Vec<i64>,
     pub by_session: Vec<SessionRowDto>,
@@ -196,11 +237,42 @@ pub struct LedgerDto {
 #[derive(Serialize)]
 pub struct PushDto {
     pub fetched_at_ms: u64,
+    pub quota_fetched_at_ms: u64,
+    pub quota_checked_at_ms: u64,
     #[serde(rename = "quotaError")]
     /// quota 拉取失败原因;None = 正常。
     pub quota_error: Option<String>,
     pub cards: Vec<CardDto>,
+    pub monthly_value: MonthlyValueDto,
     pub ledger: LedgerDto,
+}
+
+#[derive(Serialize)]
+pub struct MonthlyValueDto {
+    pub month_api_equivalent_usd: f64,
+    pub default_list_price_benchmark_usd: f64,
+    pub list_price_benchmark_usd: f64,
+    pub list_price_multiple: f64,
+    pub benchmark_is_custom: bool,
+    pub reported_usd: f64,
+    pub estimated_usd: f64,
+}
+
+fn monthly_value_dto(r: &ledger::LedgerReport) -> MonthlyValueDto {
+    let month_api_equivalent_usd = r.month.cost();
+    let benchmark = settings::monthly_plan_benchmark();
+    MonthlyValueDto {
+        month_api_equivalent_usd,
+        default_list_price_benchmark_usd: model::LIST_PRICE_BENCHMARK_MONTHLY_USD,
+        list_price_benchmark_usd: benchmark.monthly_usd,
+        list_price_multiple: model::api_equivalent_vs_monthly_plan_multiple(
+            month_api_equivalent_usd,
+            benchmark.monthly_usd,
+        ),
+        benchmark_is_custom: benchmark.is_custom,
+        reported_usd: r.month.cost_reported,
+        estimated_usd: r.month.cost_estimated,
+    }
 }
 
 pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
@@ -230,6 +302,19 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                     .iter()
                     .map(|(m, g)| (m.clone(), agg_dto(g)))
                     .collect(),
+            })
+            .collect(),
+        by_model: r
+            .by_model
+            .iter()
+            .map(|m| ModelRowDto {
+                model: m.model.clone(),
+                clients: m
+                    .clients
+                    .iter()
+                    .map(|client| ledger::types::client_label(client))
+                    .collect(),
+                agg: agg_dto(&m.agg),
             })
             .collect(),
         recent_by_agent: r
@@ -282,6 +367,17 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                 )
             })
             .collect(),
+        analysis_rows: r
+            .analysis_rows
+            .iter()
+            .map(|row| AnalysisRowDto {
+                date: row.date.clone(),
+                client: row.client,
+                project: row.project.clone(),
+                agg: agg_dto(&row.agg),
+                unpriced_messages: row.unpriced_messages,
+            })
+            .collect(),
         hourly: r.hourly.to_vec(),
         weekday: r.weekday.to_vec(),
         by_session: r
@@ -313,14 +409,19 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
 
 pub fn push(
     fetched_at_ms: u64,
+    quota_fetched_at_ms: u64,
+    quota_checked_at_ms: u64,
     quota_error: Option<String>,
     snap: &Snapshot,
     rep: &ledger::LedgerReport,
 ) -> String {
     serde_json::to_string(&PushDto {
         fetched_at_ms,
+        quota_fetched_at_ms,
+        quota_checked_at_ms,
         quota_error,
         cards: cards(snap),
+        monthly_value: monthly_value_dto(rep),
         ledger: ledger_dto(rep),
     })
     .unwrap_or_else(|_| {
@@ -338,12 +439,45 @@ mod tests {
     fn push_serializes_full_payload() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
-        let s = push(123, None, &snap, &rep);
+        let s = push(123, 120, 122, None, &snap, &rep);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["cards"].as_array().unwrap().len(), 4);
+        assert_eq!(v["quota_fetched_at_ms"], 120);
+        assert_eq!(v["quota_checked_at_ms"], 122);
         assert!(v["ledger"]["today"]["total"].is_i64());
         assert!(v["ledger"]["trend_24h"].as_array().unwrap().len() == 24);
         assert!(v["ledger"]["daily_totals"].as_array().unwrap().len() > 100);
+        let benchmark = settings::monthly_plan_benchmark();
+        assert_eq!(
+            v["monthly_value"]["default_list_price_benchmark_usd"],
+            model::LIST_PRICE_BENCHMARK_MONTHLY_USD
+        );
+        assert_eq!(
+            v["monthly_value"]["list_price_benchmark_usd"],
+            benchmark.monthly_usd
+        );
+        assert_eq!(
+            v["monthly_value"]["benchmark_is_custom"],
+            benchmark.is_custom
+        );
+        let month_api_equivalent_usd = v["monthly_value"]["month_api_equivalent_usd"]
+            .as_f64()
+            .unwrap();
+        assert!((month_api_equivalent_usd - rep.month.cost()).abs() < 1e-9);
+        let list_price_multiple = v["monthly_value"]["list_price_multiple"].as_f64().unwrap();
+        assert!(
+            (list_price_multiple
+                - model::api_equivalent_vs_monthly_plan_multiple(
+                    rep.month.cost(),
+                    benchmark.monthly_usd,
+                ))
+            .abs()
+                < 1e-9
+        );
+        let reported_usd = v["monthly_value"]["reported_usd"].as_f64().unwrap();
+        assert!((reported_usd - rep.month.cost_reported).abs() < 1e-9);
+        let estimated_usd = v["monthly_value"]["estimated_usd"].as_f64().unwrap();
+        assert!((estimated_usd - rep.month.cost_estimated).abs() < 1e-9);
     }
 
     #[test]
@@ -351,7 +485,7 @@ mod tests {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
         let v: serde_json::Value =
-            serde_json::from_str(&push(1, Some("omp down".into()), &snap, &rep)).unwrap();
+            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep)).unwrap();
         assert_eq!(v["quotaError"], "omp down");
     }
 }

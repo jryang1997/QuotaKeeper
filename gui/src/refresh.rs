@@ -1,19 +1,37 @@
 //! 刷新引擎:GUI 侧后台采集,复用主 crate 的 backend/goat/ledger。
 //!
-//! 与 TUI main.rs 的 spawn_refresh 同构:一次带回 quota(可失败)与
-//! ledger(单源错误记录在案),经 mpsc 回传,主线程经 IPC 推给 WebView。
+//! 配额与用量分开采集,经 mpsc 回传,主线程合并最新快照后推给 WebView。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, goat, ledger, model};
+use tui_token_monitor::{backend, ledger, model};
 
 use model::Snapshot;
 
 pub struct Refreshed {
     pub fetched_at_ms: u64,
-    pub quota: Result<Snapshot, String>,
-    pub ledger: Box<ledger::LedgerReport>,
+    pub quota: Option<Result<Snapshot, String>>,
+    pub ledger: Option<Box<ledger::LedgerReport>>,
+}
+
+static QUOTA_RUNNING: AtomicBool = AtomicBool::new(false);
+static QUOTA_RERUN: AtomicBool = AtomicBool::new(false);
+static LEDGER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct RefreshGuard(&'static AtomicBool);
+
+impl Drop for RefreshGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn acquire(flag: &'static AtomicBool) -> Option<RefreshGuard> {
+    flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .ok()
+        .map(|_| RefreshGuard(flag))
 }
 
 pub fn now_ms() -> u64 {
@@ -23,43 +41,57 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 采集一次。放在独立线程池线程执行,避免占用事件循环。
+/// 刷新按钮和首次启动时,并行刷新用量与配额。
 pub fn spawn(tx: mpsc::Sender<Refreshed>) {
+    spawn_quota(tx.clone());
+    spawn_ledger(tx);
+}
+
+/// 配额服务请求较慢,单独限频,避免跟随用量轮询频繁访问。
+pub fn spawn_quota(tx: mpsc::Sender<Refreshed>) {
+    let Some(guard) = acquire(&QUOTA_RUNNING) else {
+        QUOTA_RERUN.store(true, Ordering::Release);
+        return;
+    };
     std::thread::spawn(move || {
-        let t = std::thread::spawn(backend::fetch_snapshot);
-        let goat_rep = goat::fetch_report().ok();
-        let quota = match t
-            .join()
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("OMP 采集线程 panic")))
-        {
-            Ok(mut snap) => {
-                if let Some(r) = goat_rep
-                    && let Some(slot) = snap.cards.iter_mut().find(|c| {
-                        matches!(
-                            c,
-                            model::Card::Missing {
-                                provider: model::ProviderId::Goat
-                            }
-                        )
-                    })
-                {
-                    *slot = model::Card::Live(r);
-                }
-                Ok(snap)
+        loop {
+            let quota = backend::fetch_snapshot().map_err(|e| e.to_string());
+            let _ = tx.send(Refreshed {
+                fetched_at_ms: now_ms(),
+                quota: Some(quota),
+                ledger: None,
+            });
+            if !QUOTA_RERUN.swap(false, Ordering::AcqRel) {
+                break;
             }
-            Err(e) => Err(e.to_string()),
-        };
+        }
+        drop(guard);
+        if QUOTA_RERUN.swap(false, Ordering::AcqRel) {
+            spawn_quota(tx);
+        }
+    });
+}
+
+/// 本地用量数据支持快速轮询,独立于配额请求运行。
+pub fn spawn_ledger(tx: mpsc::Sender<Refreshed>) {
+    let Some(guard) = acquire(&LEDGER_RUNNING) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let _guard = guard;
         let rep = ledger::collect(chrono::Local::now());
         let _ = tx.send(Refreshed {
             fetched_at_ms: now_ms(),
-            quota,
-            ledger: Box::new(rep),
+            quota: None,
+            ledger: Some(Box::new(rep)),
         });
     });
 }
 
-/// 刷新节拍:60s 周期,由主循环按 next_refresh 驱动(GUI 侧沿用 TUI 语义)。
-pub const PERIOD: Duration = Duration::from_secs(60);
+/// 本地文件与 SQLite 轮询节拍。
+pub const LEDGER_PERIOD: Duration = Duration::from_secs(5);
+/// 配额刷新节拍,避免高频请求远端服务。
+pub const QUOTA_PERIOD: Duration = Duration::from_secs(60);
 
 pub fn is_due(next: Instant) -> bool {
     Instant::now() >= next

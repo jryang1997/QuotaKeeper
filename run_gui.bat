@@ -12,5 +12,10 @@ if not exist "%EXE%" (
   pause
   exit /b 1
 )
+if not exist "gui\target\x86_64-pc-windows-gnu\release\WebView2Loader.dll" (
+  echo [!] 缺少 WebView2Loader.dll，请重新运行 GUI Release 构建。
+  pause
+  exit /b 1
+)
 start "" "%EXE%"
 exit /b 0
