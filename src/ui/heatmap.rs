@@ -452,7 +452,9 @@ mod tests {
             date: "x".into(),
             tokens: 1,
             cost: 0.5,
+            messages: 2,
         };
         assert_eq!(d.tokens, 1);
+        assert_eq!(d.messages, 2);
     }
 }

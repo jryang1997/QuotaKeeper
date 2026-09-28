@@ -71,6 +71,8 @@ pub struct DailyTotal {
     pub date: String,
     pub tokens: i64,
     pub cost: f64,
+    /// 当日请求数(GUI 月度 RUNS minibar 用;TUI 热力图不消费).
+    pub messages: u64,
 }
 
 /// 可筛选的每日账本。保留来源和项目维度，供任意日期分析及导出使用。
@@ -106,6 +108,8 @@ pub struct LedgerReport {
     pub today: Agg,
     pub week: Agg,
     pub month: Agg,
+    /// 当月按 client 聚合,token 降序,只含有数据的(GUI 套餐卡「MONTHLY」行).
+    pub month_by_client: Vec<(&'static str, Agg)>,
     /// 近 30 天按 agent,总量降序,只含有数据的.
     pub by_agent: Vec<AgentRow>,
     /// 近 30 天按模型,总量降序,同名模型跨 Agent 合并.
@@ -127,6 +131,8 @@ pub struct LedgerReport {
     pub hourly: [i64; 24],
     /// 近 30 天按星期(周一=0)的 token 合计.
     pub weekday: [i64; 7],
+    /// 近 30 天「星期×小时」token 矩阵(周一=0 行,0-23 列;面板 punchcard 用).
+    pub weekday_hour: [[i64; 24]; 7],
     /// 近 30 天会话维度,按最后活跃降序,最多 40 条.
     pub by_session: Vec<SessionRow>,
     /// 近 30 天项目维度,按总量降序,最多 20 条.
@@ -287,10 +293,12 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut today_agg = Agg::default();
     let mut week_agg = Agg::default();
     let mut month_agg = Agg::default();
+    let mut month_by_client_raw: HashMap<&'static str, Agg> = HashMap::new();
     let mut by_agent_raw: HashMap<&'static str, (Agg, HashMap<String, Agg>)> = HashMap::new();
     let mut by_day_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
     let mut hourly = [0i64; 24];
     let mut weekday = [0i64; 7];
+    let mut weekday_hour = [[0i64; 24]; 7];
     let mut recent60 = 0i64; // 近 60 分钟 token 合计(燃烧率)
     let now_ms = now.timestamp_millis();
     let recent60_since = now_ms - 3_600_000;
@@ -349,6 +357,10 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         }
         if date_str.starts_with(&month_prefix) {
             month_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
+            month_by_client_raw
+                .entry(r.client)
+                .or_default()
+                .add(&r.tokens, r.cost, r.cost_is_estimate);
         }
         if date >= today - Duration::days(29) && date <= today {
             let entry = by_agent_raw.entry(r.client).or_default();
@@ -358,10 +370,14 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 .entry(r.model.clone())
                 .or_default()
                 .add(&r.tokens, r.cost, r.cost_is_estimate);
-            // 时段分布(本地小时 / 星期)
+            // 时段分布(本地小时 / 星期 / 星期×小时 punchcard)
             let local = ts.with_timezone(&Local);
-            hourly[local.hour() as usize] += r.tokens.total();
-            weekday[local.weekday().num_days_from_monday() as usize] += r.tokens.total();
+            let hour_idx = local.hour() as usize;
+            let weekday_idx = local.weekday().num_days_from_monday() as usize;
+            let total = r.tokens.total();
+            hourly[hour_idx] += total;
+            weekday[weekday_idx] += total;
+            weekday_hour[weekday_idx][hour_idx] += total;
             // 会话 / 项目维度
             if let Some(s) = &r.session {
                 let e = session_raw.entry((r.client, s.clone())).or_default();
@@ -528,6 +544,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
             date: date_str.clone(),
             tokens: sum.total(),
             cost: sum.cost(),
+            messages: sum.messages,
         });
         if sum.total() > 0 {
             daily_detail.insert(date_str, detail);
@@ -581,11 +598,15 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     analysis_rows
         .sort_by(|a, b| (&a.date, a.client, &a.project).cmp(&(&b.date, b.client, &b.project)));
 
+    let mut month_by_client: Vec<(&'static str, Agg)> = month_by_client_raw.into_iter().collect();
+    month_by_client.sort_by(|a, b| b.1.total().cmp(&a.1.total()));
+
     LedgerReport {
         sources: Vec::new(),
         today: today_agg,
         week: week_agg,
         month: month_agg,
+        month_by_client,
         by_agent,
         by_model,
         recent_by_agent,
@@ -597,6 +618,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         analysis_rows,
         hourly,
         weekday,
+        weekday_hour,
         by_session,
         by_project,
         burn_rate: if recent60 > 0 {
@@ -760,6 +782,24 @@ mod tests {
         assert_eq!(rep.today.input, 1);
         assert_eq!(rep.week.input, 11);
         assert_eq!(rep.month.input, 111);
+        // 当月按 client 拆分:codex 1、omp 10、dsh 100;上月记录(8/20、8/1)不入月账.
+        assert_eq!(rep.month_by_client.len(), 3);
+        let by = |client: &str| {
+            rep.month_by_client
+                .iter()
+                .find(|(c, _)| *c == client)
+                .map(|(_, agg)| agg.input)
+                .unwrap()
+        };
+        assert_eq!(by("codex"), 1);
+        assert_eq!(by("omp"), 10);
+        assert_eq!(by("dsh"), 100);
+        // punchcard 矩阵:9/25=周五(4) 9 点=1、9/24=周四(3)=10、9/1=周二(1)=100;30 天外的 8/20、8/1 不入格.
+        assert_eq!(rep.weekday_hour[4][9], 1);
+        assert_eq!(rep.weekday_hour[3][9], 10);
+        assert_eq!(rep.weekday_hour[1][9], 100);
+        assert_eq!(rep.weekday_hour[0][9], 0);
+        assert_eq!(rep.weekday_hour[4].iter().sum::<i64>(), 1);
         // 30 天窗口含 8-20(36 天前?)— 8/20 距 9/25 是 36 天,应被排除
         assert_eq!(
             rep.by_agent.iter().map(|a| a.client).collect::<Vec<_>>(),

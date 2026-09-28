@@ -196,7 +196,7 @@ fn main() -> anyhow::Result<()> {
     let win = WindowBuilder::new()
         .with_title("Token Monitor")
         .with_inner_size(tao::dpi::LogicalSize::new(1180.0, 760.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(360.0, 560.0))
+        .with_min_inner_size(tao::dpi::LogicalSize::new(960.0, 640.0))
         .with_window_icon(icon)
         .build(&el)?;
 
@@ -305,6 +305,7 @@ fn main() -> anyhow::Result<()> {
     let mut latest_quota_checked_at_ms = 0_u64;
     let mut latest_ledger: Option<Box<tui_token_monitor::ledger::LedgerReport>> = None;
     let mut latest_ledger_fetched_at_ms = 0_u64;
+    let mut latest_goat_usage = None::<tui_token_monitor::goat::UsageSummary>;
     let webview = std::cell::RefCell::new(webview);
     let mut tray = None;
     let mut tray_level = None::<u8>;
@@ -536,6 +537,9 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
+                    if let Some(usage) = r.goat_usage {
+                        latest_goat_usage = usage;
+                    }
                     if let Some(ledger) = r.ledger {
                         latest_ledger = Some(ledger);
                         latest_ledger_fetched_at_ms = r.fetched_at_ms;
@@ -548,6 +552,7 @@ fn main() -> anyhow::Result<()> {
                             quota_error.clone(),
                             &latest_snapshot,
                             ledger,
+                            latest_goat_usage,
                         );
                         let js = format!("window.__onPush && window.__onPush({payload});");
                         // WebView 未就绪时 evaluate_script 出错;下轮采集会自然重推

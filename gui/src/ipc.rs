@@ -6,6 +6,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
+use tui_token_monitor::goat::UsageSummary;
 use tui_token_monitor::ledger::{self, Agg};
 use tui_token_monitor::model::{self, Card, Snapshot};
 use tui_token_monitor::settings;
@@ -181,6 +182,22 @@ pub struct DailyTotalDto {
     pub date: String,
     pub tokens: i64,
     pub cost: f64,
+    pub messages: u64,
+}
+
+/// 当月按 client 聚合(GUI 套餐卡「MONTHLY」行).
+#[derive(Serialize)]
+pub struct ClientAggDto {
+    pub client: &'static str,
+    pub agg: AggDto,
+}
+
+/// GOAT 官方当前账期用量;None = 不可用,前端回退本机账本口径.
+#[derive(Serialize)]
+pub struct GoatUsageDto {
+    pub tokens: u64,
+    pub requests: u64,
+    pub cost: f64,
 }
 
 #[derive(Serialize)]
@@ -216,6 +233,7 @@ pub struct LedgerDto {
     pub today: AggDto,
     pub week: AggDto,
     pub month: AggDto,
+    pub month_by_client: Vec<ClientAggDto>,
     pub by_agent: Vec<AgentRowDto>,
     pub by_model: Vec<ModelRowDto>,
     pub recent_by_agent: Vec<RecentAgentDto>,
@@ -227,6 +245,7 @@ pub struct LedgerDto {
     pub analysis_rows: Vec<AnalysisRowDto>,
     pub hourly: Vec<i64>,
     pub weekday: Vec<i64>,
+    pub weekday_hour: [[i64; 24]; 7],
     pub by_session: Vec<SessionRowDto>,
     pub by_project: Vec<ProjectRowDto>,
     pub burn_rate: Option<f64>,
@@ -243,6 +262,7 @@ pub struct PushDto {
     /// quota 拉取失败原因;None = 正常。
     pub quota_error: Option<String>,
     pub cards: Vec<CardDto>,
+    pub goat_usage: Option<GoatUsageDto>,
     pub monthly_value: MonthlyValueDto,
     pub ledger: LedgerDto,
 }
@@ -290,6 +310,14 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
         today: agg_dto(&r.today),
         week: agg_dto(&r.week),
         month: agg_dto(&r.month),
+        month_by_client: r
+            .month_by_client
+            .iter()
+            .map(|(client, agg)| ClientAggDto {
+                client,
+                agg: agg_dto(agg),
+            })
+            .collect(),
         by_agent: r
             .by_agent
             .iter()
@@ -353,6 +381,7 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                 date: d.date.clone(),
                 tokens: d.tokens,
                 cost: d.cost,
+                messages: d.messages,
             })
             .collect(),
         daily_detail: r
@@ -380,6 +409,7 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
             .collect(),
         hourly: r.hourly.to_vec(),
         weekday: r.weekday.to_vec(),
+        weekday_hour: r.weekday_hour,
         by_session: r
             .by_session
             .iter()
@@ -414,6 +444,7 @@ pub fn push(
     quota_error: Option<String>,
     snap: &Snapshot,
     rep: &ledger::LedgerReport,
+    goat_usage: Option<UsageSummary>,
 ) -> String {
     serde_json::to_string(&PushDto {
         fetched_at_ms,
@@ -421,6 +452,11 @@ pub fn push(
         quota_checked_at_ms,
         quota_error,
         cards: cards(snap),
+        goat_usage: goat_usage.map(|u| GoatUsageDto {
+            tokens: u.total_tokens,
+            requests: u.total_count as u64,
+            cost: u.total_cost,
+        }),
         monthly_value: monthly_value_dto(rep),
         ledger: ledger_dto(rep),
     })
@@ -439,11 +475,12 @@ mod tests {
     fn push_serializes_full_payload() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
-        let s = push(123, 120, 122, None, &snap, &rep);
+        let s = push(123, 120, 122, None, &snap, &rep, None);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["cards"].as_array().unwrap().len(), 4);
         assert_eq!(v["quota_fetched_at_ms"], 120);
         assert_eq!(v["quota_checked_at_ms"], 122);
+        assert!(v["goat_usage"].is_null());
         assert!(v["ledger"]["today"]["total"].is_i64());
         assert!(v["ledger"]["trend_24h"].as_array().unwrap().len() == 24);
         assert!(v["ledger"]["daily_totals"].as_array().unwrap().len() > 100);
@@ -485,7 +522,26 @@ mod tests {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
         let v: serde_json::Value =
-            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep)).unwrap();
+            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep, None))
+                .unwrap();
         assert_eq!(v["quotaError"], "omp down");
+    }
+
+    #[test]
+    fn goat_usage_flows_through_as_snake_case() {
+        let snap = model::parse_snapshot(FIXTURE).unwrap();
+        let rep = ledger::collect(chrono::Local::now());
+        let summary = UsageSummary {
+            total_count: 5752.0,
+            total_tokens: 1_054_688_077,
+            total_cost: 59.05,
+        };
+        let v: serde_json::Value = serde_json::from_str(&push(
+            1, 0, 1, None, &snap, &rep, Some(summary),
+        ))
+        .unwrap();
+        assert_eq!(v["goat_usage"]["tokens"], 1_054_688_077_u64);
+        assert_eq!(v["goat_usage"]["requests"], 5752);
+        assert!((v["goat_usage"]["cost"].as_f64().unwrap() - 59.05).abs() < 1e-9);
     }
 }
