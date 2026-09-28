@@ -2,10 +2,10 @@
 //!
 //! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘);
 //! - 新鲜期内直接读缓存;过期/缺失才联网拉,失败回退旧缓存,全失败返回空表(显示 "—");
-//! - 查找顺序:原名 → 小写 → 去掉 `provider/` 前缀 → 小写前缀(OMP 的模型如
-//!   `deepseek/deepseek-v4.1-flash` 走后缀命中;OMP 有报告价,不走这里).
+//! - 查找顺序:精确模型名 → 唯一的大小写不敏感全名 → 唯一的 provider 后缀。
+//!   多个 provider 同后缀时不估价，避免套用不确定的费率。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -35,6 +35,10 @@ pub struct ModelPrice {
 #[derive(Debug, Default)]
 pub struct Pricing {
     entries: HashMap<String, ModelPrice>,
+    case_insensitive: HashMap<String, ModelPrice>,
+    ambiguous_names: HashSet<String>,
+    unique_suffixes: HashMap<String, ModelPrice>,
+    ambiguous_suffixes: HashSet<String>,
 }
 
 #[derive(Debug, Default, Deserialize, serde::Serialize)]
@@ -84,14 +88,22 @@ impl Pricing {
         if model.is_empty() {
             return None;
         }
-        let lower = model.to_lowercase();
-        let suffix = lower.rsplit('/').next().unwrap_or(&lower);
-        for key in [model, lower.as_str(), suffix] {
-            if let Some(p) = self.entries.get(key) {
-                return Some(p);
-            }
+        if let Some(price) = self.entries.get(model) {
+            return Some(price);
         }
-        None
+        let lower = model.to_lowercase();
+        if self.ambiguous_names.contains(&lower) {
+            return None;
+        }
+        if let Some(price) = self.case_insensitive.get(&lower) {
+            return Some(price);
+        }
+
+        let suffix = lower.rsplit('/').next().unwrap_or(&lower);
+        if self.ambiguous_suffixes.contains(suffix) {
+            return None;
+        }
+        self.unique_suffixes.get(suffix)
     }
 }
 
@@ -144,24 +156,42 @@ fn fetch_one(url: &str) -> Option<Pricing> {
     Some(build(entries))
 }
 
-/// 后缀索引:客户端上报的模型名常无 provider 前缀(LiteLLM 键是
-/// "deepseek/deepseek-v4.1-flash" 这类),按 '/' 后的尾部建一份索引;
-/// 后缀冲突时先到先得(全键查找优先,不受影响).
-fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
-    let mut suffixes: HashMap<String, String> = HashMap::new();
-    for name in entries.keys() {
-        if let Some(suf) = name.rsplit('/').next()
-            && suf != name.as_str()
-            && !suffixes.contains_key(suf)
-        {
-            suffixes.insert(suf.to_string(), name.clone());
+/// Index exact and unique suffix names only. LiteLLM contains many providers for
+/// the same model ID, often with different prices; choosing the first suffix
+/// encountered in a HashMap would make the estimate nondeterministic.
+fn build(entries: HashMap<String, ModelPrice>) -> Pricing {
+    let mut case_insensitive = HashMap::new();
+    let mut ambiguous_names = HashSet::new();
+    let mut unique_suffixes = HashMap::new();
+    let mut ambiguous_suffixes = HashSet::new();
+
+    for (name, price) in &entries {
+        let lower = name.to_lowercase();
+        if !ambiguous_names.contains(&lower) {
+            if case_insensitive.remove(&lower).is_some() {
+                ambiguous_names.insert(lower);
+            } else {
+                case_insensitive.insert(lower, *price);
+            }
+        }
+
+        let suffix = name.rsplit('/').next().unwrap_or(name).to_lowercase();
+        if !ambiguous_suffixes.contains(&suffix) {
+            if unique_suffixes.remove(&suffix).is_some() {
+                ambiguous_suffixes.insert(suffix);
+            } else {
+                unique_suffixes.insert(suffix, *price);
+            }
         }
     }
-    for (suf, full) in suffixes {
-        let price = entries[&full];
-        entries.entry(suf).or_insert(price);
+
+    Pricing {
+        entries,
+        case_insensitive,
+        ambiguous_names,
+        unique_suffixes,
+        ambiguous_suffixes,
     }
-    Pricing { entries }
 }
 
 #[cfg(test)]
@@ -169,8 +199,8 @@ mod tests {
     use super::*;
 
     fn pricing_with(entries: &[(&str, f64, f64)]) -> Pricing {
-        Pricing {
-            entries: entries
+        build(
+            entries
                 .iter()
                 .map(|(n, i, o)| {
                     (
@@ -184,7 +214,7 @@ mod tests {
                     )
                 })
                 .collect(),
-        }
+        )
     }
 
     #[test]
@@ -217,5 +247,104 @@ mod tests {
             p.estimate("totally-unknown-model", &TokenBreakdown::default())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn ambiguous_suffix_does_not_pick_a_provider_price() {
+        let p = build(
+            [
+                (
+                    "provider-a/shared-model".to_string(),
+                    ModelPrice {
+                        input: 1.0,
+                        output: 2.0,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "provider-b/shared-model".to_string(),
+                    ModelPrice {
+                        input: 3.0,
+                        output: 4.0,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let tokens = TokenBreakdown {
+            input: 1_000_000,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            p.estimate("provider-a/shared-model", &tokens),
+            Some(1_000_000.0)
+        );
+        assert_eq!(
+            p.estimate("provider-b/shared-model", &tokens),
+            Some(3_000_000.0)
+        );
+        assert_eq!(p.estimate("shared-model", &tokens), None);
+    }
+
+    #[test]
+    fn exact_unqualified_catalog_entry_wins_over_suffix_collision() {
+        let p = build(
+            [
+                (
+                    "shared-model".to_string(),
+                    ModelPrice {
+                        input: 5.0,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "provider-a/shared-model".to_string(),
+                    ModelPrice {
+                        input: 1.0,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "provider-b/shared-model".to_string(),
+                    ModelPrice {
+                        input: 3.0,
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let tokens = TokenBreakdown {
+            input: 1_000_000,
+            ..Default::default()
+        };
+
+        assert_eq!(p.estimate("shared-model", &tokens), Some(5_000_000.0));
+    }
+
+    #[test]
+    fn case_insensitive_exact_match_keeps_qualified_provider_price() {
+        let p = build(
+            [(
+                "openai/gpt-6-sol".to_string(),
+                ModelPrice {
+                    input: 0.000002,
+                    output: 0.00001,
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let tokens = TokenBreakdown {
+            input: 1_000_000,
+            ..Default::default()
+        };
+
+        assert_eq!(p.estimate("OpenAI/GPT-6-SOL", &tokens), Some(2.0));
     }
 }

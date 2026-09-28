@@ -45,6 +45,13 @@ pub struct AgentRow {
     pub models: Vec<(String, Agg)>,
 }
 
+/// 近 30 天按模型汇总,总量降序;同名模型会合并,来源保留在 clients 中.
+pub struct ModelRow {
+    pub model: String,
+    pub clients: Vec<&'static str>,
+    pub agg: Agg,
+}
+
 /// 最近一小时按 Agent 汇总，仅代表本机记录到的活动。
 pub struct RecentAgentRow {
     pub client: &'static str,
@@ -64,6 +71,15 @@ pub struct DailyTotal {
     pub date: String,
     pub tokens: i64,
     pub cost: f64,
+}
+
+/// 可筛选的每日账本。保留来源和项目维度，供任意日期分析及导出使用。
+pub struct AnalysisRow {
+    pub date: String,
+    pub client: &'static str,
+    pub project: Option<String>,
+    pub agg: Agg,
+    pub unpriced_messages: u64,
 }
 
 /// 会话维度行(近 30 天,按最后活跃排序).
@@ -92,6 +108,8 @@ pub struct LedgerReport {
     pub month: Agg,
     /// 近 30 天按 agent,总量降序,只含有数据的.
     pub by_agent: Vec<AgentRow>,
+    /// 近 30 天按模型,总量降序,同名模型跨 Agent 合并.
+    pub by_model: Vec<ModelRow>,
     /// 最近一小时按 token 降序。
     pub recent_by_agent: Vec<RecentAgentRow>,
     /// 最后一条有时间戳的本机记录，可能早于一小时。
@@ -104,6 +122,7 @@ pub struct LedgerReport {
     pub daily_totals: Vec<DailyTotal>,
     /// 近 26 周内有数据日期的按 agent 拆分(热力图点击下钻用).
     pub daily_detail: HashMap<String, Vec<(&'static str, Agg)>>,
+    pub analysis_rows: Vec<AnalysisRow>,
     /// 近 30 天按本地小时(0-23)的 token 合计.
     pub hourly: [i64; 24],
     /// 近 30 天按星期(周一=0)的 token 合计.
@@ -262,6 +281,8 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let today_str = today.format("%Y-%m-%d").to_string();
     let heat_start = monday - Duration::weeks((HEATMAP_WEEKS - 1) as i64);
     let mut heat_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
+    let mut analysis_raw: HashMap<(String, &'static str, Option<String>), (Agg, u64)> =
+        HashMap::new();
 
     let mut today_agg = Agg::default();
     let mut week_agg = Agg::default();
@@ -293,6 +314,15 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         };
         let date: NaiveDate = ts.with_timezone(&Local).date_naive();
         let date_str = date.format("%Y-%m-%d").to_string();
+        if date <= today {
+            let entry = analysis_raw
+                .entry((date_str.clone(), r.client, r.project.clone()))
+                .or_default();
+            entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
+            if r.cost.is_none() {
+                entry.1 += 1;
+            }
+        }
         if date_str == today_str {
             today_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
         }
@@ -392,6 +422,33 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
             })
         })
         .collect();
+
+    let mut by_model_raw: HashMap<String, (Agg, std::collections::HashSet<&'static str>)> =
+        HashMap::new();
+    for agent in &by_agent {
+        for (model, agg) in &agent.models {
+            let entry = by_model_raw.entry(model.clone()).or_default();
+            entry.0.merge(agg);
+            entry.1.insert(agent.client);
+        }
+    }
+    let mut by_model: Vec<ModelRow> = by_model_raw
+        .into_iter()
+        .map(|(model, (agg, clients))| ModelRow {
+            model,
+            clients: CLIENTS
+                .iter()
+                .filter_map(|(client, _)| clients.contains(client).then_some(*client))
+                .collect(),
+            agg,
+        })
+        .collect();
+    by_model.sort_by(|a, b| {
+        b.agg
+            .total()
+            .cmp(&a.agg.total())
+            .then_with(|| a.model.cmp(&b.model))
+    });
 
     let mut recent_by_agent: Vec<RecentAgentRow> = recent_raw
         .into_iter()
@@ -509,18 +566,35 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     });
     by_project.truncate(20);
 
+    let mut analysis_rows: Vec<AnalysisRow> = analysis_raw
+        .into_iter()
+        .map(
+            |((date, client, project), (agg, unpriced_messages))| AnalysisRow {
+                date,
+                client,
+                project,
+                agg,
+                unpriced_messages,
+            },
+        )
+        .collect();
+    analysis_rows
+        .sort_by(|a, b| (&a.date, a.client, &a.project).cmp(&(&b.date, b.client, &b.project)));
+
     LedgerReport {
         sources: Vec::new(),
         today: today_agg,
         week: week_agg,
         month: month_agg,
         by_agent,
+        by_model,
         recent_by_agent,
         last_activity_ms,
         trend_24h,
         by_day,
         daily_totals,
         daily_detail,
+        analysis_rows,
         hourly,
         weekday,
         by_session,
@@ -580,6 +654,41 @@ mod tests {
             session: None,
             project: None,
         }
+    }
+
+    #[test]
+    fn analysis_rows_preserve_project_and_missing_price() {
+        let now = Local.with_ymd_and_hms(2026, 9, 27, 12, 0, 0).unwrap();
+        let mut first = rec(
+            "codex",
+            "model",
+            now.timestamp_millis(),
+            TokenBreakdown {
+                input: 10,
+                ..Default::default()
+            },
+        );
+        first.project = Some("alpha".into());
+        first.cost = None;
+        let mut second = first.clone();
+        second.project = Some("beta".into());
+        second.cost = Some(1.25);
+        let report = aggregate(vec![first, second], now);
+        assert_eq!(report.analysis_rows.len(), 2);
+        let alpha = report
+            .analysis_rows
+            .iter()
+            .find(|row| row.project.as_deref() == Some("alpha"))
+            .unwrap();
+        assert_eq!(alpha.agg.total(), 10);
+        assert_eq!(alpha.unpriced_messages, 1);
+        let beta = report
+            .analysis_rows
+            .iter()
+            .find(|row| row.project.as_deref() == Some("beta"))
+            .unwrap();
+        assert_eq!(beta.agg.cost_reported, 1.25);
+        assert_eq!(beta.unpriced_messages, 0);
     }
 
     fn now() -> DateTime<Local> {

@@ -227,7 +227,7 @@ pub(crate) fn render(
             idx,
         ));
         let label_this = match range {
-            TrendRange::H24 => idx % 6 == 0 || idx == buckets.len() - 1,
+            TrendRange::H24 => idx.is_multiple_of(6) || idx == buckets.len() - 1,
             TrendRange::D14 => idx == 0 || idx == buckets.len() / 2 || idx == buckets.len() - 1,
         };
         if label_this {

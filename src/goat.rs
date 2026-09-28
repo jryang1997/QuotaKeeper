@@ -1,7 +1,7 @@
 //! GOAT 原生采集:api.commandcode.ai alpha billing(内部/alpha 端点,非官方稳定契约).
 //!
 //! 口径复用 cmduse(cmd-usage 0.6.9 / cmduse-core)验证过的实现:
-//! - 认证:`CMD_API_KEY` env 或 `~/.commandcode/auth.json` 的 `apiKey`(`cmd login` 写入).
+//! - 认证:应用的 Windows 凭据、`COMMAND_CODE_API_KEY`/`CMD_API_KEY` env，或官方 CLI 登录态.
 //! - `GET /alpha/billing/credits` → balances + windowLimits(fiveHour/weekly used/cap/resetAt 毫秒).
 //! - `GET /alpha/billing/subscriptions` → planId/status/currentPeriodEnd(月窗口推导用).
 //! - 月窗口:used = cap - monthlyCredits(钳制),reset = periodEnd;5h/周逐字采用,不自推.
@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use crate::model::{Limit, ProviderId, Report, Status, status_for};
+use crate::model::{Limit, ProviderId, QuotaSource, Report, Status, status_for};
 
 const API_BASE: &str = "https://api.commandcode.ai";
 const TIMEOUT: Duration = Duration::from_secs(15);
@@ -83,10 +83,20 @@ struct SubscriptionsResp {
     data: Option<SubData>,
 }
 
-/// 读 key:env 优先,其次官方 CLI 登录态.报错只点名文件,不回显内容.
+/// 读 key:应用凭据优先,再用环境变量或官方 CLI 登录态.不回显内容.
 fn api_key() -> anyhow::Result<String> {
+    if let Some(key) = crate::credential::command_code_key().ok().flatten()
+        && crate::credential::valid_api_key(&key)
+    {
+        return Ok(key);
+    }
+    if let Ok(k) = std::env::var("COMMAND_CODE_API_KEY")
+        && crate::credential::valid_api_key(&k)
+    {
+        return Ok(k);
+    }
     if let Ok(k) = std::env::var("CMD_API_KEY")
-        && !k.trim().is_empty()
+        && crate::credential::valid_api_key(&k)
     {
         return Ok(k);
     }
@@ -103,7 +113,7 @@ fn api_key() -> anyhow::Result<String> {
         .map_err(|_| anyhow::anyhow!("GOAT 登录态损坏:{path} 不是合法 JSON,重跑 `cmdc login`"))?;
     v.get("apiKey")
         .and_then(|k| k.as_str())
-        .filter(|k| !k.trim().is_empty())
+        .filter(|k| crate::credential::valid_api_key(k))
         .map(|k| k.to_string())
         .ok_or_else(|| anyhow::anyhow!("GOAT 登录态缺 apiKey 字段:重跑 `cmdc login`"))
 }
@@ -139,7 +149,7 @@ fn plan_name(plan_id: &str) -> String {
     } else if id.contains("go") {
         "Go".into()
     } else if id.is_empty() {
-        "GOAT".into()
+        "订阅类型未知".into()
     } else {
         plan_id.into()
     }
@@ -162,8 +172,6 @@ fn plan_monthly_cap(plan_id: &str) -> Option<f64> {
         Some(80.0)
     } else if id.contains("go") {
         Some(10.0)
-    } else if id.is_empty() {
-        Some(70.0)
     } else {
         None
     }
@@ -196,7 +204,7 @@ fn monthly_limit(cap: f64, remaining: f64, period_end: Option<&str>, now_ms: i64
     let used = (cap - remaining).clamp(0.0, cap);
     let used_pct = (used / cap * 100.0).clamp(0.0, 100.0);
     Limit {
-        label: "Monthly".to_string(),
+        label: "Monthly (inferred)".to_string(),
         used_pct,
         resets_in_ms: period_end.and_then(parse_iso_ms).map(|r| r - now_ms),
         status: status_for(used_pct),
@@ -225,7 +233,12 @@ fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
     }
     Report {
         provider: ProviderId::Goat,
-        plan_type: plan_name(&subs.plan_id),
+        source: QuotaSource::CommandCodeApi,
+        plan_type: if subs.status.is_empty() {
+            plan_name(&subs.plan_id)
+        } else {
+            format!("{} · {}", plan_name(&subs.plan_id), subs.status)
+        },
         limits,
     }
 }
@@ -238,7 +251,7 @@ pub fn fetch_report() -> anyhow::Result<Report> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     let credits: CreditsResp = get_json("/alpha/billing/credits", &key)?;
-    // subscriptions 失败不致命:窗口照出,plan 标默认,月卡按默认 cap 推.
+    // 订阅接口失败时保留真实 5h/7d 窗口，不推测套餐与月额度。
     let subs: SubData = get_json::<SubscriptionsResp>("/alpha/billing/subscriptions", &key)
         .map(|r| r.data.unwrap_or_default())
         .unwrap_or_default();
@@ -277,7 +290,7 @@ mod tests {
     fn goat_fixture_windows_match_cmduse_math() {
         let r = fixture_report();
         assert_eq!(r.provider, ProviderId::Goat);
-        assert_eq!(r.plan_type, "GOAT");
+        assert_eq!(r.plan_type, "GOAT · active");
         assert_eq!(r.limits.len(), 3);
         // 5h:1.55/14;周:19.61/35;月:(70-44.15)/70.
         assert!((r.limits[0].used_pct - (1.55 / 14.0 * 100.0)).abs() < 1e-9);
@@ -309,7 +322,7 @@ mod tests {
             &doc.subscription,
             NOW_MS,
         );
-        assert_eq!(r.plan_type, "GOAT");
+        assert_eq!(r.plan_type, "GOAT · active");
         assert_eq!(r.limits.len(), 3);
         assert!((r.limits[0].used_pct - (0.736504846 / 14.0 * 100.0)).abs() < 1e-9);
         assert!((r.limits[1].used_pct - (10.3077762467 / 35.0 * 100.0)).abs() < 1e-9);
@@ -330,8 +343,23 @@ mod tests {
             &doc.subscription,
             NOW_MS,
         );
-        assert_eq!(r.plan_type, "Provider");
+        assert_eq!(r.plan_type, "Provider · active");
         assert_eq!(r.limits.len(), 1);
+    }
+
+    #[test]
+    fn failed_subscription_never_invents_goat_monthly_cap() {
+        let doc: FixtureDoc = serde_json::from_str(FIXTURE).unwrap();
+        let report = build_report(
+            &CreditsResp {
+                credits: doc.credits,
+                window_limits: doc.window_limits,
+            },
+            &SubData::default(),
+            NOW_MS,
+        );
+        assert_eq!(report.plan_type, "订阅类型未知");
+        assert_eq!(report.limits.len(), 2);
     }
 
     #[test]

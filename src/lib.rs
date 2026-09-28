@@ -1,5 +1,9 @@
 pub mod backend;
+pub mod codex_app_server;
+pub mod credential;
 pub mod goat;
 pub mod ledger;
 pub mod model;
+pub mod opencode_go;
+pub mod settings;
 pub mod ui;

@@ -70,7 +70,7 @@ pub struct HitRegions {
     pub trend_ranges: Vec<(Rect, TrendRange)>,
     pub trend_metrics: Vec<(Rect, TrendMetric)>,
     pub trend_buckets: Vec<(Rect, usize)>,
-    /// usage 页维度标签 → 维度下标(0 Agent / 1 会话 / 2 项目)
+    /// usage 页维度标签 → 维度下标(0 Agent / 1 会话 / 2 项目 / 3 模型)
     pub dim_tabs: Vec<(Rect, usize)>,
 }
 
@@ -167,8 +167,10 @@ pub struct ViewState<'a> {
     pub chart_mode: bool,
     pub trend_range: TrendRange,
     pub trend_metric: TrendMetric,
-    /// 用量页维度:0 Agent / 1 会话 / 2 项目
+    /// 用量页维度:0 Agent / 1 会话 / 2 项目 / 3 模型
     pub dim: usize,
+    /// 模型列表当前滚动位置.
+    pub model_offset: usize,
     /// 刷新动画帧计数
     pub tick: u64,
     pub show_help: bool,
@@ -186,7 +188,8 @@ pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
         .split(frame.area());
     header(frame, root[0], st);
 
-    let narrow = frame.area().width < 76;
+    // Usage needs 75 columns (68 column constraints + 7 separators), plus 16 for the sidebar.
+    let narrow = frame.area().width < 91;
     let content = if narrow {
         root[1]
     } else {
@@ -206,7 +209,7 @@ pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
 
     footer(frame, root[2], st);
     if st.show_help {
-        help_overlay(frame, st.page);
+        help_overlay(frame, st.page, st.page == Page::Usage && st.dim == 3);
     }
 }
 
@@ -306,11 +309,15 @@ fn sidebar(frame: &mut Frame, area: Rect, active: Page, hits: &mut HitRegions) {
 }
 
 fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
-    let hint = match (i18n::lang(), st.page) {
-        (i18n::Lang::Zh, Page::Usage) => "↑↓ 页 · g 图 · t 时间 · c 金额 · ? 帮助",
-        (i18n::Lang::Zh, _) => "↑↓ 页 · r 刷新 · ? 帮助 · q 退出",
-        (i18n::Lang::En, Page::Usage) => "↑↓ page · g chart · t range · c cost · ? help",
-        (i18n::Lang::En, _) => "↑↓ page · r refresh · ? help · q quit",
+    let hint = match (i18n::lang(), st.page, st.dim == 3) {
+        (i18n::Lang::Zh, Page::Usage, true) => "↑↓ 模型 · Tab 页 · g 图 · t 时间 · c 金额 · ? 帮助",
+        (i18n::Lang::Zh, Page::Usage, false) => "↑↓ 页 · g 图 · t 时间 · c 金额 · ? 帮助",
+        (i18n::Lang::Zh, _, _) => "↑↓ 页 · r 刷新 · ? 帮助 · q 退出",
+        (i18n::Lang::En, Page::Usage, true) => {
+            "↑↓ models · Tab page · g chart · t range · c cost · ? help"
+        }
+        (i18n::Lang::En, Page::Usage, false) => "↑↓ page · g chart · t range · c cost · ? help",
+        (i18n::Lang::En, _, _) => "↑↓ page · r refresh · ? help · q quit",
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -324,7 +331,7 @@ fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
     );
 }
 
-fn help_overlay(frame: &mut Frame, page: Page) {
+fn help_overlay(frame: &mut Frame, page: Page, model_list_active: bool) {
     let area = frame.area();
     let width = area.width.saturating_sub(4).min(58);
     let height = if page == Page::Usage { 9 } else { 7 };
@@ -338,14 +345,22 @@ fn help_overlay(frame: &mut Frame, page: Page) {
     let mut lines = if zh {
         vec![
             "1/2/3  配额 / 用量 / 热力图",
-            "↑/k  上一页    ↓/j/Tab  下一页",
+            if model_list_active {
+                "↑/k  上一模型    ↓/j  下一模型    Tab  下一页"
+            } else {
+                "↑/k  上一页    ↓/j/Tab  下一页"
+            },
             "r  刷新    p  主题    l  语言",
             "Esc  关闭详情    q  退出",
         ]
     } else {
         vec![
             "1/2/3  Quota / Usage / Heatmap",
-            "↑/k  previous    ↓/j/Tab  next",
+            if model_list_active {
+                "↑/k  previous model    ↓/j  next model    Tab  next page"
+            } else {
+                "↑/k  previous    ↓/j/Tab  next"
+            },
             "r  refresh    p  theme    l  language",
             "Esc  close detail    q  quit",
         ]
@@ -395,6 +410,7 @@ mod tests {
             trend_range: TrendRange::H24,
             trend_metric: TrendMetric::Tokens,
             dim: 0,
+            model_offset: 0,
             tick: 0,
             show_help: false,
         }
@@ -402,7 +418,7 @@ mod tests {
 
     #[test]
     fn sidebar_hit_regions() {
-        let backend = TestBackend::new(80, 24);
+        let backend = TestBackend::new(100, 24);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();
         let st = view(Page::Quota);
@@ -415,6 +431,30 @@ mod tests {
         let mut hits2 = HitRegions::default();
         term.draw(|f| render(f, &view(Page::Usage), &mut hits2))
             .unwrap();
+    }
+
+    #[test]
+    fn sidebar_breakpoint_preserves_minimum_agent_table_width() {
+        let mut term_90 = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        let mut hits_90 = HitRegions::default();
+        term_90
+            .draw(|f| render(f, &view(Page::Usage), &mut hits_90))
+            .unwrap();
+        assert!(hits_90.sidebar.is_empty());
+
+        let mut quota_80 = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut quota_hits_80 = HitRegions::default();
+        quota_80
+            .draw(|f| render(f, &view(Page::Quota), &mut quota_hits_80))
+            .unwrap();
+        assert!(quota_hits_80.sidebar.is_empty());
+
+        let mut term_91 = Terminal::new(TestBackend::new(91, 24)).unwrap();
+        let mut hits_91 = HitRegions::default();
+        term_91
+            .draw(|f| render(f, &view(Page::Usage), &mut hits_91))
+            .unwrap();
+        assert_eq!(hits_91.sidebar.len(), 3);
     }
 
     #[test]
@@ -434,7 +474,9 @@ mod tests {
             .split_whitespace()
             .collect();
         assert!(
-            text.contains(t::get().name.split(' ').next().unwrap()),
+            t::THEMES
+                .iter()
+                .any(|theme| text.contains(theme.name.split(' ').next().unwrap())),
             "底栏缺主题名"
         );
     }

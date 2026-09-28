@@ -79,6 +79,7 @@ pub enum K {
     DimAgent,
     DimSession,
     DimProject,
+    DimModel,
     HeatTitle,
     WMon,
     WWed,
@@ -301,6 +302,13 @@ pub fn t(k: K) -> &'static str {
                 "项目"
             } else {
                 "Projects"
+            }
+        }
+        K::DimModel => {
+            if zh {
+                "模型"
+            } else {
+                "Models"
             }
         }
         K::HeatTitle => {

@@ -6,14 +6,16 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 
 use crate::ledger::{LedgerReport, client_label, format_tokens, format_usd, types::Agg};
-use crate::model::{Card, ProviderId, Snapshot};
+#[cfg(test)]
+use crate::model::ProviderId;
+use crate::model::{self, Card, Snapshot};
 
 use super::{HitRegions, TrendMetric, TrendRange, ViewState, quota, trend};
 use crate::ui::i18n;
@@ -42,12 +44,13 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
         .split(area);
 
     right_now(frame, main[0], st, ledger);
-    render_dim_tabs(frame, main[1], st.dim, hits);
+    render_dim_tabs(frame, main[1], st.dim, hits, ledger);
 
     let agent_area = main[2];
     match st.dim {
         1 => render_session_table(frame, agent_area, ledger),
         2 => render_project_table(frame, agent_area, ledger),
+        3 => render_model_table(frame, agent_area, ledger, st.model_offset),
         _ => render_agent_table(frame, agent_area, ledger, st.sel_agent, hits),
     }
 
@@ -242,12 +245,19 @@ fn render_project_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport) {
 }
 
 /// 维度标签:Agent | 会话 | 项目(可点击).
-fn render_dim_tabs(frame: &mut Frame, area: Rect, active: usize, hits: &mut HitRegions) {
+fn render_dim_tabs(
+    frame: &mut Frame,
+    area: Rect,
+    active: usize,
+    hits: &mut HitRegions,
+    ledger: &LedgerReport,
+) {
     let th = t::get();
     let labels = [
         (i18n::t(i18n::K::DimAgent), 0usize),
         (i18n::t(i18n::K::DimSession), 1),
         (i18n::t(i18n::K::DimProject), 2),
+        (i18n::t(i18n::K::DimModel), 3),
     ];
     let mut x = area.x;
     for (label, idx) in labels {
@@ -279,6 +289,132 @@ fn render_dim_tabs(frame: &mut Frame, area: Rect, active: usize, hits: &mut HitR
             idx,
         ));
         x += w + 2;
+    }
+
+    let monthly_value = monthly_value_label(ledger, crate::settings::monthly_plan_benchmark());
+    let available = area
+        .width
+        .saturating_sub(x.saturating_sub(area.x).saturating_add(2));
+    if disp_w(&monthly_value) <= available {
+        frame.render_widget(
+            Paragraph::new(monthly_value)
+                .alignment(Alignment::Right)
+                .style(Style::default().fg(th.dim)),
+            Rect {
+                x: x + 2,
+                y: area.y,
+                width: available,
+                height: 1,
+            },
+        );
+    }
+}
+
+/// 精确显示 token 数,每三位加分隔符.
+fn exact_token_count(value: i64) -> String {
+    let mut reversed = String::new();
+    for (index, digit) in value.to_string().chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            reversed.push(',');
+        }
+        reversed.push(digit);
+    }
+    reversed.chars().rev().collect()
+}
+
+/// 模型维度表(近 30 天,完整列表可用 ↑↓ 滚动).
+fn render_model_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport, offset: usize) {
+    let th = t::get();
+    if ledger.by_model.is_empty() {
+        frame.render_widget(Paragraph::new(i18n::t(i18n::K::NoData)), area);
+        return;
+    }
+
+    let visible = area.height.saturating_sub(1).max(1) as usize;
+    let start = offset.min(ledger.by_model.len().saturating_sub(1));
+    let end = start.saturating_add(visible).min(ledger.by_model.len());
+    let header = Row::new([
+        format!(
+            "{} {}-{}/{} ↑↓",
+            i18n::t(i18n::K::DimModel),
+            start + 1,
+            end,
+            ledger.by_model.len()
+        ),
+        i18n::t(i18n::K::HClient).to_string(),
+        i18n::t(i18n::K::HTotal).to_string(),
+        i18n::t(i18n::K::HCost).to_string(),
+    ])
+    .style(Style::default().fg(th.dim).add_modifier(Modifier::BOLD));
+    let rows: Vec<Row> = ledger.by_model[start..end]
+        .iter()
+        .map(|model| {
+            let clients = model
+                .clients
+                .iter()
+                .map(|client| client_label(client))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Row::new([
+                model.model.clone(),
+                clients,
+                exact_token_count(model.agg.total()),
+                if model.agg.cost() > 0.0 {
+                    format_usd(model.agg.cost())
+                } else {
+                    "—".to_string()
+                },
+            ])
+        })
+        .collect();
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Min(18),
+            Constraint::Min(12),
+            Constraint::Length(12),
+            Constraint::Length(9),
+        ],
+    )
+    .header(header)
+    .column_spacing(1);
+    frame.render_widget(table, area);
+}
+
+fn monthly_value_label(ledger: &LedgerReport, benchmark: crate::settings::PlanBenchmark) -> String {
+    let price = if i18n::lang() == i18n::Lang::Zh {
+        format!(
+            "{}{}",
+            format_usd(benchmark.monthly_usd),
+            if benchmark.is_custom {
+                "我的月费"
+            } else {
+                "月基准"
+            }
+        )
+    } else {
+        format!(
+            "{} {}",
+            format_usd(benchmark.monthly_usd),
+            if benchmark.is_custom {
+                "my plan/mo"
+            } else {
+                "list/mo"
+            }
+        )
+    };
+    let cost = ledger.month.cost();
+    if cost > 0.0 {
+        format!(
+            "API≈{} · {:.2}×{}",
+            format_usd(cost),
+            model::api_equivalent_vs_monthly_plan_multiple(cost, benchmark.monthly_usd),
+            price
+        )
+    } else if ledger.month.total() == 0 {
+        format!("API≈$0.00 · 0.00×{}", price)
+    } else {
+        format!("API— · —×{}", price)
     }
 }
 
@@ -315,7 +451,7 @@ fn tightest_quota(snapshot: Option<&Snapshot>) -> Option<String> {
     let mut fallback: Option<(f64, String)> = None;
     for card in &snapshot?.cards {
         let Card::Live(report) = card else { continue };
-        if report.provider == ProviderId::Antigravity {
+        if report.source == crate::model::QuotaSource::CpaLocal {
             continue;
         }
         let name = report
@@ -897,6 +1033,7 @@ mod tests {
             trend_range: super::TrendRange::H24,
             trend_metric: super::TrendMetric::Tokens,
             dim: 0,
+            model_offset: 0,
             tick: 0,
             show_help: false,
         }
@@ -930,6 +1067,51 @@ mod tests {
         let (rect, idx) = hits.agent_rows[0];
         assert!(
             matches!(hits.hit(rect.x + 1, rect.y), Some(super::super::Hit::AgentRow(i)) if i == idx)
+        );
+    }
+
+    #[test]
+    fn renders_monthly_value_and_plan_multiple_at_80_columns() {
+        let ledger = fixture_ledger();
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        let mut hits = HitRegions::default();
+        let st = view(&ledger);
+        term.draw(|f| render(f, f.area(), &st, &mut hits)).unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect();
+        let compact_text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact_text.contains("API≈$2.00"), "缺本月估值");
+        assert!(compact_text.contains("0.05×"), "缺套餐倍数");
+        assert!(
+            compact_text.contains("$40.00月基准"),
+            "缺套餐基础标价参照: {text}"
+        );
+        assert_eq!(hits.agent_rows.len(), ledger.by_agent.len());
+    }
+
+    #[test]
+    fn marks_month_value_unavailable_when_usage_has_no_price() {
+        let mut ledger = fixture_ledger();
+        ledger.month.cost_reported = 0.0;
+        ledger.month.cost_estimated = 0.0;
+        let label = monthly_value_label(
+            &ledger,
+            crate::settings::PlanBenchmark {
+                monthly_usd: crate::settings::DEFAULT_MONTHLY_PLAN_USD,
+                is_custom: false,
+            },
+        );
+        assert!(label.contains("API—"), "应标明当前没有可用估价: {label}");
+        assert!(label.contains("—×"), "倍数也应显示不可估: {label}");
+        assert!(
+            !label.contains("0.00×"),
+            "不能把无价格误显示为 0 倍: {label}"
         );
     }
 
@@ -1010,12 +1192,13 @@ mod tests {
 
     #[test]
     fn quota_teaser_excludes_antigravity_intensity() {
-        use crate::model::{Limit, Report, Status};
+        use crate::model::{Limit, QuotaSource, Report, Status};
         let snapshot = Snapshot {
             generated_at_ms: 0,
             cards: vec![
                 Card::Live(Report {
                     provider: ProviderId::Antigravity,
+                    source: QuotaSource::CpaLocal,
                     plan_type: "CPA".into(),
                     limits: vec![Limit {
                         label: "5 hours".into(),
@@ -1026,6 +1209,7 @@ mod tests {
                 }),
                 Card::Live(Report {
                     provider: ProviderId::Codex,
+                    source: QuotaSource::CodexAppServer,
                     plan_type: "Plus".into(),
                     limits: vec![Limit {
                         label: "5 hours".into(),
@@ -1044,12 +1228,13 @@ mod tests {
 
     #[test]
     fn exhausted_real_quota_precedes_a_valid_eta() {
-        use crate::model::{Limit, Report, Status};
+        use crate::model::{Limit, QuotaSource, Report, Status};
         let snapshot = Snapshot {
             generated_at_ms: 0,
             cards: vec![
                 Card::Live(Report {
                     provider: ProviderId::Codex,
+                    source: QuotaSource::CodexAppServer,
                     plan_type: "Plus".into(),
                     limits: vec![Limit {
                         label: "5 hours".into(),
@@ -1060,6 +1245,7 @@ mod tests {
                 }),
                 Card::Live(Report {
                     provider: ProviderId::OpenCodeGo,
+                    source: QuotaSource::OpenCodeGoApi,
                     plan_type: "Go".into(),
                     limits: vec![Limit {
                         label: "5 hours".into(),
@@ -1125,7 +1311,7 @@ mod tests {
         assert!(text.contains("tui_token_moniter"), "缺项目行");
         assert!(text.contains("1"), "缺会话数");
         // 维度标签命中区
-        assert_eq!(hits.dim_tabs.len(), 3);
+        assert_eq!(hits.dim_tabs.len(), 4);
         let (rect, idx) = hits.dim_tabs[1];
         let hit_res = hits.hit(rect.x + 1, rect.y);
         assert!(

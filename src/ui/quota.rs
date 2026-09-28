@@ -357,6 +357,7 @@ mod tests {
             trend_range: crate::ui::TrendRange::H24,
             trend_metric: crate::ui::TrendMetric::Tokens,
             dim: 0,
+            model_offset: 0,
             tick: 0,
             show_help: false,
         }

@@ -1,13 +1,35 @@
-//! Quota 归一化模型:对齐 OMP `UsageReport` 语义的小接口.
+//! Quota 归一化模型:各服务独立采集后合并,保留每张卡的真实来源.
 //!
 //! 不变量:
 //! - `used_pct` 恒为 0–100 百分制(OMP `amount.used` 已是该口径;GOAT `used/cap` 美元口径,见 tests/fixtures/goat.json).
 //! - 状态只由 `status_for` 按阈值推导:>=100 exhausted,>=80 warning,其余 ok.
-//! - 三家 provider 固定顺序展示,缺失的一律为 `Card::Missing`,保证 UI 永不缺卡.
+//! - 四家 provider 固定顺序展示,缺失的一律为 `Card::Missing`,保证 UI 永不缺卡.
 
 use serde::Deserialize;
 
 use std::collections::HashMap;
+
+/// 默认比较基准为截至 2026-09-26 的三项基础美元月标价之和。
+/// 不是用户实际扣款:GOAT 另收支付手续费,税费及地区/渠道价格也可能不同。
+/// Antigravity 经 CPA 使用且没有固定月标价,因此不计入该基数。
+pub const LIST_PRICE_BENCHMARK_MONTHLY_USD: f64 = crate::settings::DEFAULT_MONTHLY_PLAN_USD;
+
+/// API 价格等值相对于用户月费基准的倍数。
+pub fn api_equivalent_vs_monthly_plan_multiple(
+    api_equivalent_usd: f64,
+    monthly_plan_usd: f64,
+) -> f64 {
+    if api_equivalent_usd.is_finite() && monthly_plan_usd.is_finite() && monthly_plan_usd > 0.0 {
+        api_equivalent_usd.max(0.0) / monthly_plan_usd
+    } else {
+        0.0
+    }
+}
+
+/// 本月已记录的 API 等值金额相对于基础标价参照的倍数。
+pub fn api_equivalent_vs_list_price_multiple(api_equivalent_usd: f64) -> f64 {
+    api_equivalent_vs_monthly_plan_multiple(api_equivalent_usd, LIST_PRICE_BENCHMARK_MONTHLY_USD)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -51,20 +73,49 @@ impl ProviderId {
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::OpenCodeGo => "OpenCode Go · $10/mo",
-            Self::Codex => "Codex · ChatGPT Plus $20/mo",
-            Self::Goat => "Command Code GOAT · $10/mo",
+            Self::OpenCodeGo => "OpenCode Go",
+            Self::Codex => "Codex",
+            Self::Goat => "Command Code GOAT",
             Self::Antigravity => "Antigravity · CPA",
         }
     }
 
     pub fn missing_hint(&self) -> &'static str {
         match self {
-            Self::OpenCodeGo => "omp 中无 opencode-go 凭证:omp 登录后自动出现",
-            Self::Codex => "omp 中无 openai-codex 凭证:omp 登录后自动出现",
+            Self::OpenCodeGo => {
+                "配置 Go API key（应用设置、OPENCODE_API_KEY 或 OpenCode auth.json）；OMP 可作兼容兜底"
+            }
+            Self::Codex => "未找到可用 Codex 登录态；请登录 Codex CLI 后刷新",
             // OMP 20 个 usage provider 无 command-code(registry.ts),原生 GOAT 通道才有.
-            Self::Goat => "GOAT 未登录:在真实终端运行 `cmdc login`,或设 CMD_API_KEY",
+            Self::Goat => {
+                "配置 GOAT API key（应用设置或 COMMAND_CODE_API_KEY）；也可使用 cmdc 登录态"
+            }
             Self::Antigravity => "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaSource {
+    OpenCodeGoApi,
+    CodexAppServer,
+    CodexAccount,
+    CommandCodeApi,
+    CpaGoogleQuota,
+    CpaLocal,
+    OmpFallback,
+}
+
+impl QuotaSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpenCodeGoApi => "OpenCode Go usage API · 本应用直连",
+            Self::CodexAppServer => "Codex 官方 app-server · 额度读取",
+            Self::CodexAccount => "Codex 登录态 → ChatGPT 未公开用量接口 · 兼容兜底",
+            Self::CommandCodeApi => "Command Code /alpha/billing · 本应用直连（未文档化接口）",
+            Self::CpaGoogleQuota => "CPA 代查 Google 上游配额 · 内部接口",
+            Self::CpaLocal => "CPA 本机管理接口；若有 OMP stats.db 则附本机活动数据",
+            Self::OmpFallback => "OMP usage --json · 兼容兜底",
         }
     }
 }
@@ -81,6 +132,7 @@ pub struct Limit {
 #[derive(Debug, Clone)]
 pub struct Report {
     pub provider: ProviderId,
+    pub source: QuotaSource,
     pub plan_type: String,
     pub limits: Vec<Limit>,
 }
@@ -153,7 +205,7 @@ struct OmpAmount {
     used_fraction: Option<f64>,
 }
 
-/// 解析 `omp usage --json` 全文为三卡快照.未知 provider 直接丢弃.
+/// 解析 `omp usage --json` 全文为四卡快照.未知 provider 直接丢弃.
 pub fn parse_snapshot(json: &str) -> anyhow::Result<Snapshot> {
     let doc: OmpDoc = serde_json::from_str(json)?;
     let mut by_provider: HashMap<ProviderId, Report> = HashMap::new();
@@ -183,6 +235,7 @@ pub fn parse_snapshot(json: &str) -> anyhow::Result<Snapshot> {
             provider,
             Report {
                 provider,
+                source: QuotaSource::OmpFallback,
                 plan_type: r.metadata.plan_type.clone(),
                 limits,
             },
@@ -267,6 +320,18 @@ mod tests {
         assert_eq!(status_for(99.9), Status::Warning);
         assert_eq!(status_for(100.0), Status::Exhausted);
         assert_eq!(status_for(140.0), Status::Exhausted);
+    }
+
+    #[test]
+    fn bundled_plan_multiple_uses_monthly_usd_price() {
+        assert_eq!(LIST_PRICE_BENCHMARK_MONTHLY_USD, 40.0);
+        assert_eq!(api_equivalent_vs_list_price_multiple(0.0), 0.0);
+        assert_eq!(api_equivalent_vs_list_price_multiple(40.0), 1.0);
+        assert_eq!(api_equivalent_vs_list_price_multiple(100.0), 2.5);
+        assert_eq!(api_equivalent_vs_list_price_multiple(-10.0), 0.0);
+        assert_eq!(api_equivalent_vs_list_price_multiple(f64::NAN), 0.0);
+        assert_eq!(api_equivalent_vs_monthly_plan_multiple(60.0, 30.0), 2.0);
+        assert_eq!(api_equivalent_vs_monthly_plan_multiple(60.0, 0.0), 0.0);
     }
 
     #[test]

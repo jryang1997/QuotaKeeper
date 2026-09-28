@@ -8,7 +8,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, goat, ledger, model, ui};
+use tui_token_monitor::{backend, ledger, model, ui};
 
 use crossterm::{
     event::{
@@ -36,28 +36,13 @@ fn now_ms() -> i64 {
 
 fn spawn_refresh(tx: mpsc::Sender<Msg>) {
     std::thread::spawn(move || {
-        // backend A:OMP 两卡;backend B:GOAT 原生.互不阻塞,任一成功都出数.
+        // 四家额度独立刷新；各卡的兼容兜底由 backend 管理。
         let t = std::thread::spawn(backend::fetch_snapshot);
-        let goat_rep = goat::fetch_report().ok();
         let quota = match t
             .join()
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("OMP 采集线程 panic")))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("配额采集线程 panic")))
         {
-            Ok(mut snap) => {
-                if let Some(r) = goat_rep
-                    && let Some(slot) = snap.cards.iter_mut().find(|c| {
-                        matches!(
-                            c,
-                            model::Card::Missing {
-                                provider: model::ProviderId::Goat
-                            }
-                        )
-                    })
-                {
-                    *slot = model::Card::Live(r);
-                }
-                Ok((snap, now_ms() as u64))
-            }
+            Ok(snap) => Ok((snap, now_ms() as u64)),
             Err(e) => Err(e.to_string()),
         };
         // ledger 采集与 quota 无关:本地日志扫描 + SQLite 直查 + 可选估价
@@ -71,6 +56,9 @@ fn notify_quota(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
     let mut next = Vec::with_capacity(prev.len());
     for card in &snap.cards {
         let model::Card::Live(r) = card else { continue };
+        if r.source == model::QuotaSource::CpaLocal {
+            continue;
+        }
         // toast 标题用短名("OpenCode Go · $10/mo" → "OpenCode Go")
         let provider = r.provider.title().split(" ·").next().unwrap_or("usage");
         for l in &r.limits {
@@ -138,7 +126,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut chart_mode = true;
     let mut trend_range = TrendRange::H24;
     let mut trend_metric = TrendMetric::Tokens;
-    let mut dim: usize = 0; // 用量页维度:0 Agent / 1 会话 / 2 项目
+    let mut dim: usize = 0; // 用量页维度:0 Agent / 1 会话 / 2 项目 / 3 模型
+    let mut model_offset: usize = 0;
     // 配额阈值通知状态机:每 (卡, 额度) 记上一轮等级,跃迁才发 toast
     let mut prev_levels: Vec<(String, u8)> = Vec::new();
     let mut ledger_report: Option<ledger::LedgerReport> = None;
@@ -195,6 +184,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
             trend_range,
             trend_metric,
             dim,
+            model_offset,
             tick,
             show_help,
         };
@@ -254,8 +244,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         ui::i18n::save(&home);
                     }
                     KeyCode::Char('s') if page == Page::Usage => {
-                        dim = (dim + 1) % 3;
+                        dim = (dim + 1) % 4;
+                        model_offset = 0;
                         sel_agent = None;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') if page == Page::Usage && dim == 3 => {
+                        let model_count = ledger_report
+                            .as_ref()
+                            .map_or(0, |ledger| ledger.by_model.len());
+                        model_offset = model_offset
+                            .saturating_add(1)
+                            .min(model_count.saturating_sub(1));
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if page == Page::Usage && dim == 3 => {
+                        model_offset = model_offset.saturating_sub(1);
                     }
                     KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
                         page = match page {
@@ -333,6 +335,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         }
                         Some(ui::Hit::DimTab(i)) => {
                             dim = i;
+                            model_offset = 0;
                             sel_agent = None;
                         }
                         Some(ui::Hit::AgentRow(i)) => {
