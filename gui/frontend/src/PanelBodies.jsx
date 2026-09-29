@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
-import { CLIENT_COLORS, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
+import { CLIENT_COLORS, STR, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
 
 const WEEKDAY_ZH = ['一', '二', '三', '四', '五', '六', '日'];

@@ -149,41 +149,39 @@ export default function PanelsPage({ ledger, lang }) {
       <div ref={gridRef} className="panel-grid" style={{ height: maxBottom * PANEL_ROW_H + (maxBottom - 1) * PANEL_GAP }}>
         {align.v.map((v, i) => <i key={`v${i}`} className="panel-align-v" style={{ left: `calc(${(v / PANEL_COLS) * 100}% + ${v * PANEL_GAP}px)` }} />)}
         {align.h.map((y, i) => <i key={`h${i}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
-        <PanelErrorBoundary>
-          {drag?.mode === 'move' && origin && <div className="panel-ghost" style={posStyle(origin)} />}
-          {bottomPanels.map((p) => {
-            const Body = PANEL_BODIES[p.id];
-            return (
-              <div key={p.id} className={`panel-card${drag?.mode === 'resize' && drag.id === p.id ? ' is-resizing' : ''}${p.locked ? ' is-locked' : ''}`} style={posStyle(p)}>
-                <div className="panel-head" onPointerDown={(e) => startDrag(e, p.id, 'move')}>
-                  <span className="panel-title">{t(`panel_${p.id}`)}</span>
-                  <span className="panel-meta">{panelMeta(p.id, ledger, lang)}</span>
-                  <span className="panel-head-btns" onPointerDown={(e) => e.stopPropagation()}>
-                    <button type="button" className={`panel-btn${p.locked ? ' is-on' : ''}`} onClick={() => toggleLock(p.id)} title={lockTitle} aria-label={lockTitle}>
-                      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-                    </button>
-                    <button type="button" className="panel-btn" onClick={() => removePanel(p.id)} title={removeTitle} aria-label={removeTitle}>×</button>
-                  </span>
-                </div>
-                <div className="panel-body">{ledger ? <Body ledger={ledger} lang={lang} /> : null}</div>
-                <div className="panel-resize" onPointerDown={(e) => startDrag(e, p.id, 'resize')} aria-hidden="true" />
+        {drag?.mode === 'move' && origin && <div className="panel-ghost" style={posStyle(origin)} />}
+        {bottomPanels.map((p) => {
+          const Body = PANEL_BODIES[p.id];
+          return (
+            <div key={p.id} className={`panel-card${drag?.mode === 'resize' && drag.id === p.id ? ' is-resizing' : ''}${p.locked ? ' is-locked' : ''}`} style={posStyle(p)}>
+              <div className="panel-head" onPointerDown={(e) => startDrag(e, p.id, 'move')}>
+                <span className="panel-title">{t(`panel_${p.id}`)}</span>
+                <span className="panel-meta">{panelMeta(p.id, ledger, lang)}</span>
+                <span className="panel-head-btns" onPointerDown={(e) => e.stopPropagation()}>
+                  <button type="button" className={`panel-btn${p.locked ? ' is-on' : ''}`} onClick={() => toggleLock(p.id)} title={lockTitle} aria-label={lockTitle}>
+                    <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                  </button>
+                  <button type="button" className="panel-btn" onClick={() => removePanel(p.id)} title={removeTitle} aria-label={removeTitle}>×</button>
+                </span>
               </div>
-            );
-          })}
-          {drag && origin && (() => {
-            const Body = PANEL_BODIES[origin.id];
-            return (
-              <div className={`panel-card is-dragging${drag.mode === 'resize' ? ' is-resizing' : ''}`} style={{ ...posStyle(origin), transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.025)` }}>
-                <div className="panel-head">
-                  <span className="panel-title">{t(`panel_${origin.id}`)}</span>
-                  <span className="panel-meta">{panelMeta(origin.id, ledger, lang)}</span>
-                </div>
-                <div className="panel-body">{ledger ? <Body ledger={ledger} lang={lang} /> : null}</div>
+              <div className="panel-body"><PanelErrorBoundary>{ledger ? <Body ledger={ledger} lang={lang} /> : null}</PanelErrorBoundary></div>
+              <div className="panel-resize" onPointerDown={(e) => startDrag(e, p.id, 'resize')} aria-hidden="true" />
+            </div>
+          );
+        })}
+        {drag && origin && (() => {
+          const Body = PANEL_BODIES[origin.id];
+          return (
+            <div className={`panel-card is-dragging${drag.mode === 'resize' ? ' is-resizing' : ''}`} style={{ ...posStyle(origin), transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.025)` }}>
+              <div className="panel-head">
+                <span className="panel-title">{t(`panel_${origin.id}`)}</span>
+                <span className="panel-meta">{panelMeta(origin.id, ledger, lang)}</span>
               </div>
-            );
-          })()}
-          {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
-        </PanelErrorBoundary>
+              <div className="panel-body"><PanelErrorBoundary>{ledger ? <Body ledger={ledger} lang={lang} /> : null}</PanelErrorBoundary></div>
+            </div>
+          );
+        })()}
+        {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
       </div>
     </div>
   );
