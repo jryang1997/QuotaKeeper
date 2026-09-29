@@ -157,10 +157,10 @@ fn predict(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Option<(String, C
     ))
 }
 
-fn card_height(card: &Card) -> u16 {
+fn card_height(card: &Card, has_monthly: bool) -> u16 {
     match card {
-        // 每条额度两行(文字 + 块条)+ 上下边框
-        Card::Live(r) => r.limits.len() as u16 * 2 + 2,
+        // 每条额度两行(文字 + 块条)+ 上下边框;有月度行再 +1
+        Card::Live(r) => r.limits.len() as u16 * 2 + 2 + u16::from(has_monthly),
         Card::Missing { .. } => 3,
     }
 }
@@ -174,6 +174,40 @@ fn compact_height(card: &Card) -> u16 {
 
 pub fn render(frame: &mut Frame, area: Rect, st: &ViewState) {
     render_cards(frame, area, st);
+}
+
+/// 配额卡月度行:provider → 本机账本 client(仅三卡有;GOAT 官方口径/Cursor 无账本数据).
+fn monthly_row(
+    card: &Card,
+    ledger: Option<&crate::ledger::LedgerReport>,
+) -> Option<Option<(&'static str, crate::ledger::Agg)>> {
+    let Card::Live(r) = card else { return None };
+    let client = match r.provider {
+        crate::model::ProviderId::OpenCodeGo => "opencode",
+        crate::model::ProviderId::Codex => "codex",
+        crate::model::ProviderId::Claude => "claude",
+        _ => return None,
+    };
+    let ledger = ledger?;
+    Some(
+        ledger
+            .month_by_client
+            .iter()
+            .find(|(c, _)| *c == client)
+            .map(|(c, agg)| (*c, agg.clone())),
+    )
+}
+
+fn fmt_monthly_tokens(v: i64) -> String {
+    if v >= 1_000_000_000 {
+        format!("{:.2}B", v as f64 / 1e9)
+    } else if v >= 1_000_000 {
+        format!("{:.2}M", v as f64 / 1e6)
+    } else if v >= 1_000 {
+        format!("{:.1}K", v as f64 / 1e3)
+    } else {
+        v.to_string()
+    }
 }
 
 /// 卡片标题:plan_type 与 provider 名重复时(如 "OpenCode Go · $10/mo · OpenCode Go")去掉重复段.
@@ -194,7 +228,8 @@ fn render_cards(frame: &mut Frame, area: Rect, st: &ViewState) {
         frame.render_widget(Paragraph::new(i18n::t(i18n::K::Loading)), area);
         return;
     };
-    let full_height: u16 = snap.cards.iter().map(card_height).sum();
+    let monthly = |c: &Card| monthly_row(c, st.ledger).is_some();
+    let full_height: u16 = snap.cards.iter().map(|c| card_height(c, monthly(c))).sum();
     let compact = full_height > area.height;
     let compact_total: u16 = snap.cards.iter().map(compact_height).sum();
     if compact && compact_total > area.height && area.width >= 48 {
@@ -203,21 +238,28 @@ fn render_cards(frame: &mut Frame, area: Rect, st: &ViewState) {
             .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
             .split(area);
         let middle = snap.cards.len().div_ceil(2);
-        render_card_list(frame, columns[0], &snap.cards[..middle], th, true);
-        render_card_list(frame, columns[1], &snap.cards[middle..], th, true);
+        render_card_list(frame, columns[0], &snap.cards[..middle], th, true, st.ledger);
+        render_card_list(frame, columns[1], &snap.cards[middle..], th, true, st.ledger);
     } else {
-        render_card_list(frame, area, &snap.cards, th, compact);
+        render_card_list(frame, area, &snap.cards, th, compact, st.ledger);
     }
 }
 
-fn render_card_list(frame: &mut Frame, area: Rect, cards: &[Card], th: &t::Theme, compact: bool) {
+fn render_card_list(
+    frame: &mut Frame,
+    area: Rect,
+    cards: &[Card],
+    th: &t::Theme,
+    compact: bool,
+    ledger: Option<&crate::ledger::LedgerReport>,
+) {
     let constraints: Vec<Constraint> = cards
         .iter()
         .map(|c| {
             Constraint::Length(if compact {
                 compact_height(c)
             } else {
-                card_height(c)
+                card_height(c, monthly_row(c, ledger).is_some())
             })
         })
         .collect();
@@ -229,14 +271,14 @@ fn render_card_list(frame: &mut Frame, area: Rect, cards: &[Card], th: &t::Theme
         if compact {
             render_compact_card(frame, *a, card, th);
         } else {
-            render_card(frame, *a, card, th);
+            render_card(frame, *a, card, th, ledger);
         }
     }
 }
 
 fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
     let Card::Live(report) = card else {
-        render_card(frame, area, card, th);
+        render_card(frame, area, card, th, None);
         return;
     };
     let block = Block::default()
@@ -286,31 +328,70 @@ fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme
     }
 }
 
-fn render_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
+fn render_card(
+    frame: &mut Frame,
+    area: Rect,
+    card: &Card,
+    th: &t::Theme,
+    ledger: Option<&crate::ledger::LedgerReport>,
+) {
     match card {
         Card::Live(r) => {
-            let title = format!(" {} ", card_title(r));
+            // 卡头:标题 + 订阅到期 chip(≤7 天警示色),与 GUI 同源
+            let now = chrono::Local::now();
+            let mut title_spans = vec![Span::styled(
+                format!(" {} ", card_title(r)),
+                Style::default().fg(th.accent),
+            )];
+            if let Some(ends) = r.subscription_ends_at_ms {
+                let days = ((ends - now.timestamp_millis()).max(0)) / 86_400_000;
+                if let Some(date) = chrono::DateTime::from_timestamp_millis(ends) {
+                    let md = date.with_timezone(&chrono::Local).format("%m-%d");
+                    title_spans.push(Span::styled(
+                        format!("{md} 到期"),
+                        Style::default().fg(if days <= 7 { th.warn } else { th.dim }),
+                    ));
+                }
+            }
             let block = Block::default()
-                .title(Span::styled(title, Style::default().fg(th.accent)))
+                .title(Line::from(title_spans))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(th.border));
             let inner = block.inner(area);
             frame.render_widget(block, area);
+            let has_monthly = monthly_row(card, ledger).is_some();
+            let mut constraints: Vec<Constraint> = r
+                .limits
+                .iter()
+                .flat_map(|_| [Constraint::Length(1), Constraint::Length(1)])
+                .collect();
+            if has_monthly {
+                constraints.push(Constraint::Length(1));
+            }
             let rows: Vec<Rect> = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(
-                    r.limits
-                        .iter()
-                        .flat_map(|_| [Constraint::Length(1), Constraint::Length(1)])
-                        .collect::<Vec<_>>(),
-                )
+                .constraints(constraints)
                 .split(inner)
                 .to_vec();
-            let now = chrono::Local::now();
             for (l, pair) in r.limits.iter().zip(rows.chunks(2)) {
                 frame.render_widget(Paragraph::new(limit_text_line(l, now)), pair[0]);
                 frame.render_widget(Paragraph::new(limit_bar_line(l, inner.width)), pair[1]);
+            }
+            if let Some(row) = rows.last()
+                && let Some(Some((_, agg))) = monthly_row(card, ledger).as_ref().map(|m| m.as_ref().map(|(c, a)| (*c, a.clone())))
+            {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled("MONTHLY ", Style::default().fg(th.dim)),
+                        Span::styled(
+                            fmt_monthly_tokens(agg.total()),
+                            Style::default().fg(th.border),
+                        ),
+                        Span::styled(" tokens", Style::default().fg(th.dim)),
+                    ])),
+                    *row,
+                );
             }
         }
         Card::Missing { provider } => {
@@ -346,6 +427,7 @@ mod tests {
             last_error: None,
             age_secs: Some(3),
             ledger: None,
+            period: crate::ui::overview::Period::D30,
             sel_agent: None,
             sel_day: None,
             sel_trend: None,

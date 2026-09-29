@@ -50,9 +50,22 @@ pub fn name() -> &'static str {
 #[derive(Debug, Clone, Copy)]
 pub enum K {
     Title,
+    PageOverview,
     PageQuota,
     PageTokens,
     PageHeat,
+    PToday,
+    P7,
+    P30,
+    P90,
+    PAll,
+    TotalTokens,
+    TotalRuns,
+    CacheHit,
+    SourceHealth,
+    DailyActivity,
+    LocalLedger,
+    Summary,
     Syncing,
     SToday,
     SWeek,
@@ -109,6 +122,13 @@ pub fn t(k: K) -> &'static str {
                 "Monitor"
             }
         }
+        K::PageOverview => {
+            if zh {
+                "总览"
+            } else {
+                "Overview"
+            }
+        }
         K::PageQuota => {
             if zh {
                 "配额"
@@ -128,6 +148,90 @@ pub fn t(k: K) -> &'static str {
                 "热力图"
             } else {
                 "Heatmap"
+            }
+        }
+        K::PToday => {
+            if zh {
+                "今日"
+            } else {
+                "Today"
+            }
+        }
+        K::P7 => {
+            if zh {
+                "7天"
+            } else {
+                "7d"
+            }
+        }
+        K::P30 => {
+            if zh {
+                "30天"
+            } else {
+                "30d"
+            }
+        }
+        K::P90 => {
+            if zh {
+                "90天"
+            } else {
+                "90d"
+            }
+        }
+        K::PAll => {
+            if zh {
+                "全部"
+            } else {
+                "All"
+            }
+        }
+        K::TotalTokens => {
+            if zh {
+                "累计 Tokens"
+            } else {
+                "Total Tokens"
+            }
+        }
+        K::TotalRuns => {
+            if zh {
+                "累计调用"
+            } else {
+                "Total Runs"
+            }
+        }
+        K::CacheHit => {
+            if zh {
+                "缓存命中"
+            } else {
+                "cache hit"
+            }
+        }
+        K::SourceHealth => {
+            if zh {
+                "来源健康"
+            } else {
+                "Source health"
+            }
+        }
+        K::DailyActivity => {
+            if zh {
+                "每日活动"
+            } else {
+                "Daily activity"
+            }
+        }
+        K::Summary => {
+            if zh {
+                "汇总"
+            } else {
+                "Summary"
+            }
+        }
+        K::LocalLedger => {
+            if zh {
+                "本机账本"
+            } else {
+                "local ledger"
             }
         }
         K::Syncing => {

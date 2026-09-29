@@ -1,13 +1,14 @@
 //! 壳:顶栏 + 响应式侧栏 + 内容区 + 底栏.
 //!
 //! 交互:鼠标点击侧栏切换页面、点击图表/热力格切换明细;
-//! 键盘 ↑↓/Tab/1·2·3 切页,? 显示帮助.
+//! 键盘 ↑↓/Tab/1·2·3·4 切页,总览页 ←→ 切周期,? 显示帮助.
 //! 命中区由渲染时一并填充,主循环用同一份数据做点击判定.
 //! 颜色一律取自 theme(全局,`p` 循环).
 
 pub mod heatmap;
 pub mod i18n;
 pub mod notify;
+pub mod overview;
 pub mod quota;
 pub mod theme;
 pub mod trend;
@@ -38,6 +39,7 @@ fn dim() -> Style {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
+    Overview,
     Quota,
     Usage,
     Heatmap,
@@ -72,6 +74,8 @@ pub struct HitRegions {
     pub trend_buckets: Vec<(Rect, usize)>,
     /// usage 页维度标签 → 维度下标(0 Agent / 1 会话 / 2 项目 / 3 模型)
     pub dim_tabs: Vec<(Rect, usize)>,
+    /// 总览页周期 tabs → 周期
+    pub period_tabs: Vec<(Rect, crate::ui::overview::Period)>,
 }
 
 impl HitRegions {
@@ -85,6 +89,7 @@ impl HitRegions {
         self.trend_metrics.clear();
         self.trend_buckets.clear();
         self.dim_tabs.clear();
+        self.period_tabs.clear();
     }
 
     pub fn hit(&self, column: u16, row: u16) -> Option<Hit> {
@@ -134,6 +139,11 @@ impl HitRegions {
                 return Some(Hit::DimTab(*idx));
             }
         }
+        for (rect, period) in &self.period_tabs {
+            if rect.contains(pos) {
+                return Some(Hit::PeriodTab(*period));
+            }
+        }
         None
     }
 }
@@ -146,6 +156,7 @@ pub enum Hit {
     TrendMetric(TrendMetric),
     TrendBucket(usize),
     DimTab(usize),
+    PeriodTab(crate::ui::overview::Period),
     AgentRow(usize),
     DayRow(usize),
     HeatCell(String),
@@ -158,6 +169,8 @@ pub struct ViewState<'a> {
     pub last_error: Option<&'a str>,
     pub age_secs: Option<u64>,
     pub ledger: Option<&'a LedgerReport>,
+    /// 总览页周期
+    pub period: crate::ui::overview::Period,
     pub sel_agent: Option<usize>,
     pub sel_day: Option<usize>,
     pub sel_trend: Option<usize>,
@@ -202,6 +215,7 @@ pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
     };
 
     match st.page {
+        Page::Overview => overview::render(frame, content, st, hits),
         Page::Quota => quota::render(frame, content, st),
         Page::Usage => usage::render(frame, content, st, hits),
         Page::Heatmap => heatmap::render(frame, content, st, hits),
@@ -218,6 +232,7 @@ const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '�
 
 fn header(frame: &mut Frame, area: Rect, st: &ViewState) {
     let page = match st.page {
+        Page::Overview => i18n::t(i18n::K::PageOverview),
         Page::Quota => i18n::t(i18n::K::PageQuota),
         Page::Usage => i18n::t(i18n::K::PageTokens),
         Page::Heatmap => i18n::t(i18n::K::PageHeat),
@@ -254,14 +269,15 @@ fn header(frame: &mut Frame, area: Rect, st: &ViewState) {
     );
 }
 
-const SIDEBAR_ITEMS: [(i18n::K, Page); 3] = [
+const SIDEBAR_ITEMS: [(i18n::K, Page); 4] = [
+    (i18n::K::PageOverview, Page::Overview),
     (i18n::K::PageQuota, Page::Quota),
     (i18n::K::PageTokens, Page::Usage),
     (i18n::K::PageHeat, Page::Heatmap),
 ];
 
 /// 粗略显示宽度:CJK(≥0x2E80)记 2,其余记 1(侧栏标签够用).
-fn disp_w(s: &str) -> u16 {
+pub(crate) fn disp_w(s: &str) -> u16 {
     s.chars()
         .map(|c| if c as u32 >= 0x2E80 { 2 } else { 1 })
         .sum()
@@ -312,6 +328,7 @@ fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
     let hint = match (i18n::lang(), st.page, st.dim == 3) {
         (i18n::Lang::Zh, Page::Usage, true) => "↑↓ 模型 · Tab 页 · g 图 · t 时间 · c 金额 · ? 帮助",
         (i18n::Lang::Zh, Page::Usage, false) => "↑↓ 页 · g 图 · t 时间 · c 金额 · ? 帮助",
+        (i18n::Lang::Zh, Page::Overview, _) => "←→ 周期 · r 刷新 · ? 帮助 · q 退出",
         (i18n::Lang::Zh, _, _) => "↑↓ 页 · r 刷新 · ? 帮助 · q 退出",
         (i18n::Lang::En, Page::Usage, true) => {
             "↑↓ models · Tab page · g chart · t range · c cost · ? help"
@@ -344,7 +361,7 @@ fn help_overlay(frame: &mut Frame, page: Page, model_list_active: bool) {
     let zh = i18n::lang() == i18n::Lang::Zh;
     let mut lines = if zh {
         vec![
-            "1/2/3  配额 / 用量 / 热力图",
+            "1/2/3/4  总览 / 配额 / 用量 / 热力图 · 总览页 ←→ 切周期",
             if model_list_active {
                 "↑/k  上一模型    ↓/j  下一模型    Tab  下一页"
             } else {
@@ -355,7 +372,7 @@ fn help_overlay(frame: &mut Frame, page: Page, model_list_active: bool) {
         ]
     } else {
         vec![
-            "1/2/3  Quota / Usage / Heatmap",
+            "1/2/3/4  Overview / Quota / Usage / Heatmap · ←→ period",
             if model_list_active {
                 "↑/k  previous model    ↓/j  next model    Tab  next page"
             } else {
@@ -402,6 +419,7 @@ mod tests {
             last_error: None,
             age_secs: None,
             ledger: None,
+            period: crate::ui::overview::Period::D30,
             sel_agent: None,
             sel_day: None,
             sel_trend: None,
@@ -423,11 +441,12 @@ mod tests {
         let mut hits = HitRegions::default();
         let st = view(Page::Quota);
         term.draw(|f| render(f, &st, &mut hits)).unwrap();
-        assert_eq!(hits.sidebar.len(), 3);
+        assert_eq!(hits.sidebar.len(), 4);
         // chips:每个高 3、间隔 1,内区从 x=1 起
-        assert!(matches!(hits.hit(1, 4), Some(Hit::Sidebar(Page::Quota))));
-        assert!(matches!(hits.hit(1, 8), Some(Hit::Sidebar(Page::Usage))));
-        assert!(matches!(hits.hit(1, 12), Some(Hit::Sidebar(Page::Heatmap))));
+        assert!(matches!(hits.hit(1, 4), Some(Hit::Sidebar(Page::Overview))));
+        assert!(matches!(hits.hit(1, 8), Some(Hit::Sidebar(Page::Quota))));
+        assert!(matches!(hits.hit(1, 12), Some(Hit::Sidebar(Page::Usage))));
+        assert!(matches!(hits.hit(1, 16), Some(Hit::Sidebar(Page::Heatmap))));
         let mut hits2 = HitRegions::default();
         term.draw(|f| render(f, &view(Page::Usage), &mut hits2))
             .unwrap();
@@ -454,7 +473,7 @@ mod tests {
         term_91
             .draw(|f| render(f, &view(Page::Usage), &mut hits_91))
             .unwrap();
-        assert_eq!(hits_91.sidebar.len(), 3);
+        assert_eq!(hits_91.sidebar.len(), 4);
     }
 
     #[test]

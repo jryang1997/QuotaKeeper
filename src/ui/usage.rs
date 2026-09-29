@@ -1025,6 +1025,7 @@ mod tests {
             last_error: None,
             age_secs: None,
             ledger: Some(ledger),
+            period: crate::ui::overview::Period::D30,
             sel_agent: None,
             sel_day: None,
             sel_trend: None,

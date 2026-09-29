@@ -8,7 +8,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, ledger, model, ui};
+use tui_token_monitor::{backend, ledger, model, pace, ui};
 
 use crossterm::{
     event::{
@@ -53,6 +53,42 @@ fn spawn_refresh(tx: mpsc::Sender<Msg>) {
 
 /// 配额阈值通知:等级跃迁才发 toast(避免每 60s 重复轰炸)。
 /// 订阅到期提醒:档位只升不降,上升时 toast;续费回落静默更新状态.
+/// 预测提醒(与 GUI pace 同逻辑):比匀速快且预计耗尽 → 首次触发 toast.
+fn notify_pace(snap: &Snapshot, fetched_at_ms: u64, risk: &mut std::collections::HashMap<String, bool>) {
+    let zh = ui::i18n::lang() == ui::i18n::Lang::Zh;
+    let mut next: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for card in &snap.cards {
+        let model::Card::Live(r) = card else { continue };
+        if r.source == model::QuotaSource::CpaLocal {
+            continue;
+        }
+        let provider = r.provider.title().split(" ·").next().unwrap_or("").to_string();
+        for l in &r.limits {
+            let key = format!("{provider} · {}", l.label);
+            let forecast = pace::forecast(l, fetched_at_ms as i64);
+            let at_risk = forecast.is_some_and(|v| v.exhaust_in_ms.is_some());
+            if at_risk
+                && risk.get(&key) != Some(&true)
+                && let Some(v) = forecast
+            {
+                let mins = v.exhaust_in_ms.unwrap_or(0) / 60_000;
+                let title = format!("{key}");
+                let body = if zh {
+                    format!("比匀速快 {:.0} 个百分点;预计 {} 分钟后耗尽", v.delta_points, mins)
+                } else {
+                    format!(
+                        "{:.0} points ahead of pace; may run out in {} min",
+                        v.delta_points, mins
+                    )
+                };
+                ui::notify::toast(&title, &body);
+            }
+            next.insert(key, at_risk);
+        }
+    }
+    *risk = next;
+}
+
 fn notify_expiry(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
     let now = now_ms();
     let mut next = Vec::with_capacity(prev.len());
@@ -142,7 +178,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut next_refresh = Instant::now();
     let mut tick: u64 = 0;
 
-    let mut page = Page::Quota;
+    let mut page = Page::Overview;
+    // 总览页周期(←→ 或点击 tabs 切换)
+    let mut period = ui::overview::Period::D30;
     let mut show_help = false;
     let mut sel_agent: Option<usize> = None;
     let mut sel_day: Option<usize> = None;
@@ -157,6 +195,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut prev_levels: Vec<(String, u8)> = Vec::new();
     // 订阅到期通知状态机:每卡记上一轮档位,只升不降(续费回落静默)
     let mut prev_expiry: Vec<(String, u8)> = Vec::new();
+    // 预测提醒:每 (卡, 窗口) 记风险位,进入风险首次 toast,回落后再入才再发
+    let mut pace_risk: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut ledger_report: Option<ledger::LedgerReport> = None;
     let mut hits = HitRegions::default();
 
@@ -175,6 +215,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                     Ok((snap, at)) => {
                         notify_quota(&snap, &mut prev_levels);
                         notify_expiry(&snap, &mut prev_expiry);
+                        notify_pace(&snap, at, &mut pace_risk);
                         snapshot = Some(snap);
                         fetched_at_ms = Some(at);
                         last_error = None;
@@ -204,6 +245,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
             last_error: last_error.as_deref(),
             age_secs,
             ledger: ledger_report.as_ref(),
+            period,
             sel_agent,
             sel_day,
             sel_trend,
@@ -289,9 +331,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                     }
                     KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
                         page = match page {
+                            Page::Overview => Page::Quota,
                             Page::Quota => Page::Usage,
                             Page::Usage => Page::Heatmap,
-                            Page::Heatmap => Page::Quota,
+                            Page::Heatmap => Page::Overview,
                         };
                         sel_agent = None;
                         sel_day = None;
@@ -300,7 +343,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                     }
                     KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => {
                         page = match page {
-                            Page::Quota => Page::Heatmap,
+                            Page::Overview => Page::Heatmap,
+                            Page::Quota => Page::Overview,
                             Page::Usage => Page::Quota,
                             Page::Heatmap => Page::Usage,
                         };
@@ -309,21 +353,34 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         sel_trend = None;
                         sel_heat = None;
                     }
+                    KeyCode::Left if page == Page::Overview => {
+                        period = period.prev();
+                    }
+                    KeyCode::Right if page == Page::Overview => {
+                        period = period.next();
+                    }
                     KeyCode::Char('1') => {
-                        page = Page::Quota;
+                        page = Page::Overview;
                         sel_agent = None;
                         sel_day = None;
                         sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('2') => {
-                        page = Page::Usage;
+                        page = Page::Quota;
                         sel_agent = None;
                         sel_day = None;
                         sel_trend = None;
                         sel_heat = None;
                     }
                     KeyCode::Char('3') => {
+                        page = Page::Usage;
+                        sel_agent = None;
+                        sel_day = None;
+                        sel_trend = None;
+                        sel_heat = None;
+                    }
+                    KeyCode::Char('4') => {
                         page = Page::Heatmap;
                         sel_agent = None;
                         sel_day = None;
@@ -342,6 +399,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                             sel_day = None;
                             sel_trend = None;
                             sel_heat = None;
+                        }
+                        Some(ui::Hit::PeriodTab(p)) => {
+                            period = p;
                         }
                         Some(ui::Hit::ToggleChart) => {
                             chart_mode = !chart_mode;
