@@ -41,14 +41,15 @@ const CLIENT_COLORS = {
   claude: '#ef6c4d',
 };
 const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757',
 };
-const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity'];
+const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude'];
 const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
   goat: 'logos/commandcode.svg',
   antigravity: 'logos/antigravity.png',
+  claude: 'logos/claude.png',
 };
 
 const SOURCE_PATHS = {
