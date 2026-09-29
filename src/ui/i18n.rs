@@ -97,10 +97,6 @@ pub enum K {
     ByModel,
     NoData,
     Loading,
-    MGo,
-    MCodex,
-    MGoat,
-    MAg,
 }
 
 pub fn t(k: K) -> &'static str {
@@ -428,27 +424,6 @@ pub fn t(k: K) -> &'static str {
                 "加载中…"
             } else {
                 "Loading…"
-            }
-        }
-        K::MGo | K::MCodex => {
-            if zh {
-                "omp 无凭证 · 登录后出现"
-            } else {
-                "no omp credential"
-            }
-        }
-        K::MGoat => {
-            if zh {
-                "未登录 · cmdc login"
-            } else {
-                "run cmdc login"
-            }
-        }
-        K::MAg => {
-            if zh {
-                "CPA 未运行或未配置 cpa-key"
-            } else {
-                "CPA down or no cpa-key"
             }
         }
     }

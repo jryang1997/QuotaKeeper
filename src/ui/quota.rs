@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
 };
 
-use crate::model::{Card, Limit, ProviderId, Status, format_countdown};
+use crate::model::{Card, Limit, Status, format_countdown};
 use crate::ui::ViewState;
 use crate::ui::i18n;
 use crate::ui::theme as t;
@@ -314,11 +314,8 @@ fn render_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
             }
         }
         Card::Missing { provider } => {
-            let hint = match provider {
-                ProviderId::Goat => i18n::t(i18n::K::MGoat),
-                ProviderId::Antigravity => i18n::t(i18n::K::MAg),
-                _ => i18n::t(i18n::K::MGo),
-            };
+            // 准确的缺卡原因(双语)由 model 统一给出,与 GUI 同源。
+            let hint = provider.missing_hint();
             let block = Block::default()
                 .title(format!(" {} ", provider.title()))
                 .borders(Borders::ALL)
