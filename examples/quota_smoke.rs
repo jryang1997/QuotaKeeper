@@ -15,6 +15,17 @@ fn print_snapshot(snap: &Snapshot) {
                     report.source.label()
                 );
                 println!("    套餐:{}", report.plan_type);
+                if let Some(ends) = report.subscription_ends_at_ms {
+                    let left_days = (ends - chrono::Utc::now().timestamp_millis()).max(0)
+                        / 86_400_000;
+                    println!(
+                        "    订阅期至:{}(剩 {} 天)",
+                        chrono::DateTime::from_timestamp_millis(ends)
+                            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|| "?".into()),
+                        left_days
+                    );
+                }
                 for limit in &report.limits {
                     let reset = match limit.resets_in_ms {
                         Some(ms) => format!(" · {}s 后重置", ms / 1000),

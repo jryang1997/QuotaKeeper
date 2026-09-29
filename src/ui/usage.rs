@@ -1206,6 +1206,7 @@ mod tests {
                         resets_in_ms: Some(9_000_000),
                         status: Status::Warning,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::Codex,
@@ -1217,6 +1218,7 @@ mod tests {
                         resets_in_ms: Some(9_000_000),
                         status: Status::Ok,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
             ],
         };
@@ -1242,6 +1244,7 @@ mod tests {
                         resets_in_ms: Some(1_000_000),
                         status: Status::Exhausted,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::OpenCodeGo,
@@ -1253,6 +1256,7 @@ mod tests {
                         resets_in_ms: Some(9_000_000),
                         status: Status::Ok,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
             ],
         };

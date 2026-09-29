@@ -19,15 +19,21 @@ fn omp_candidates() -> Vec<String> {
 
 /// Fetch all providers independently. One failed source cannot erase other live cards.
 pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
-    let (codex, go, goat, cpa, claude) = std::thread::scope(|scope| {
-        let codex = scope.spawn(|| {
-            crate::codex_app_server::fetch_report().or_else(|_| codex_native_quota_report())
-        });
+    let (codex, go, goat, cpa, claude, cursor) = std::thread::scope(|scope| {
+        let codex = scope.spawn(codex_card);
         let go = scope.spawn(crate::opencode_go::fetch_report);
         let goat = scope.spawn(crate::goat::fetch_report);
         let cpa = scope.spawn(cpa_antigravity_card);
         let claude = scope.spawn(crate::claude_quota::fetch_report);
-        (codex.join(), go.join(), goat.join(), cpa.join(), claude.join())
+        let cursor = scope.spawn(crate::cursor_quota::fetch_report);
+        (
+            codex.join(),
+            go.join(),
+            goat.join(),
+            cpa.join(),
+            claude.join(),
+            cursor.join(),
+        )
     });
 
     let mut cards = model::ProviderId::all().map(|provider| Card::Missing { provider });
@@ -45,6 +51,9 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     }
     if let Ok(Ok(report)) = claude {
         cards[4] = Card::Live(report);
+    }
+    if let Ok(Ok(report)) = cursor {
+        cards[5] = Card::Live(report);
     }
 
     if (matches!(cards[0], Card::Missing { .. }) || matches!(cards[1], Card::Missing { .. }))
@@ -65,7 +74,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     })
 }
 
-fn merge_missing(cards: &mut [Card; 5], fallback: Vec<Card>) {
+fn merge_missing(cards: &mut [Card; 6], fallback: Vec<Card>) {
     for card in fallback {
         let Card::Live(report) = card else { continue };
         if let Some(index) = ProviderId::all()
@@ -407,6 +416,7 @@ fn cpa_upstream_report(
         source: QuotaSource::CpaGoogleQuota,
         plan_type,
         limits,
+        subscription_ends_at_ms: None,
     })
 }
 
@@ -517,27 +527,74 @@ pub fn cpa_antigravity_card() -> Option<model::Card> {
         source: QuotaSource::CpaLocal,
         plan_type: plan,
         limits,
+        subscription_ends_at_ms: None,
     }))
 }
 
-/// Codex 原生配额:读 ~/.codex/auth.json(CODEX_HOME 可重定向)的 OAuth token,直调 wham/usage.
-/// 返回的快照只含 Codex 一张卡(Go/GOAT 由各自链路负责)。
-fn codex_native_quota_report() -> anyhow::Result<Report> {
+/// Codex 卡:官方 app-server(失败回退 wham/usage),再补 accounts/check 的订阅期.
+fn codex_card() -> anyhow::Result<Report> {
+    let mut report =
+        crate::codex_app_server::fetch_report().or_else(|_| codex_native_quota_report())?;
+    // 订阅期(ChatGPT 续费时间):与 wham 同一登录态调 accounts/check,失败静默——
+    // 属增强信息而非依赖,端点未公开且随时可变(形状参考 codex-switcher,MIT)。
+    if let Some(ends) = codex_subscription_end_ms() {
+        report.subscription_ends_at_ms = Some(ends);
+    }
+    Ok(report)
+}
+
+fn codex_auth_tokens() -> Option<(String, String)> {
     let auth_path = crate::paths::codex_home().join("auth.json");
-    let text = std::fs::read_to_string(&auth_path)
-        .map_err(|_| anyhow::anyhow!("{} 不存在(未用 Codex CLI 登录)", auth_path.display()))?;
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("auth.json 解析失败: {e}"))?;
+    let text = std::fs::read_to_string(&auth_path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let access = v
-        .pointer("/tokens/access_token")
-        .and_then(|x| x.as_str())
-        .ok_or_else(|| anyhow::anyhow!("auth.json 无 tokens.access_token"))?
+        .pointer("/tokens/access_token")?
+        .as_str()?
         .to_string();
     let account = v
         .pointer("/tokens/account_id")
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .to_string();
+    Some((access, account))
+}
+
+/// ChatGPT 订阅周期:`accounts/check` 里任一账号 entitlement 的 renews_at(ISO8601;
+/// 个别部署只给日期,回退按 UTC 当日零点解析)。
+fn codex_subscription_end_ms() -> Option<i64> {
+    let (access, _account) = codex_auth_tokens()?;
+    let resp = crate::http::get("https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27")
+        .set("Authorization", &format!("Bearer {access}"))
+        .set("Accept", "application/json")
+        .timeout(Duration::from_secs(15))
+        .call()
+        .ok()?;
+    let v: serde_json::Value = resp.into_json().ok()?;
+    v["accounts"]
+        .as_object()?
+        .values()
+        .filter_map(|acc| acc["entitlement"]["renews_at"].as_str())
+        .find_map(|raw| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .map(|dt| dt.timestamp_millis())
+                .or_else(|| {
+                    chrono::NaiveDate::parse_from_str(raw.get(0..10)?, "%Y-%m-%d")
+                        .ok()?
+                        .and_hms_opt(0, 0, 0)?
+                        .and_utc()
+                        .timestamp_millis()
+                        .into()
+                })
+        })
+}
+
+/// Codex 原生配额:读 ~/.codex/auth.json(CODEX_HOME 可重定向)的 OAuth token,直调 wham/usage.
+/// 返回的快照只含 Codex 一张卡(Go/GOAT 由各自链路负责)。
+fn codex_native_quota_report() -> anyhow::Result<Report> {
+    let (access, account) = codex_auth_tokens().ok_or_else(|| {
+        anyhow::anyhow!("~/.codex/auth.json 不存在或无 tokens.access_token(未用 Codex CLI 登录)")
+    })?;
 
     let resp = crate::http::get("https://chatgpt.com/backend-api/wham/usage")
         .set("Authorization", &format!("Bearer {access}"))
@@ -586,6 +643,8 @@ fn codex_native_quota_report() -> anyhow::Result<Report> {
             .unwrap_or("Codex access")
             .to_string(),
         limits,
+        // wham 路径自身不带订阅期;由调用方补 accounts/check 的 renews_at.
+        subscription_ends_at_ms: None,
     })
 }
 
@@ -630,6 +689,7 @@ mod tests {
             source: QuotaSource::CodexAppServer,
             plan_type: "pro".into(),
             limits: vec![],
+            subscription_ends_at_ms: None,
         });
         let fallback = model::parse_snapshot(include_str!("../tests/fixtures/usage.json")).unwrap();
         merge_missing(&mut cards, fallback.cards);

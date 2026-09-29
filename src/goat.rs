@@ -254,6 +254,8 @@ fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
             format!("{} · {}", plan_name(&subs.plan_id), subs.status)
         },
         limits,
+        // 订阅周期结束 = 续费/到期时间(currentPeriodEnd),供到期提醒用.
+        subscription_ends_at_ms: subs.current_period_end.as_deref().and_then(parse_iso_ms),
     }
 }
 

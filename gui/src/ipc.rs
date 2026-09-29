@@ -58,6 +58,9 @@ pub enum CardDto {
         plan_type: String,
         source: &'static str,
         method: &'static str,
+        /// 订阅周期结束(续费/到期)时间;None = 该来源不提供.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        subscription_ends_at_ms: Option<i64>,
         limits: Vec<LimitDto>,
     },
     Missing {
@@ -95,8 +98,9 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                         "provider_fraction"
                     }
                     model::ProviderId::Antigravity => "activity_vs_average",
-                    model::ProviderId::Claude => "provider_fraction",
+                    model::ProviderId::Claude | model::ProviderId::Cursor => "provider_fraction",
                 },
+                subscription_ends_at_ms: r.subscription_ends_at_ms,
                 limits: r
                     .limits
                     .iter()
@@ -118,6 +122,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Goat => "Command Code billing API",
                     model::ProviderId::Antigravity => "CPA 管理接口 · 可代查 Google 上游配额",
                     model::ProviderId::Claude => "Claude 官方 oauth/usage（Claude Code 登录态）",
+                    model::ProviderId::Cursor => "Cursor usage-summary（Cursor 登录态）",
                 },
                 method: "unavailable",
             },
@@ -132,6 +137,7 @@ fn provider_slug(p: model::ProviderId) -> &'static str {
         model::ProviderId::Goat => "goat",
         model::ProviderId::Antigravity => "antigravity",
         model::ProviderId::Claude => "claude",
+        model::ProviderId::Cursor => "cursor",
     }
 }
 
@@ -488,7 +494,7 @@ mod tests {
         let rep = ledger::collect(chrono::Local::now());
         let s = push(123, 120, 122, None, &snap, &rep, None);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(v["cards"].as_array().unwrap().len(), 5);
+        assert_eq!(v["cards"].as_array().unwrap().len(), 6);
         assert_eq!(v["quota_fetched_at_ms"], 120);
         assert_eq!(v["quota_checked_at_ms"], 122);
         assert!(v["goat_usage"].is_null());

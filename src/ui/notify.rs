@@ -65,6 +65,54 @@ pub fn transition(prev: u8, now: u8) -> Option<ToastEvent> {
     }
 }
 
+/// 订阅到期档位:0 正常 / 1 ≤7 天 / 2 ≤3 天 / 3 ≤1 天或已过期。None = 无订阅期。
+pub fn expiry_level(ends_at_ms: Option<i64>, now_ms: i64) -> u8 {
+    let Some(ends) = ends_at_ms else { return 0 };
+    let left = ends - now_ms;
+    if left <= 86_400_000 {
+        3
+    } else if left <= 3 * 86_400_000 {
+        2
+    } else if left <= 7 * 86_400_000 {
+        1
+    } else {
+        0
+    }
+}
+
+/// 到期 toast 标题(双语):「GOAT 订阅」/「GOAT subscription」。
+pub fn expiry_title(provider: &str) -> String {
+    match crate::ui::i18n::lang() {
+        crate::ui::i18n::Lang::Zh => format!("{provider} 订阅"),
+        crate::ui::i18n::Lang::En => format!("{provider} subscription"),
+    }
+}
+
+/// 到期 toast 正文(双语):「10-01 到期 · 剩 2 天」;剩 0 天「今日到期」。
+pub fn expiry_message(ends_at_ms: i64, now_ms: i64) -> String {
+    let days_left = ((ends_at_ms - now_ms).max(0) + 86_399_999) / 86_400_000;
+    let date = chrono::DateTime::from_timestamp_millis(ends_at_ms)
+        .map(|dt| dt.with_timezone(&chrono::Local))
+        .map(|dt| dt.format("%m-%d").to_string())
+        .unwrap_or_default();
+    match crate::ui::i18n::lang() {
+        crate::ui::i18n::Lang::Zh => {
+            if days_left == 0 {
+                format!("{date} 今日到期")
+            } else {
+                format!("{date} 到期 · 剩 {days_left} 天")
+            }
+        }
+        crate::ui::i18n::Lang::En => {
+            if days_left == 0 {
+                format!("expires today ({date})")
+            } else {
+                format!("expires {date} · {days_left} days left")
+            }
+        }
+    }
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -128,5 +176,27 @@ mod tests {
         assert!(transition(1, 1).is_none());
         assert!(transition(0, 0).is_none());
         assert!(transition(0, 2).is_some());
+    }
+
+    #[test]
+    fn expiry_level_follows_day_thresholds() {
+        let now = 0i64;
+        assert_eq!(expiry_level(None, now), 0);
+        assert_eq!(expiry_level(Some(8 * 86_400_000), now), 0);
+        assert_eq!(expiry_level(Some(7 * 86_400_000), now), 1);
+        assert_eq!(expiry_level(Some(4 * 86_400_000), now), 1);
+        assert_eq!(expiry_level(Some(3 * 86_400_000), now), 2);
+        assert_eq!(expiry_level(Some(86_400_000), now), 3);
+        assert_eq!(expiry_level(Some(0), now), 3);
+        // 已过期(负余量)也是最高档
+        assert_eq!(expiry_level(Some(-86_400_000), now), 3);
+    }
+
+    #[test]
+    fn expiry_message_counts_days_up() {
+        let now = 0i64;
+        let zh_day = expiry_message(2 * 86_400_000, now);
+        assert!(zh_day.contains("剩 2 天"), "{zh_day}");
+        assert!(expiry_message(0, now).contains("今日到期"));
     }
 }

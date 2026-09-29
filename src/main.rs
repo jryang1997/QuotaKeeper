@@ -52,6 +52,31 @@ fn spawn_refresh(tx: mpsc::Sender<Msg>) {
 }
 
 /// 配额阈值通知:等级跃迁才发 toast(避免每 60s 重复轰炸)。
+/// 订阅到期提醒:档位只升不降,上升时 toast;续费回落静默更新状态.
+fn notify_expiry(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
+    let now = now_ms();
+    let mut next = Vec::with_capacity(prev.len());
+    for card in &snap.cards {
+        let model::Card::Live(r) = card else { continue };
+        let Some(ends) = r.subscription_ends_at_ms else { continue };
+        let provider = r.provider.title().split(" ·").next().unwrap_or("subscription");
+        let level = ui::notify::expiry_level(Some(ends), now);
+        let before = prev
+            .iter()
+            .find(|(k, _)| *k == provider)
+            .map(|(_, v)| *v)
+            .unwrap_or(0);
+        if level > before {
+            ui::notify::toast(
+                &ui::notify::expiry_title(provider),
+                &ui::notify::expiry_message(ends, now),
+            );
+        }
+        next.push((provider.to_string(), level));
+    }
+    *prev = next;
+}
+
 fn notify_quota(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
     let mut next = Vec::with_capacity(prev.len());
     for card in &snap.cards {
@@ -130,6 +155,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut model_offset: usize = 0;
     // 配额阈值通知状态机:每 (卡, 额度) 记上一轮等级,跃迁才发 toast
     let mut prev_levels: Vec<(String, u8)> = Vec::new();
+    // 订阅到期通知状态机:每卡记上一轮档位,只升不降(续费回落静默)
+    let mut prev_expiry: Vec<(String, u8)> = Vec::new();
     let mut ledger_report: Option<ledger::LedgerReport> = None;
     let mut hits = HitRegions::default();
 
@@ -147,6 +174,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                 match quota {
                     Ok((snap, at)) => {
                         notify_quota(&snap, &mut prev_levels);
+                        notify_expiry(&snap, &mut prev_expiry);
                         snapshot = Some(snap);
                         fetched_at_ms = Some(at);
                         last_error = None;

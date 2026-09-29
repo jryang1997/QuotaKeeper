@@ -297,6 +297,7 @@ fn main() -> anyhow::Result<()> {
     let mut latest_snapshot = fallback_snapshot();
     let mut quota_error = None;
     let mut notification_levels: Option<Vec<(String, u8, f64)>> = None;
+    let mut notification_expiry_levels: Option<Vec<(String, u8)>> = None;
     let mut notify_enabled = false;
     let mut pace_alerts_enabled = false;
     let mut pace_risk = std::collections::HashMap::<String, bool>::new();
@@ -518,6 +519,80 @@ fn main() -> anyhow::Result<()> {
                                     }
                                 }
                                 notification_levels = Some(current);
+                                // 订阅到期提醒:档位只升不降,上升时 toast(复用通知开关与夜间静默).
+                                {
+                                    let now_ms = r.fetched_at_ms as i64;
+                                    let expiry_current: Vec<(String, u8)> = snapshot
+                                        .cards
+                                        .iter()
+                                        .filter_map(|card| {
+                                            let tui_token_monitor::model::Card::Live(report) = card
+                                            else {
+                                                return None;
+                                            };
+                                            let ends = report.subscription_ends_at_ms?;
+                                            let provider = report
+                                                .provider
+                                                .title()
+                                                .split(" ·")
+                                                .next()
+                                                .unwrap_or("subscription")
+                                                .to_string();
+                                            Some((
+                                                provider,
+                                                tui_token_monitor::ui::notify::expiry_level(
+                                                    Some(ends),
+                                                    now_ms,
+                                                ),
+                                            ))
+                                        })
+                                        .collect();
+                                    if let Some(previous) = notification_expiry_levels.as_ref() {
+                                        for (provider, level) in &expiry_current {
+                                            let prior = previous
+                                                .iter()
+                                                .find(|(old, _)| old == provider)
+                                                .map(|(_, value)| *value)
+                                                .unwrap_or(0);
+                                            if *level > prior
+                                                && notify_enabled
+                                                && !(quiet_hours && in_quiet_hours())
+                                                && let Some(ends) = snapshot
+                                                    .cards
+                                                    .iter()
+                                                    .find_map(|card| {
+                                                        let tui_token_monitor::model::Card::Live(
+                                                            report,
+                                                        ) = card
+                                                        else {
+                                                            return None;
+                                                        };
+                                                        let name = report
+                                                            .provider
+                                                            .title()
+                                                            .split(" ·")
+                                                            .next()
+                                                            .unwrap_or("");
+                                                        (name == *provider)
+                                                            .then_some(report.subscription_ends_at_ms)
+                                                            .flatten()
+                                                    })
+                                            {
+                                                let title = if notify_lang == 1 {
+                                                    format!("{provider} subscription")
+                                                } else {
+                                                    format!("{provider} 订阅")
+                                                };
+                                                let body =
+                                                    tui_token_monitor::ui::notify::expiry_message(
+                                                        ends, now_ms,
+                                                    );
+                                                tui_token_monitor::ui::notify::toast(&title, &body);
+                                            }
+                                        }
+                                    }
+                                    notification_expiry_levels = Some(expiry_current);
+                                }
                                 latest_snapshot = snapshot;
                                 quota_error = None;
                                 latest_quota_fetched_at_ms = r.fetched_at_ms;
@@ -682,6 +757,7 @@ mod tray_tests {
                         resets_in_ms: Some(1000),
                         status: Status::Warning,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::Antigravity,
@@ -693,6 +769,7 @@ mod tray_tests {
                         resets_in_ms: None,
                         status: Status::Exhausted,
                     }],
+                    subscription_ends_at_ms: None,
                 }),
             ],
         };
@@ -716,6 +793,7 @@ mod tray_tests {
                     resets_in_ms: Some(1000),
                     status: Status::Warning,
                 }],
+                subscription_ends_at_ms: None,
             })],
         };
         let levels = quota_levels(&snap);

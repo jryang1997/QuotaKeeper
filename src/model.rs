@@ -56,6 +56,7 @@ pub enum ProviderId {
     Goat,
     Antigravity,
     Claude,
+    Cursor,
 }
 
 impl ProviderId {
@@ -68,13 +69,14 @@ impl ProviderId {
     }
 
     /// 固定展示顺序.
-    pub fn all() -> [Self; 5] {
+    pub fn all() -> [Self; 6] {
         [
             Self::OpenCodeGo,
             Self::Codex,
             Self::Goat,
             Self::Antigravity,
             Self::Claude,
+            Self::Cursor,
         ]
     }
 
@@ -85,6 +87,7 @@ impl ProviderId {
             Self::Goat => "Command Code GOAT",
             Self::Antigravity => "Antigravity · CPA",
             Self::Claude => "Claude Pro/Max",
+            Self::Cursor => "Cursor",
         }
     }
 
@@ -110,6 +113,10 @@ impl ProviderId {
             (Self::Antigravity, false) => "CPA not running, or ~/.tui-token-monitor/cpa-key missing",
             (Self::Claude, true) => "未找到 Claude Code 登录态；运行 `claude` 登录后刷新",
             (Self::Claude, false) => "No Claude Code login found; run `claude` to sign in, then refresh",
+            (Self::Cursor, true) => "未找到 Cursor 登录态；启动 Cursor 编辑器或 `cursor-agent login` 后刷新",
+            (Self::Cursor, false) => {
+                "No Cursor login found; start the Cursor editor or run `cursor-agent login`, then refresh"
+            }
         }
     }
 }
@@ -124,6 +131,7 @@ pub enum QuotaSource {
     CpaLocal,
     OmpFallback,
     ClaudeOauth,
+    CursorUsageSummary,
 }
 
 impl QuotaSource {
@@ -137,6 +145,7 @@ impl QuotaSource {
             Self::CpaLocal => "CPA 本机管理接口；若有 OMP stats.db 则附本机活动数据",
             Self::OmpFallback => "OMP usage --json · 兼容兜底",
             Self::ClaudeOauth => "Claude 官方 oauth/usage · 本应用直连",
+            Self::CursorUsageSummary => "Cursor usage-summary · 本应用直连（未文档化接口）",
         }
     }
 }
@@ -156,6 +165,9 @@ pub struct Report {
     pub source: QuotaSource,
     pub plan_type: String,
     pub limits: Vec<Limit>,
+    /// 订阅周期结束(续费/到期)时间;None = 该来源不提供订阅期.
+    /// 语义上是"付费订阅到期",与配额窗口的 reset(月度窗口等)是两回事.
+    pub subscription_ends_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +271,7 @@ pub fn parse_snapshot(json: &str) -> anyhow::Result<Snapshot> {
                 source: QuotaSource::OmpFallback,
                 plan_type: r.metadata.plan_type.clone(),
                 limits,
+                subscription_ends_at_ms: None,
             },
         );
     }
@@ -304,7 +317,7 @@ mod tests {
     #[test]
     fn fixture_parses_to_expected_percentages() {
         let snap = parse_snapshot(FIXTURE).unwrap();
-        assert_eq!(snap.cards.len(), 5);
+        assert_eq!(snap.cards.len(), 6);
         let go = match &snap.cards[0] {
             Card::Live(r) => r,
             Card::Missing { .. } => panic!("go 应为 Live"),
@@ -319,11 +332,17 @@ mod tests {
         assert_eq!(codex.limits.len(), 2);
         assert!((codex.limits[0].used_pct - 7.0).abs() < 1e-9);
         assert!((codex.limits[1].used_pct - 70.0).abs() < 1e-9);
-        // fixture 无 Claude 数据:第五张卡按 Missing 兜底。
+        // fixture 无 Claude/Cursor 数据:第五、六张卡按 Missing 兜底。
         assert!(matches!(
             snap.cards[4],
             Card::Missing {
                 provider: ProviderId::Claude
+            }
+        ));
+        assert!(matches!(
+            snap.cards[5],
+            Card::Missing {
+                provider: ProviderId::Cursor
             }
         ));
     }
