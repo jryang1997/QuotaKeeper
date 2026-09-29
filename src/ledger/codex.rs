@@ -39,16 +39,12 @@ pub fn scan_paths(home: &Path) -> Vec<PathBuf> {
     out
 }
 
-pub fn parse_file(path: &Path) -> Vec<UsageRecord> {
-    let Ok(mut f) = std::fs::File::open(path) else {
-        return Vec::new();
-    };
+pub fn parse_file(path: &Path) -> std::io::Result<Vec<UsageRecord>> {
+    let mut f = std::fs::File::open(path)?;
     let mut text = String::new();
-    if f.read_to_string(&mut text).is_err() {
-        return Vec::new();
-    }
+    f.read_to_string(&mut text)?;
     let mtime_ms = mtime_ms(path);
-    parse_str(&text, mtime_ms)
+    Ok(parse_str(&text, mtime_ms))
 }
 
 fn mtime_ms(path: &Path) -> i64 {

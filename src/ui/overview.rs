@@ -352,7 +352,7 @@ fn fmt_usd(v: f64) -> String {
 
 fn fmt_tokens_plain(v: i64) -> String {
     if v >= 1e9 as i64 {
-        format!("{:.1}M", v as f64 / 1e6)
+        format!("{:.1}B", v as f64 / 1e9)
     } else if v >= 1e6 as i64 {
         format!("{:.1}M", v as f64 / 1e6)
     } else if v >= 1e3 as i64 {
@@ -670,6 +670,12 @@ mod tests {
         assert_eq!(dot_tokens(1_150_000_000), "1.15B");
         assert_eq!(dot_tokens(14_700_000), "14.70M");
         assert_eq!(dot_tokens(980), "980");
+    }
+
+    #[test]
+    fn plain_tokens_scales_billions() {
+        assert_eq!(fmt_tokens_plain(1_150_000_000), "1.1B");
+        assert_eq!(fmt_tokens_plain(14_700_000), "14.7M");
     }
 
     #[test]

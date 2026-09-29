@@ -1,6 +1,7 @@
 //! Ledger 统一数据类型:五路 token 拆分 + 归一化记录 + 聚合.
 //!
-//! 口径:各 collector 在 parse 时把来源语义归一化为**互不重叠**的五桶
+//! 口径:各 collector 在 parse 时把来源语义归一化为互不重叠的 input/output/cache_read/cache_write 四个计数桶;
+//! reasoning 是 output 的信息性子集,不另加到 total。
 //! (来源差异大:Codex 的 input 含 cached,ZCode 的 total=input+output 即 input 含
 //! cache 且 reasoning 含在 output 里;而 Claude/OpenCode/DSH/OMP 本来就不重叠).
 //! 归一化后 total/成本直接相加:

@@ -6,7 +6,7 @@
 //! - 单个源失败不影响其他源,错误进 `SourceStatus` 在 UI 展示;
 //! - 口径归一化见 types.rs;周 = ISO 周一至今,月 = 自然月,日期按本地时区.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
@@ -152,33 +152,30 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
     let home = home_dir();
     let mut records: Vec<UsageRecord> = Vec::new();
     let mut sources = Vec::new();
+    let mut active_files = HashSet::new();
 
     // JSONL/zstd 源:文件级缓存
     for (client, scan, parse) in [
         (
             codex::CLIENT,
             codex::scan_paths as fn(&Path) -> Vec<PathBuf>,
-            codex::parse_file as fn(&Path) -> Vec<UsageRecord>,
+            codex::parse_file as fn(&Path) -> std::io::Result<Vec<UsageRecord>>,
         ),
         (claude::CLIENT, claude::scan_paths, claude::parse_file),
         (dsh::CLIENT, dsh::scan_paths, dsh::parse_file),
     ] {
-        match load_client(&home, scan, parse) {
-            Ok(recs) => {
-                sources.push(SourceStatus {
-                    client,
-                    records: recs.len(),
-                    error: None,
-                });
-                records.extend(recs);
-            }
-            Err(e) => sources.push(SourceStatus {
-                client,
-                records: 0,
-                error: Some(e),
-            }),
-        }
+        let (recs, error) = load_client(&home, scan, parse, &mut active_files);
+        sources.push(SourceStatus {
+            client,
+            records: recs.len(),
+            error,
+        });
+        records.extend(recs);
     }
+    file_cache()
+        .lock()
+        .unwrap()
+        .retain(|path, _| active_files.contains(path));
 
     // SQLite 源:每轮直查
     for (client, path, run) in [
@@ -232,13 +229,16 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
 fn load_client(
     home: &Path,
     scan: fn(&Path) -> Vec<PathBuf>,
-    parse: fn(&Path) -> Vec<UsageRecord>,
-) -> Result<Vec<UsageRecord>, String> {
+    parse: fn(&Path) -> std::io::Result<Vec<UsageRecord>>,
+    active_files: &mut HashSet<PathBuf>,
+) -> (Vec<UsageRecord>, Option<String>) {
     let paths = scan(home);
+    active_files.extend(paths.iter().cloned());
     if paths.is_empty() {
-        return Err("未找到会话文件".into());
+        return (Vec::new(), Some("未找到会话文件".into()));
     }
     let mut out = Vec::new();
+    let mut errors = Vec::new();
     let cache = file_cache();
     let mut cache = cache.lock().unwrap();
     for path in paths {
@@ -248,15 +248,27 @@ fn load_client(
                 out.extend(recs.iter().cloned());
             }
             _ => {
-                let recs = parse(&path);
-                if let Some(sig) = sig {
-                    cache.insert(path.clone(), (sig, recs.clone()));
+                match parse(&path) {
+                    Ok(recs) => {
+                        if let Some(sig) = sig {
+                            cache.insert(path.clone(), (sig, recs.clone()));
+                        }
+                        out.extend(recs);
+                    }
+                    Err(e) => {
+                        cache.remove(&path);
+                        errors.push(format!("{}: {e}", path.display()));
+                    }
                 }
-                out.extend(recs);
             }
         }
     }
-    Ok(out)
+    let error = if errors.is_empty() {
+        None
+    } else {
+        Some(format!("{} 个会话文件读取失败; {}", errors.len(), errors[0]))
+    };
+    (out, error)
 }
 
 type FileSig = (u128, u64);
@@ -320,7 +332,6 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         Agg,
         i64,
         std::collections::HashSet<String>,
-        std::collections::HashSet<&'static str>,
     );
     let mut project_raw: HashMap<String, ProjectEntry> = HashMap::new();
 
@@ -406,7 +417,6 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                         Agg::default(),
                         0,
                         std::collections::HashSet::new(),
-                        std::collections::HashSet::new(),
                     )
                 });
                 e.0.add(&r.tokens, r.cost, r.cost_is_estimate);
@@ -414,7 +424,6 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 if let Some(s) = &r.session {
                     e.2.insert(s.clone());
                 }
-                e.3.insert(r.client);
             }
         }
         if date > today - Duration::days(14) && date <= today {
@@ -589,7 +598,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     // 项目维度:按总量降序
     let mut by_project: Vec<ProjectRow> = project_raw
         .into_iter()
-        .map(|(project, (agg, last_ts, sessions, _))| ProjectRow {
+        .map(|(project, (agg, last_ts, sessions))| ProjectRow {
             project,
             agg,
             sessions: sessions.len(),
@@ -697,6 +706,51 @@ mod tests {
             session: None,
             project: None,
         }
+    }
+
+    #[test]
+    fn file_read_error_keeps_other_records_and_reports_the_failure() {
+        fn scan(home: &Path) -> Vec<PathBuf> {
+            vec![
+                home.join("session-good.jsonl.zstd"),
+                home.join("session-bad.jsonl.zstd"),
+            ]
+        }
+
+        let home = std::env::temp_dir().join(format!(
+            "token-monitor-ledger-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&home).unwrap();
+        let good = br#"{"type":"assistant/message","time":1000,"data":{"usage":{"inputTokens":5}}}"#;
+        std::fs::write(
+            home.join("session-good.jsonl.zstd"),
+            zstd::encode_all(good.as_slice(), 0).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(home.join("session-bad.jsonl.zstd"), b"bad zstd").unwrap();
+
+        let (records, error) = load_client(&home, scan, dsh::parse_file, &mut HashSet::new());
+        std::fs::remove_file(home.join("session-good.jsonl.zstd")).unwrap();
+        std::fs::remove_file(home.join("session-bad.jsonl.zstd")).unwrap();
+        std::fs::remove_dir(&home).unwrap();
+
+        assert_eq!(records.len(), 1);
+        let error = error.expect("failed file must be reported");
+        assert!(error.contains("1 个会话文件读取失败"));
+        assert!(error.contains("session-bad.jsonl.zstd"));
+    }
+
+    #[test]
+    fn missing_session_files_are_parse_errors() {
+        let missing = Path::new("definitely-missing-session-file.jsonl");
+        assert!(codex::parse_file(missing).is_err());
+        assert!(claude::parse_file(missing).is_err());
+        assert!(dsh::parse_file(missing).is_err());
     }
 
     #[test]
