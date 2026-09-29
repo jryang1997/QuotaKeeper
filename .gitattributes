@@ -4,3 +4,5 @@
 *.rs text eol=lf
 *.toml text eol=lf
 *.ico binary
+# Vite output must round-trip byte-for-byte on Windows CI.
+gui/frontend/dist/** -text
