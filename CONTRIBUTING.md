@@ -2,13 +2,14 @@
 
 ## 开发环境
 
-- Rust 1.85+(edition 2024;`rust-toolchain.toml` 会自动装 stable 与 windows-gnu target)。
-- GUI 需要 Node.js(gui/frontend,Vite + React 19)。
+- Rust 1.88+(edition 2024;`rust-toolchain.toml` 会自动装 stable 与 windows-gnu target)。
+- GUI 需要 Rust 1.90+ 和 Node.js(gui/frontend,Vite + React 19)。
 
 ```sh
-cargo test                                   # 核心 crate,113 项测试
-cargo test --manifest-path gui/Cargo.toml    # GUI 壳测试,11 项
+cargo test                                   # 核心 crate 测试
+cargo test --manifest-path gui/Cargo.toml    # GUI 壳测试
 cd gui/frontend && npm ci && npm run build   # GUI 前端构建
+cd gui/frontend && npm test                   # 面板布局、偏好、通信契约测试
 ```
 
 ## 提交规矩
@@ -23,6 +24,7 @@ cd gui/frontend && npm ci && npm run build   # GUI 前端构建
 - 新配额卡放 `src/<name>_quota.rs`,产出 `model::Report`;在 `model::ProviderId::all()`、`backend::fetch_snapshot`、`gui/src/ipc.rs` 三处接线,Missing 卡必须给出准确的双语修复提示(`missing_hint`)。
 - 所有出站 HTTP 走 `crate::http::get/post`(统一系统代理),必须带超时。
 - UI 文案集中在 `src/ui/i18n.rs`,中英双语缺一不可。
+- GUI 页面分别在 `gui/frontend/src/*Page.jsx`;共享显示文案与格式在 `ui-data.js`。面板布局规则与存储校验在 `panel-layout.js`,面板内容在 `PanelBodies.jsx`,WebView 消息统一走 `gui-bridge.js`。新增交互先在所属模块修改,不要把逻辑塞回 `main.jsx`。
 - 不修改用户 CLI 的自有状态文件;一切登录态只读。
 
 ## 文档

@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange)
+![TUI Rust 1.88+](https://img.shields.io/badge/TUI%20Rust-1.88%2B-orange)
 ![Platform: Windows 优先](https://img.shields.io/badge/platform-Windows%20first-lightgrey)
 
 </div>
@@ -58,7 +58,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 
 ### TUI
 
-前置:Rust 1.85+(edition 2024)。
+前置:Rust 1.88+(edition 2024)。
 
 ```sh
 cargo install --path .        # 或 cargo build --release,产物在 target/release/
@@ -67,6 +67,8 @@ cargo install --path .        # 或 cargo build --release,产物在 target/relea
 Windows 默认走 MSVC 工具链(需 Visual Studio Build Tools);本仓库 CI 同时验证 GNU 工具链路径,固化 GNU 的方法见 `.cargo/config.toml` 内注释。
 
 ### Windows 桌面版(GUI)
+
+前置:Rust 1.90+、Node.js。
 
 ```sh
 cd gui/frontend && npm ci && npm run build && cd ../..
@@ -99,18 +101,23 @@ run_gui.bat                   # GNU 构建自动把 WebView2Loader.dll 复制到
 ## 验证
 
 ```sh
-cargo test                                    # 113 项:fixture 回放 / 内存 SQLite / 多帧 zstd / 时间边界 / 图表命中 / 无头渲染
-cargo test --manifest-path gui/Cargo.toml     # GUI 壳 11 项
+cargo test                                    # fixture 回放 / 内存 SQLite / 多帧 zstd / 时间边界 / 图表命中 / 无头渲染
+cargo test --manifest-path gui/Cargo.toml     # GUI 壳测试
+npm --prefix gui/frontend test                 # GUI 布局、偏好与通信契约
 cargo run --example ledger_smoke              # 对本机真实数据源跑一遍 ledger,打印汇总
-cargo run --example quota_smoke               # 对本机真实凭据跑一遍五卡配额快照
+cargo run --example quota_smoke               # 对本机真实凭据跑一遍六卡配额快照
 ```
 
 ## 已知口径
 
 - Token 页 token 计数(本地)与配额页百分比(服务商)不同源,对不上是正常的。
-- 周一为每周起点;日界按本地时区;五路桶(input/output/cache_read/cache_write/reasoning)已归一化为互不重叠。
+- 周一为每周起点;日界按本地时区;input/output/cache_read/cache_write 四个计数桶互不重叠,reasoning 已包含在 output 中,仅单独展示。
 - 美元估价为 LiteLLM 第三方公开价目,未逐项由厂商核验,不反映时段/上下文档位/订阅折扣;OMP 来源报告价与估价分开记录。
 - chrono 钉 0.4.38:0.4.40+ 的 Windows Local 走 raw-dylib,在 WinLibs GCC 的 windows-gnu 目标上首次调用即崩(见根 Cargo.toml 注释)。
+
+## 致谢与来源
+
+项目的配额采集与展示调研参考了 [CodexBar](https://github.com/steipete/CodexBar)、[CodeBurn](https://github.com/getagentseal/codeburn)、[tokscale](https://github.com/junhoyeo/tokscale) 和 [ccusage](https://github.com/ccusage/ccusage) 的公开实现与文档。具体数据来源及取舍见 [研究记录](docs/research/);品牌图标来源见 [图标清单](gui/frontend/public/logos/README.md)。
 
 ## License
 

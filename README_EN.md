@@ -8,7 +8,7 @@ Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — 
 
 [![CI](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange)
+![TUI Rust 1.88+](https://img.shields.io/badge/TUI%20Rust-1.88%2B-orange)
 ![Platform: Windows first](https://img.shields.io/badge/platform-Windows%20first-lightgrey)
 
 </div>
@@ -53,13 +53,15 @@ Outbound requests honor `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`.
 
 ### TUI
 
-Requires Rust 1.85+ (edition 2024).
+Requires Rust 1.88+ (edition 2024).
 
 ```sh
 cargo install --path .    # or cargo build --release
 ```
 
 ### Windows GUI
+
+Requires Rust 1.90+ and Node.js.
 
 ```sh
 cd gui/frontend && npm ci && npm run build && cd ../..
@@ -83,10 +85,15 @@ All data stays local. No telemetry. API keys go only to the Windows Credential M
 ## Verification
 
 ```sh
-cargo test                                   # 113 tests: fixture replay, in-memory SQLite, multi-frame zstd, headless rendering
-cargo test --manifest-path gui/Cargo.toml    # 11 GUI shell tests
+cargo test                                   # fixture replay, in-memory SQLite, multi-frame zstd, headless rendering
+cargo test --manifest-path gui/Cargo.toml    # GUI shell tests
+npm --prefix gui/frontend test                # GUI layout, preferences and bridge contracts
 cargo run --example ledger_smoke
 ```
+
+## Acknowledgements and sources
+
+Research for quota collection and presentation drew on the public implementations and documentation of [CodexBar](https://github.com/steipete/CodexBar), [CodeBurn](https://github.com/getagentseal/codeburn), [tokscale](https://github.com/junhoyeo/tokscale), and [ccusage](https://github.com/ccusage/ccusage). See the [research notes](docs/research/) for data sources and tradeoffs, and the [logo provenance](gui/frontend/public/logos/README.md) for brand assets.
 
 ## License
 

@@ -1,12 +1,12 @@
 # CodeBurn / TokenScale 名称核实与竞品全景(一手来源)
 
-调研日期:2026-09-29。stars 等为当日 GitHub API 读数,会随时间漂移。所有竞品事实只取对方 GitHub 仓库(README / GitHub API),不采信第三方博客。此文与 [Windows 桌面版竞品功能审计](competitor-feature-audit.md)互补:那篇聚焦 GUI 交互细节,这篇核实项目所有者点名的两个产品名,并给出全景成熟度与对标结论。本仓库基线见 [README](../../README.md)。
+调研日期:2026-09-29。stars 等为当日 GitHub API 读数,会随时间漂移。所有竞品事实只取对方 GitHub 仓库(README / GitHub API),不采信第三方博客。此文与 [Windows 桌面版竞品功能审计](competitor-feature-audit.md)互补:那篇聚焦 GUI 交互细节,这篇核实项目所有者点名的两个产品名,并给出全景成熟度与对标结论。本仓库基线见 [README](../../README.md)。下文的功能覆盖和对比数字保留调研时快照;本仓库后来已补 LICENSE 和 CI,当前发布能力请以仓库文件为准。
 
 ## 先看结论
 
 1. **CodeBurn 实有其物且已是大体量竞品**:[getagentseal/codeburn](https://github.com/getagentseal/codeburn)(11,268 stars,MIT,TypeScript,2026-04-13 建仓),`npx codeburn` 即用,本地解析 40 个 AI 编码工具的会话文件,LiteLLM 估价,`codeburn quota` 读已登录工具的实时限额,还带订阅套餐 pacing、浪费诊断和 Windows 桌面版。它是与本项目定位重叠度最高、增速最快的产品(约 5.5 个月到 11k stars)。[仓库 README](https://github.com/getagentseal/codeburn) · [GitHub API](https://api.github.com/repos/getagentseal/codeburn)
 2. **TokenScale 查无此产品;最接近且判断为同一所指的是 tokscale**([junhoyeo/tokscale](https://github.com/junhoyeo/tokscale),5,567 stars,MIT,官网 [tokscale.ai](https://tokscale.ai)):Rust/Ratatui TUI,50+ 客户端本地解析 + 多路官方/半官方接口,名字与本项目的描述(“AI coding 用量追踪”)完全吻合,应为口误或记忆偏差。检索到的唯一其他 "Tokenscale" 是一篇 LLM serving 弹性伸缩论文(CoRR abs/2512.03416),与用量监测无关。[仓库](https://github.com/junhoyeo/tokscale)
-3. **头部格局已固化,打法分四类**:本地账本解析的事实标准 ccusage(18.8k)、单工具深挖的 Claude-Code-Usage-Monitor(8.7k,Python)、官方端点配额最全的 CodexBar(22k,macOS)、两端通吃的 CodeBurn/tokscale。共同点:全 MIT、全有一行命令安装、全把 LiteLLM 当价目源。本项目的差异化(OpenCode Go / GOAT / Antigravity 经 CPA 的官方端点配额、Windows TUI+GUI 双形态、来源口径透明)在 README 层面无人重复;最大短板不是功能而是开源基建:无 LICENSE、无 CI、无 Releases、无一键安装。[对标结论](#对标结论)见文末。
+3. **头部格局已固化,打法分四类**:本地账本解析的事实标准 ccusage(18.8k)、单工具深挖的 Claude-Code-Usage-Monitor(8.7k,Python)、官方端点配额最全的 CodexBar(22k,macOS)、两端通吃的 CodeBurn/tokscale。共同点:全 MIT、全有一行命令安装、全把 LiteLLM 当价目源。本项目的差异化(OpenCode Go / GOAT / Antigravity 经 CPA 的官方端点配额、Windows TUI+GUI 双形态、来源口径透明)在 README 层面无人重复;发布与一键安装仍是差距。[对标结论](#对标结论)见文末。
 
 ## 0. 名称核实(先对齐)
 
@@ -76,7 +76,7 @@ Python 自托管仪表盘:"Self-hosted dashboard for tracking LLM token usage an
 | stars / 建仓 | 11,268 / 2026-04 | 5,567 / 2025-12 | 18,778 / 2025-05 | 8,728 / 2025-06 | 22,033 / 2025-11 | 新仓库 |
 | 最近推送 | 2026-09-28 | 2026-09-25 | 2026-09-28 | **2026-07-05** | 2026-09-28 | 持续 |
 | 语言 / 依赖 | TS(Node 22+) | Rust+TS(Bun) | Rust(嵌入价目) | Python 3.9+ | Swift | Rust |
-| License | MIT | MIT | MIT(NOASSERTION) | MIT | MIT | **未设** |
+| License | MIT | MIT | MIT(NOASSERTION) | MIT | MIT | MIT |
 | 形态 | CLI+桌面+托盘 | TUI+线上社区 | CLI 报表 | TUI | 菜单栏(Linux Qt) | **TUI+Windows GUI** |
 | 工具覆盖 | 40 | 50+ | ~18 | 仅 Claude | ~90 provider | 6 账本 + 4 配额源 |
 | 本地账本解析 | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -100,7 +100,7 @@ Python 自托管仪表盘:"Self-hosted dashboard for tracking LLM token usage an
 
 **别人有、我们没有的**
 
-1. **一键安装与开源基建**——上线前最大硬伤。四家全部一行安装(npx/brew/uv/cask),且全为 MIT;本仓库尚无 LICENSE、无 CI、无 Releases,分发要 `npm ci` + `cargo build` + bat 脚本。这不是功能问题,是开源Launch的信任门槛。
+1. **一键安装与发布流程**——四家全部一行安装(npx/brew/uv/cask),且全为 MIT;本仓库已有 LICENSE 与 CI,但尚无仓库内的自动打包发布流程,分发仍要 `npm ci` + `cargo build` + bat 脚本。这不是功能问题,是开源发布的信任门槛。
 2. **生态出口**:CodeBurn 有本地 MCP server(README:agent 可查自己的用量)、ccusage 有 statusline Beta、CCUM 的 statusline hook 同时是它的官方额度获取通道、CodexBar 有 `serve` 快照接口与 CLI 子命令([各自 README](https://github.com/steipete/CodexBar))。本项目只有 CSV/JSON 文件导出,无 `--json` 快照、无 statusline、无 MCP,无法被别的工具组合。
 3. **覆盖广度**:40 / 50+ / ~90 / ~18 对我们 6+4;且 CodeBurn 已把 ZCode、DeepSeek Harness、OMP、OpenCode 都列进 40 工具清单([README](https://github.com/getagentseal/codeburn)),我们的"独有账本"窗口正在关闭。广度战打不赢也不必打,但要承认 CodeBurn 单品覆盖已大于我们。
 4. **浪费诊断与组织维度**:CodeBurn 的 `optimize`(重复读文件、闲置 MCP)与 per-PR 成本、CodexBar 的 OpenAI Admin API 组织花费([README](https://github.com/steipete/CodexBar))都是我们没有的叙事;CCUM 的 P90 自动探测套餐档位与自动化退出码(0/10/11)也是可借鉴的工程细节([README](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor))。
@@ -108,7 +108,7 @@ Python 自托管仪表盘:"Self-hosted dashboard for tracking LLM token usage an
 
 **建议(按投入产出排序)**
 
-1. **先补基建再谈功能**:加 LICENSE(MIT,与赛道一致)、GitHub Actions CI + 二进制 Release(cargo binstall / winget / Scoop 清单)、TUI 免构建单文件下载。四家对标里这项差距最刺眼也最便宜。
+1. **先补发布再谈功能**:LICENSE 与 GitHub Actions CI 已有;下一步是版本化二进制 Release、TUI 免构建单文件下载,再评估 winget / Scoop 清单。四家对标里安装体验差距最直接。
 2. **输出一个机器可读快照**:对齐 CodeBurn MCP / CCUM `--output json` / CodexBar `serve` 三种已有先例,先做 `--json` + statusline,再做 MCP。没有出口,本项目只能当终端孤岛用。
 3. **把官方端点纵深做成护城河**:OpenCode Go、GOAT、CPA→Google 这三路是 README 层面零竞品的组合,且 CodeBurn 增速证明"本地解析+套餐 pacing"市场已被吃掉;应继续加深官方端点的稳定性与降级路径(现有 native-quota-sources 方向),而不是扩账本数量。
 4. **保留双口径优势**:CodeBurn 只有 LiteLLM 单一口径,我们"来源报告价 vs LiteLLM 估价"分列 + 缺价标记更诚实,值得在宣传里作为隐私/准确度卖点讲。
