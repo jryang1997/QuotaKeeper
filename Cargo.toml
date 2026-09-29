@@ -2,6 +2,12 @@
 name = "tui-token-monitor"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Terminal monitor for AI coding CLI usage & quota: burn rate, heatmap, model leaderboard, subscription plan cards"
+license = "MIT"
+repository = "https://github.com/jryang1997/tui-token-monitor"
+keywords = ["tui", "claude-code", "codex", "tokens", "quota"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 ratatui = "0.29"
