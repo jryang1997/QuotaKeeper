@@ -251,18 +251,18 @@ html[data-theme='dark'] { color-scheme: dark; }
 
 /* ---------- 面板仪表板 ---------- */
 
-.panel-page { display: flex; flex-direction: column; gap: 12px; }
-.panel-tools { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.panel-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-x: auto; }
+.panel-tools { display: flex; align-items: center; justify-content: flex-end; gap: 9px; min-width: 920px; }
 .panel-tools-spacer, .panel-hint { margin-right: auto; }
 .panel-hint { font-family: var(--font-family-code); font-size: var(--font-size-2xs); color: var(--color-text-secondary); letter-spacing: 0.08em; }
 .panel-tool {
   min-height: 29px; padding: 5px 11px;
-  border: 1px solid var(--color-border); border-radius: 8px;
-  background: var(--color-background-card); color: var(--color-text-primary);
+  border: 1px solid transparent; border-radius: 99px;
+  background: var(--dashboard-card); color: var(--color-text-primary);
   font: inherit; font-size: var(--font-size-xs); cursor: pointer;
   transition: border-color 140ms var(--spring), background 140ms var(--spring);
 }
-.panel-tool:hover { border-color: var(--color-border-emphasized); background: var(--color-background-surface); }
+.panel-tool:hover { border-color: var(--color-border-emphasized); background: var(--dashboard-card-hover); }
 .panel-tool:focus-visible { outline: 2px solid var(--color-text-blue); outline-offset: 2px; }
 .panel-tool-primary { border-color: color-mix(in srgb, var(--color-text-blue) 45%, var(--color-border)); color: var(--color-text-blue); }
 .panel-add { position: relative; }
@@ -288,36 +288,36 @@ html[data-theme='dark'] { color-scheme: dark; }
 .panel-menu-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-border-emphasized); }
 .panel-menu-dot.is-on { background: var(--color-text-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-blue) 18%, transparent); }
 
-.panel-grid { position: relative; --pgap: 14px; --prow: 84px; overflow-x: auto; min-width: 0; }
+.panel-grid { position: relative; --pgap: 14px; min-width: 920px; }
 .panel-card {
   position: absolute;
   display: flex; flex-direction: column;
-  padding: 15px 17px; overflow: hidden; box-sizing: border-box;
+  padding: 12px 15px; overflow: hidden; box-sizing: border-box;
   left: calc((100% - 11 * var(--pgap)) / 12 * var(--x) + var(--x) * var(--pgap));
   width: calc((100% - 11 * var(--pgap)) / 12 * var(--w) + (var(--w) - 1) * var(--pgap));
   top: calc(var(--y) * (var(--prow) + var(--pgap)));
   height: calc(var(--h) * var(--prow) + (var(--h) - 1) * var(--pgap));
-  border: 1px solid var(--color-border); border-radius: 12px;
-  background: var(--color-background-card);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-text-primary) 5%, transparent);
-  min-width: 248px;
+  border: 1px solid transparent; border-radius: 18px;
+  background: var(--dashboard-card);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+  min-width: 0;
   transition: left 260ms var(--spring), top 260ms var(--spring), width 260ms var(--spring), height 260ms var(--spring), box-shadow 160ms var(--spring), border-color 160ms var(--spring);
 }
 .panel-card:hover { border-color: var(--color-border-emphasized); }
 .panel-card.is-dragging { z-index: 30; pointer-events: none; cursor: grabbing; border-color: color-mix(in srgb, var(--sum-purple) 55%, var(--color-border)); box-shadow: 0 24px 60px color-mix(in srgb, var(--color-text-primary) 26%, transparent); transition: none; }
 .panel-card.is-resizing { transition: left 260ms var(--spring), top 260ms var(--spring), box-shadow 160ms var(--spring); z-index: 25; border-color: color-mix(in srgb, var(--sum-purple) 45%, var(--color-border)); }
-.panel-card.is-locked { background: color-mix(in srgb, var(--color-background-muted) 36%, var(--color-background-card)); }
+.panel-card.is-locked { background: color-mix(in srgb, var(--color-text-blue) 5%, var(--dashboard-card)); }
 .panel-ghost { position: absolute; border: 1.5px dashed color-mix(in srgb, var(--sum-purple) 60%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--sum-purple) 7%, transparent); pointer-events: none;
   left: calc((100% - 11 * var(--pgap)) / 12 * var(--x) + var(--x) * var(--pgap));
   width: calc((100% - 11 * var(--pgap)) / 12 * var(--w) + (var(--w) - 1) * var(--pgap));
   top: calc(var(--y) * (var(--prow) + var(--pgap)));
   height: calc(var(--h) * var(--prow) + (var(--h) - 1) * var(--pgap));
 }
-.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; cursor: grab; user-select: none; touch-action: none; min-height: 22px; }
+.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; cursor: grab; user-select: none; touch-action: none; min-height: 20px; }
 .panel-card.is-locked .panel-head, .panel-card.is-dragging .panel-head { cursor: grabbing; }
 .panel-card.is-locked .panel-head { cursor: default; }
-.panel-title { font-family: var(--font-family-code); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.panel-meta { margin-left: auto; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-family-code); font-size: 0.625rem; letter-spacing: 0.05em; color: var(--color-text-secondary); }
+.panel-title { font-family: var(--font-family-body); font-size: 0.8125rem; font-weight: 600; letter-spacing: -0.01em; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-meta { margin-left: auto; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-family-code); font-size: 0.6875rem; color: var(--color-text-secondary); }
 .panel-head-btns { display: inline-flex; gap: 2px; flex: 0 0 auto; }
 .panel-btn { width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .panel-btn:hover { background: var(--color-overlay-hover); color: var(--color-text-primary); }
@@ -377,9 +377,14 @@ html[data-theme='dark'] { color-scheme: dark; }
 .board-empty { flex: 1; display: grid; place-items: center; color: var(--color-text-secondary); }
 .board-row { display: flex; align-items: center; gap: 8px; min-height: 17px; }
 .board-rank { flex: 0 0 auto; font-family: var(--font-family-code); font-size: 0.5625rem; color: var(--color-text-secondary); }
-.board-label { flex: 0 1 74px; min-width: 0; font-family: var(--font-family-code); font-size: 0.625rem; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-label { flex: 0 1 100px; min-width: 0; font-family: var(--font-family-body); font-size: 0.75rem; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .board-row .block-bar { flex: 1 1 auto; height: 11px; }
-.board-value { flex: 0 0 auto; font-family: var(--font-family-code); font-size: 0.625rem; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.board-value { flex: 0 0 auto; font-family: var(--font-family-code); font-size: 0.6875rem; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.board-row:has(.board-rank) { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px 7px; min-height: 34px; }
+.board-row:has(.board-rank) .board-rank { grid-column: 1; grid-row: 1; }
+.board-row:has(.board-rank) .board-label { grid-column: 2 / 4; grid-row: 1; max-width: 100%; }
+.board-row:has(.board-rank) .block-bar { grid-column: 2; grid-row: 2; min-width: 0; }
+.board-row:has(.board-rank) .board-value { grid-column: 3; grid-row: 2; }
 
 /* 来源占比 / 构成 */
 .share, .cache { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 9px; }
@@ -397,16 +402,16 @@ html[data-theme='dark'] { color-scheme: dark; }
 /* 大数字四格(alltime/streak 共用) */
 .big4 { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: center; }
 .big4 > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.big4 b { font-family: var(--font-family-code); font-size: clamp(15px, 1.5vw, 21px); font-weight: 600; letter-spacing: -0.045em; font-variant-numeric: tabular-nums; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.big4 b { font-family: var(--font-family-code); font-size: clamp(15px, 1.45vw, 20px); font-weight: 600; letter-spacing: -0.045em; font-variant-numeric: tabular-nums; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .big4-unit { font-style: normal; font-size: 0.62em; font-weight: 400; color: var(--color-text-secondary); margin-left: 2px; }
-.big4 span { font-family: var(--font-family-code); font-size: 0.5625rem; letter-spacing: 0.12em; color: var(--color-text-secondary); }
+.big4 span { font-family: var(--font-family-code); font-size: 0.625rem; letter-spacing: 0.06em; color: var(--color-text-secondary); }
 
 /* 纪录 */
-.records { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
-.records-row { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-.records-label { flex: 0 0 auto; font-family: var(--font-family-code); font-size: 0.5625rem; letter-spacing: 0.09em; color: var(--color-text-secondary); }
-.records-value { font-family: var(--font-family-code); font-size: var(--font-size-xs); font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.records-sub { margin-left: auto; font-family: var(--font-family-code); font-size: 0.625rem; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.records { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 3px; justify-content: center; }
+.records-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; min-height: 16px; line-height: 16px; }
+.records-label { flex: 0 0 86px; font-family: var(--font-family-body); font-size: 0.625rem; color: var(--color-text-secondary); }
+.records-value { flex: 1 1 auto; min-width: 0; font-family: var(--font-family-body); font-size: 0.75rem; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.records-sub { flex: 0 0 auto; margin-left: auto; font-family: var(--font-family-code); font-size: 0.625rem; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 
 /* 近 30 天柱状 */
 .daily { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -782,6 +787,8 @@ html[data-theme='dark'] { color-scheme: dark; }
   --color-error: light-dark(#ba3f3e, #ff9b94);
   --color-border: light-dark(#dce4ec, #314052);
   --color-border-emphasized: light-dark(#c3d0df, #53667d);
+  --dashboard-card: color-mix(in srgb, var(--color-background-body) 64%, var(--color-background-card));
+  --dashboard-card-hover: color-mix(in srgb, var(--color-background-body) 80%, var(--color-background-card));
   background: radial-gradient(circle at 36% -28%, color-mix(in srgb, var(--color-text-blue) 12%, transparent), transparent 50%), var(--color-background-body);
   color: var(--color-text-primary);
   font-family: var(--font-family-body);

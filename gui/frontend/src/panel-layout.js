@@ -1,5 +1,5 @@
 export const PANEL_COLS = 12;
-export const PANEL_ROW_H = 84;
+export const PANEL_ROW_H = 110;
 export const PANEL_GAP = 14;
 export const PANELS_KEY = 'token-monitor.panels.v1';
 export const PANELS_MAX = 14;

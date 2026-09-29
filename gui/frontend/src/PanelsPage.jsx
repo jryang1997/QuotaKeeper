@@ -146,7 +146,7 @@ export default function PanelsPage({ ledger, lang }) {
           )}
         </div>
       </div>
-      <div ref={gridRef} className="panel-grid" style={{ height: maxBottom * PANEL_ROW_H + (maxBottom - 1) * PANEL_GAP }}>
+      <div ref={gridRef} className="panel-grid" style={{ '--prow': `${PANEL_ROW_H}px`, height: maxBottom * PANEL_ROW_H + (maxBottom - 1) * PANEL_GAP }}>
         {align.v.map((v, i) => <i key={`v${i}`} className="panel-align-v" style={{ left: `calc(${(v / PANEL_COLS) * 100}% + ${v * PANEL_GAP}px)` }} />)}
         {align.h.map((y, i) => <i key={`h${i}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
         {drag?.mode === 'move' && origin && <div className="panel-ghost" style={posStyle(origin)} />}
@@ -155,8 +155,8 @@ export default function PanelsPage({ ledger, lang }) {
           return (
             <div key={p.id} className={`panel-card${drag?.mode === 'resize' && drag.id === p.id ? ' is-resizing' : ''}${p.locked ? ' is-locked' : ''}`} style={posStyle(p)}>
               <div className="panel-head" onPointerDown={(e) => startDrag(e, p.id, 'move')}>
-                <span className="panel-title">{t(`panel_${p.id}`)}</span>
-                <span className="panel-meta">{panelMeta(p.id, ledger, lang)}</span>
+                <span className="panel-title" title={t(`panel_${p.id}`)}>{t(`panel_${p.id}`)}</span>
+                <span className="panel-meta" title={panelMeta(p.id, ledger, lang)}>{panelMeta(p.id, ledger, lang)}</span>
                 <span className="panel-head-btns" onPointerDown={(e) => e.stopPropagation()}>
                   <button type="button" className={`panel-btn${p.locked ? ' is-on' : ''}`} onClick={() => toggleLock(p.id)} title={lockTitle} aria-label={lockTitle}>
                     <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -174,8 +174,8 @@ export default function PanelsPage({ ledger, lang }) {
           return (
             <div className={`panel-card is-dragging${drag.mode === 'resize' ? ' is-resizing' : ''}`} style={{ ...posStyle(origin), transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.025)` }}>
               <div className="panel-head">
-                <span className="panel-title">{t(`panel_${origin.id}`)}</span>
-                <span className="panel-meta">{panelMeta(origin.id, ledger, lang)}</span>
+                <span className="panel-title" title={t(`panel_${origin.id}`)}>{t(`panel_${origin.id}`)}</span>
+                <span className="panel-meta" title={panelMeta(origin.id, ledger, lang)}>{panelMeta(origin.id, ledger, lang)}</span>
               </div>
               <div className="panel-body"><PanelErrorBoundary>{ledger ? <Body ledger={ledger} lang={lang} /> : null}</PanelErrorBoundary></div>
             </div>

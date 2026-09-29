@@ -226,7 +226,7 @@ function AllTimePanel({ ledger }) {
   ];
   return (
     <div className="big4">
-      {cells.map(([v, label]) => <div key={label}><b>{v}</b><span>{label}</span></div>)}
+      {cells.map(([v, label]) => <div key={label}><b title={v}>{v}</b><span>{label}</span></div>)}
     </div>
   );
 }
@@ -247,7 +247,7 @@ function StreakPanel({ ledger }) {
       <div><b>{cur}<i className="big4-unit">d</i></b><span>{'CURRENT'}</span></div>
       <div><b>{best}<i className="big4-unit">d</i></b><span>{'LONGEST'}</span></div>
       <div><b>{active}</b><span>{'ACTIVE'}</span></div>
-      <div><b>{fmtTokens(days.reduce((s, d) => s + d.tokens, 0))}</b><span>{'26W'}</span></div>
+      <div><b title={String(days.reduce((s, d) => s + d.tokens, 0))}>{fmtTokens(days.reduce((s, d) => s + d.tokens, 0))}</b><span>{'26W'}</span></div>
     </div>
   );
 }
@@ -264,9 +264,9 @@ function RecordsPanel({ ledger }) {
     }, null);
   return (
     <div className="records">
-      <div className="records-row"><span className="records-label">BUSIEST DAY</span><span className="records-value">{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
-      <div className="records-row"><span className="records-label">TOP SESSION</span><span className="records-value">{topSession ? topSession.session.slice(0, 18) : '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
-      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value">{priciest ? priciest.label : '—'}</span><span className="records-sub">{priciest ? `$${priciest.r.toFixed(4)}/req` : ''}</span></div>
+      <div className="records-row"><span className="records-label">BUSIEST DAY</span><span className="records-value" title={maxDay?.date}>{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
+      <div className="records-row"><span className="records-label">TOP SESSION</span><span className="records-value" title={topSession?.session}>{topSession?.session || '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
+      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value" title={priciest?.label}>{priciest?.label || '—'}</span><span className="records-sub">{priciest ? `$${priciest.r.toFixed(4)}/req` : ''}</span></div>
     </div>
   );
 }
@@ -364,13 +364,11 @@ export function panelMeta(id, ledger, lang) {
       return (L.weekday || [0]).some((v) => v > 0) ? names[idx] : '';
     }
     case 'models': {
-      const top = [...(L.by_model || [])].sort((a, b) => b.agg.total - a.agg.total)[0];
-      return top?.model || '';
+      return String((L.by_model || []).length);
     }
     case 'sources': return `${(L.month_by_client || []).length}`;
     case 'projects': {
-      const top = [...(L.by_project || [])].sort((a, b) => b.agg.total - a.agg.total)[0];
-      return top?.project ? top.project.slice(0, 16) : '';
+      return String((L.by_project || []).length);
     }
     case 'alltime': return fmtTokens((L.daily_totals || []).reduce((s, d) => s + d.tokens, 0));
     case 'streak': {

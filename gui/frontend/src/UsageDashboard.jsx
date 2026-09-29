@@ -1,14 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CLIENT_COLORS, fmtCost, fmtInt, fmtTokens, fmtRel } from './ui-data.js';
+import { fmtCost, fmtInt, fmtTokens, fmtRel } from './ui-data.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import { aggregateUsage, localDate, usageBounds, usageMetric } from './usage-data.js';
 
 const TOKEN_PARTS = [
-  ['input', '输入', 'Input', '#a3d9f5'],
-  ['cache_read', '缓存读取', 'Cache read', '#65b4f5'],
-  ['cache_write', '缓存写入', 'Cache write', '#8164eb'],
-  ['output', '输出', 'Output', '#2174e8'],
+  ['input', '输入', 'Input', 'var(--usage-part-input)'],
+  ['cache_read', '缓存读取', 'Cache read', 'var(--usage-part-cache-read)'],
+  ['cache_write', '缓存写入', 'Cache write', 'var(--usage-part-cache-write)'],
+  ['output', '输出', 'Output', 'var(--usage-part-output)'],
 ];
+const AGENT_COLORS = {
+  codex: 'var(--color-text-purple)',
+  omp: 'var(--color-text-blue)',
+  opencode: 'var(--color-text-orange)',
+  zcode: 'var(--color-text-green)',
+  dsh: 'var(--usage-part-output)',
+  claude: 'var(--usage-part-cache-write)',
+};
+const agentColor = (client) => AGENT_COLORS[client] || 'var(--usage-blue)';
 const RANGES = [
   ['7d', '近 7 天', 'Last 7 days'], ['30d', '近 30 天', 'Last 30 days'],
   ['today', '今天', 'Today'], ['yesterday', '昨天', 'Yesterday'],
@@ -33,12 +42,12 @@ function TrendChart({ days, metric, agent, mode, names, zh }) {
   const showTypes = !!agent && metric === 'tokens' && mode === 'type';
   const legend = showTypes
     ? TOKEN_PARTS.map(([, cn, en, color]) => [tr(zh, cn, en), color])
-    : [...new Set(days.flatMap((day) => [...day.agents.keys()]))].map((client) => [names[client] || client, metric === 'cost' && agent ? '#ff5b20' : CLIENT_COLORS[client] || '#347ded']);
+    : [...new Set(days.flatMap((day) => [...day.agents.keys()]))].map((client) => [names[client] || client, metric === 'cost' && agent ? 'var(--color-text-orange)' : agentColor(client)]);
   const detail = selected && (showTypes
     ? TOKEN_PARTS.filter(([key]) => selected.agg[key] > 0).map(([key, cn, en, color]) => [tr(zh, cn, en), selected.agg[key], color])
     : [...selected.agents.entries()].filter(([, agg]) => usageMetric(agg, metric) > 0)
       .sort((a, b) => usageMetric(b[1], metric) - usageMetric(a[1], metric))
-      .map(([client, agg]) => [names[client] || client, usageMetric(agg, metric), metric === 'cost' && agent ? '#ff5b20' : CLIENT_COLORS[client] || '#347ded']));
+      .map(([client, agg]) => [names[client] || client, usageMetric(agg, metric), metric === 'cost' && agent ? 'var(--color-text-orange)' : agentColor(client)]));
   return <div className="usage-trend" onKeyDown={(event) => { if (event.key === 'Escape') { setHover(null); setPin(null); } }}>
     <div className="usage-plot">
       <div className="usage-y-axis"><span>{axisText(max)}</span><span>{axisText(max / 2)}</span><span>0</span></div>
@@ -47,7 +56,7 @@ function TrendChart({ days, metric, agent, mode, names, zh }) {
         const amount = usageMetric(day.agg, metric);
         const parts = showTypes
           ? TOKEN_PARTS.map(([key, , , color]) => [key, day.agg[key], color])
-          : [...day.agents.entries()].map(([client, agg]) => [client, usageMetric(agg, metric), metric === 'cost' && agent ? '#ff5b20' : CLIENT_COLORS[client] || '#347ded']);
+          : [...day.agents.entries()].map(([client, agg]) => [client, usageMetric(agg, metric), metric === 'cost' && agent ? 'var(--color-text-orange)' : agentColor(client)]);
         return <button type="button" key={day.date} className={`usage-day${active === index ? ' is-active' : ''}`}
           onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}
           onClick={() => setPin((current) => current === index ? null : index)}
