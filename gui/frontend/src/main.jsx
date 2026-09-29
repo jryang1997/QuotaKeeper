@@ -4,9 +4,10 @@ import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
 import '@astryxdesign/theme-neutral/theme.css';
 import './app.css';
+import './usage-dashboard.css';
 import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
-import UsagePage from './UsagePage.jsx';
+import UsageDashboard from './UsageDashboard.jsx';
 import SettingsPage from './SettingsPage.jsx';
 import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPreferences } from './gui-preferences.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
@@ -266,7 +267,7 @@ function App() {
   ) : data ? (
     <>
       {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
-      {page === 'usage' && <UsagePage ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} typeface={preferences.typeface} onOpenSettings={() => setPage('settings')} />}
+      {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} onOpenSettings={() => setPage('settings')} />}
       {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} />}
     </>
   ) : null;
