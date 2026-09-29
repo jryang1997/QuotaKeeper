@@ -268,7 +268,7 @@ pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegio
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
-                Constraint::Length(7),
+                Constraint::Length(8), // 来源健康卡 6 行 + 边框 2
                 Constraint::Min(3),
             ])
             .split(body);
