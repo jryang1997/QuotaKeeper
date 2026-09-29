@@ -18,27 +18,28 @@ jobs:
         run: cargo check --manifest-path gui/Cargo.toml
 
   windows-gnu:
-    # 项目第一公民目标:rust-lld 链接 + MinGW GCC 编译 C(见 .cargo/config.toml 注释)
+    # 项目第一公民目标:GNU host 工具链(与作者本机完全一致,rust-lld +
+    # runner 预装 MinGW 编译 C)。RUSTUP_TOOLCHAIN 覆盖 repo 的
+    # rust-toolchain.toml(channel=stable 会解析成 MSVC host,交叉构建
+    # 的 self-contained CRT 行为与 GNU host 不同,故不用 --target)。
     runs-on: windows-latest
     env:
+      RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-gnu
       CC_x86_64_pc_windows_gnu: gcc
       AR_x86_64_pc_windows_gnu: ar
-      # runner 的 gcc 在 PATH 上,rustc auto 模式会假定外部 mingw CRT 而不捆绑
-      # self-contained;rust-lld 又不认外部 mingw 库路径 → 强制捆绑(与本机等价)。
-      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: -Clink-self-contained=yes
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu
+          toolchain: stable-x86_64-pc-windows-gnu
       - name: 确认 MinGW 可用(runner 预装)
         run: |
           gcc --version
           ar --version
       - name: TUI 测试(GNU)
-        run: cargo test --target x86_64-pc-windows-gnu
+        run: cargo test
       - name: GUI 测试(GNU)
-        run: cargo test --manifest-path gui/Cargo.toml --target x86_64-pc-windows-gnu
+        run: cargo test --manifest-path gui/Cargo.toml
 
   linux:
     # 跨平台门槛:核心 crate 在 Linux 上可编译可测试(cfg(windows) 路径全部旁路)
