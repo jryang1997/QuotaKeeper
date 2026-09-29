@@ -99,6 +99,7 @@ run_gui.bat                   # GNU 构建自动把 WebView2Loader.dll 复制到
 cargo test                                    # 113 项:fixture 回放 / 内存 SQLite / 多帧 zstd / 时间边界 / 图表命中 / 无头渲染
 cargo test --manifest-path gui/Cargo.toml     # GUI 壳 11 项
 cargo run --example ledger_smoke              # 对本机真实数据源跑一遍 ledger,打印汇总
+cargo run --example quota_smoke               # 对本机真实凭据跑一遍五卡配额快照
 ```
 
 ## 已知口径
