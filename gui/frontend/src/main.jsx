@@ -24,6 +24,8 @@ const PROVIDER_ACCENT = {
   codex: 'var(--color-text-green)',
   goat: 'var(--color-text-purple)',
   antigravity: 'var(--color-text-orange)',
+  claude: 'var(--color-text-orange)',
+  cursor: 'var(--color-text-primary)',
 };
 
 const STATUS_COLOR = {
@@ -41,15 +43,16 @@ const CLIENT_COLORS = {
   claude: '#ef6c4d',
 };
 const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a',
 };
-const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude'];
+const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor'];
 const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
   goat: 'logos/commandcode.svg',
   antigravity: 'logos/antigravity.png',
   claude: 'logos/claude.png',
+  cursor: 'logos/cursor.png',
 };
 
 const SOURCE_PATHS = {
@@ -550,6 +553,34 @@ function paceChipText(pace, lang) {
 
 const QUOTA_CLIENT_OF = { 'opencode-go': 'opencode', codex: 'codex' };
 
+const RING_SEGMENTS = 24;
+
+// hero 分块环:24 段,pathLength=360 使 dasharray 直接用角度(每段 15°)。
+// 填充 = round(pct/100×24) 段状态色;空段 = 同色 15% 透明(与套餐卡分块条同语言)。
+function QuotaRing({ pct, tone }) {
+  // 每段 15° 槽位:10° 实块 + 5° 间隙;平头(butt)让分块缝隙清晰可见
+  const seg = 10;
+  const gap = 15 - seg;
+  const filled = Math.max(0, Math.min(RING_SEGMENTS, Math.round(pct / 100 * RING_SEGMENTS)));
+  const dash = Array(filled).fill(`${seg} ${gap}`).join(' ');
+  const track = Array(RING_SEGMENTS).fill(`${seg} ${gap}`).join(' ');
+  return (
+    <svg className="quota-ring" viewBox="0 0 116 116" aria-hidden="true">
+      <circle className="quota-ring-track" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={track} style={{ color: tone }} />
+      {filled > 0 && <circle className="quota-ring-fill" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={dash} style={{ color: tone }} />}
+    </svg>
+  );
+}
+
+function ExpiryChip({ endsInMs, lang }) {
+  if (endsInMs == null) return null;
+  // endsInMs 已是绝对时间戳(QuotaPage 减过 elapsed),不能再叠加 Date.now()
+  const days = Math.max(0, Math.ceil((endsInMs - Date.now()) / 86_400_000));
+  const date = new Date(endsInMs);
+  const md = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return <span className={`quota-expiry${days <= 7 ? ' quota-expiry-warning' : ''}`}>{lang === 0 ? `${md} 到期` : `expires ${md}`}</span>;
+}
+
 function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden }) {
   const t = (k) => STR[k][lang];
   const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
@@ -572,6 +603,7 @@ function QuotaCards({ cards, lang, allowPace = false, pinnedCards = [], hiddenCa
               <ProviderLogo provider={c.provider} />
               <Text weight="medium" className="quota-title">{c.title}</Text>
               <span className="quota-plan-type" title={c.kind === 'Live' && c.plan_type ? c.plan_type : undefined}>{c.kind === 'Live' ? c.plan_type || '' : ''}</span>
+              {c.kind === 'Live' && <ExpiryChip endsInMs={c.subscription_ends_at_ms} lang={lang} />}
               <div className="quota-card-actions">
                 <button type="button" aria-label={`${pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} ${c.title}`} title={pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} onClick={() => onTogglePin?.(c.provider)}>{pinnedCards.includes(c.provider) ? '◆' : '◇'}</button>
                 <button type="button" aria-label={`${t('card_hide')} ${c.title}`} title={t('card_hide')} onClick={() => onToggleHidden?.(c.provider)}>×</button>
@@ -627,6 +659,7 @@ function QuotaPage({ cards, sources, ledger, goatUsage, quotaFetchedAtMs, quotaS
   const currentCards = cards.map((card) => card.kind === 'Live' ? {
     ...card,
     limits: card.limits.map((limit) => ({ ...limit, resets_in_ms: limit.resets_in_ms == null ? null : Math.max(0, limit.resets_in_ms - elapsed) })),
+    subscription_ends_at_ms: card.subscription_ends_at_ms == null ? null : card.subscription_ends_at_ms - elapsed,
   } : card);
   const live = currentCards.filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average' && !preferences.hiddenCards.includes(card.provider));
   const limits = live.flatMap((card) => card.limits.map((limit) => ({ ...limit, provider: card.title.split(' ·')[0] })));
@@ -641,7 +674,8 @@ function QuotaPage({ cards, sources, ledger, goatUsage, quotaFetchedAtMs, quotaS
         <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
         <p>{tightest ? `${attention ? `${attention} ${t('quota_attention')}` : t('quota_all_clear')} · ${nextReset ? `${t('quota_next_reset')} ${fmtCountdown(nextReset.resets_in_ms)}` : '—'}` : t('empty_quota')}</p>
       </div>
-      <div className="quota-overview-meter" style={{ '--quota-pct': `${pct}%`, '--quota-tone': STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)' }} aria-label={tightest ? `${Math.round(pct)}% ${t('quota_used')}` : undefined}>
+      <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(pct)}% ${t('quota_used')}` : undefined}>
+        <QuotaRing pct={pct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
         <strong>{tightest ? `${Math.round(pct)}%` : '—'}</strong>
         <span>{t('quota_used')}</span>
       </div>
