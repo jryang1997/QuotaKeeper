@@ -7,7 +7,7 @@ fn main() {
         last_error: None,
         age_secs: Some(3),
         ledger: Some(&ledger),
-        period: tui_token_monitor::ui::overview::Period::D30,
+        period: tui_token_monitor::ui::overview::Period::Today,
         sel_agent: None, sel_day: None, sel_trend: None, sel_heat: None,
         chart_mode: true,
         trend_range: tui_token_monitor::ui::TrendRange::H24,

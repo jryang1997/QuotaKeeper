@@ -79,12 +79,20 @@ impl Period {
 }
 
 /// 所选周期的逐日切片(旧 → 新)。
+/// 26 周网格按整周对齐,尾部含本周未来空日(周一..周日),切片必须截到今天,
+/// 否则"今日"tab 会取到网格最后一格(本周日)而恒为 0(2026-09-29 实测踩坑)。
 pub fn period_days<'a>(period: Period, ledger: &'a LedgerReport) -> Vec<&'a DailyTotal> {
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    let up_to_today = ledger
+        .daily_totals
+        .iter()
+        .filter(|d| d.date.as_str() <= today.as_str());
     match period.days() {
-        None => ledger.daily_totals.iter().collect(),
-        Some(n) => ledger
-            .daily_totals
-            .iter()
+        None => up_to_today.collect(),
+        Some(n) => up_to_today
             .rev()
             .take(n)
             .collect::<Vec<_>>()
@@ -617,6 +625,21 @@ fn render_daily_table(frame: &mut Frame, area: Rect, days: &[&DailyTotal], zh: b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn today_period_never_includes_future_grid_days() {
+        // aggregate 产出的 26 周网格尾部含本周未来日;Today 切片必须恰好是今天,
+        // 且 All 切片不得越过今天(2026-09-29 回归:今日 tab 恒为 0)。
+        let ledger = crate::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let grid_last = ledger.daily_totals.last().unwrap().date.clone();
+        assert!(grid_last.as_str() >= today.as_str(), "网格应含未来日:{grid_last}");
+        let today_days = period_days(Period::Today, &ledger);
+        assert_eq!(today_days.len(), 1);
+        assert_eq!(today_days[0].date, today);
+        let all_days = period_days(Period::All, &ledger);
+        assert!(all_days.last().unwrap().date == today);
+    }
 
     #[test]
     fn period_days_slices_from_tail() {
