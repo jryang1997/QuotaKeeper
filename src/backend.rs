@@ -19,14 +19,15 @@ fn omp_candidates() -> Vec<String> {
 
 /// Fetch all providers independently. One failed source cannot erase other live cards.
 pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
-    let (codex, go, goat, cpa) = std::thread::scope(|scope| {
+    let (codex, go, goat, cpa, claude) = std::thread::scope(|scope| {
         let codex = scope.spawn(|| {
             crate::codex_app_server::fetch_report().or_else(|_| codex_native_quota_report())
         });
         let go = scope.spawn(crate::opencode_go::fetch_report);
         let goat = scope.spawn(crate::goat::fetch_report);
         let cpa = scope.spawn(cpa_antigravity_card);
-        (codex.join(), go.join(), goat.join(), cpa.join())
+        let claude = scope.spawn(crate::claude_quota::fetch_report);
+        (codex.join(), go.join(), goat.join(), cpa.join(), claude.join())
     });
 
     let mut cards = model::ProviderId::all().map(|provider| Card::Missing { provider });
@@ -41,6 +42,9 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     }
     if let Ok(Some(card)) = cpa {
         cards[3] = card;
+    }
+    if let Ok(Ok(report)) = claude {
+        cards[4] = Card::Live(report);
     }
 
     if (matches!(cards[0], Card::Missing { .. }) || matches!(cards[1], Card::Missing { .. }))
@@ -61,7 +65,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     })
 }
 
-fn merge_missing(cards: &mut [Card; 4], fallback: Vec<Card>) {
+fn merge_missing(cards: &mut [Card; 5], fallback: Vec<Card>) {
     for card in fallback {
         let Card::Live(report) = card else { continue };
         if let Some(index) = ProviderId::all()
@@ -185,6 +189,7 @@ fn cpa_api_call(
     auth_index: &str,
     url: &str,
     data: serde_json::Value,
+    last_status: &std::sync::atomic::AtomicU64,
 ) -> Option<serde_json::Value> {
     let payload = serde_json::json!({
         "auth_index": auth_index,
@@ -197,7 +202,7 @@ fn cpa_api_call(
         },
         "data": data.to_string(),
     });
-    let response = ureq::post(&format!("{CPA_BASE}/v0/management/api-call"))
+    let response = crate::http::post(&format!("{CPA_BASE}/v0/management/api-call"))
         .set("Authorization", &format!("Bearer {key}"))
         .timeout(CPA_TIMEOUT)
         .send_json(payload)
@@ -212,7 +217,12 @@ fn cpa_api_call(
         return None;
     }
     let envelope: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    if envelope.get("status_code").and_then(|x| x.as_u64()) != Some(200) {
+    // 上游(经 CPA 代查)的 HTTP 状态:非 200 不再与解析失败混为一谈,
+    // 由调用方区分 401(令牌过期)/403·404(接口不可读)/429(限流)。
+    if let Some(code) = envelope.get("status_code").and_then(|x| x.as_u64())
+        && code != 200
+    {
+        last_status.store(code, std::sync::atomic::Ordering::Relaxed);
         return None;
     }
     let body = envelope.get("body")?;
@@ -310,7 +320,11 @@ fn parse_cpa_tier(v: &serde_json::Value) -> Option<String> {
     Some(label.to_string())
 }
 
-fn cpa_upstream_report(key: &str, accounts: &[CpaAuth]) -> Option<Report> {
+fn cpa_upstream_report(
+    key: &str,
+    accounts: &[CpaAuth],
+    last_status: &std::sync::atomic::AtomicU64,
+) -> Option<Report> {
     let eligible: Vec<_> = accounts
         .iter()
         .filter(|a| !a.disabled && !a.auth_index.is_empty() && a.project_id.is_some())
@@ -337,6 +351,7 @@ fn cpa_upstream_report(key: &str, accounts: &[CpaAuth]) -> Option<Report> {
                             &account.auth_index,
                             url,
                             serde_json::json!({"project": project}),
+                            last_status,
                         )
                     });
                     (
@@ -373,6 +388,7 @@ fn cpa_upstream_report(key: &str, accounts: &[CpaAuth]) -> Option<Report> {
                 index,
                 CPA_TIER_URL,
                 serde_json::json!({"metadata":{"ideType":"ANTIGRAVITY"}}),
+                last_status,
             )
         })
         .and_then(|v| parse_cpa_tier(&v));
@@ -418,7 +434,8 @@ fn cpa_today_and_avg7(
 /// Antigravity (CPA) 卡:优先经 CPA 代查上游真实配额；失败时回退凭证健康与本机活动。
 pub fn cpa_antigravity_card() -> Option<model::Card> {
     let key = cpa_key()?;
-    let resp = ureq::get(&format!("{CPA_BASE}/v0/management/auth-files"))
+    let last_status = std::sync::atomic::AtomicU64::new(0);
+    let resp = crate::http::get(&format!("{CPA_BASE}/v0/management/auth-files"))
         .set("Authorization", &format!("Bearer {key}"))
         .timeout(CPA_TIMEOUT)
         .call()
@@ -435,7 +452,7 @@ pub fn cpa_antigravity_card() -> Option<model::Card> {
     if accounts.is_empty() {
         return None;
     }
-    if let Some(report) = cpa_upstream_report(&key, &accounts) {
+    if let Some(report) = cpa_upstream_report(&key, &accounts, &last_status) {
         return Some(Card::Live(report));
     }
     let disabled = accounts.iter().all(|a| a.disabled);
@@ -470,7 +487,13 @@ pub fn cpa_antigravity_card() -> Option<model::Card> {
     } else if failed > 0 {
         format!("CPA 凭证异常 · {failed} 次失败")
     } else {
-        "CPA 凭证可用 · 上游额度暂不可读".to_string()
+        match last_status.load(std::sync::atomic::Ordering::Relaxed) {
+            401 => "CPA 凭证可用 · 上游令牌过期(CPA 内重登 Antigravity)".to_string(),
+            403 | 404 => "CPA 凭证可用 · 上游接口不可读(403/404)".to_string(),
+            429 => "CPA 凭证可用 · 上游限流".to_string(),
+            0 => "CPA 凭证可用 · 上游额度暂不可读".to_string(),
+            code => format!("CPA 凭证可用 · 上游异常(HTTP {code})"),
+        }
     };
     let limits = activity
         .map(|(today, avg7)| {
@@ -497,16 +520,12 @@ pub fn cpa_antigravity_card() -> Option<model::Card> {
     }))
 }
 
-/// Codex 原生配额:读 ~/.codex/auth.json 的 OAuth token,直调 wham/usage.
+/// Codex 原生配额:读 ~/.codex/auth.json(CODEX_HOME 可重定向)的 OAuth token,直调 wham/usage.
 /// 返回的快照只含 Codex 一张卡(Go/GOAT 由各自链路负责)。
 fn codex_native_quota_report() -> anyhow::Result<Report> {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map(std::path::PathBuf::from)
-        .map_err(|_| anyhow::anyhow!("无 HOME"))?;
-    let auth_path = home.join(".codex").join("auth.json");
+    let auth_path = crate::paths::codex_home().join("auth.json");
     let text = std::fs::read_to_string(&auth_path)
-        .map_err(|_| anyhow::anyhow!("~/.codex/auth.json 不存在(未用 Codex CLI 登录)"))?;
+        .map_err(|_| anyhow::anyhow!("{} 不存在(未用 Codex CLI 登录)", auth_path.display()))?;
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("auth.json 解析失败: {e}"))?;
     let access = v
@@ -520,7 +539,7 @@ fn codex_native_quota_report() -> anyhow::Result<Report> {
         .unwrap_or("")
         .to_string();
 
-    let resp = ureq::get("https://chatgpt.com/backend-api/wham/usage")
+    let resp = crate::http::get("https://chatgpt.com/backend-api/wham/usage")
         .set("Authorization", &format!("Bearer {access}"))
         .set("ChatGPT-Account-Id", &account)
         .timeout(Duration::from_secs(15))

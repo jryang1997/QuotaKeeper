@@ -137,7 +137,7 @@ fn fetch() -> Option<Pricing> {
 }
 
 fn fetch_one(url: &str) -> Option<Pricing> {
-    let resp = ureq::get(url).timeout(TIMEOUT).call().ok()?;
+    let resp = crate::http::get(url).timeout(TIMEOUT).call().ok()?;
     let doc: HashMap<String, serde_json::Value> = resp.into_json().ok()?;
     let mut entries = HashMap::new();
     for (name, v) in doc {

@@ -20,8 +20,12 @@ pub const CLIENT: &str = "codex";
 
 pub fn scan_paths(home: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    // CODEX_HOME 重定向优先;默认 ~/.codex(与 Claude 的 CLAUDE_CONFIG_DIR 对齐)。
+    let codex_dir = std::env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".codex"));
     for sub in ["sessions", "archived_sessions"] {
-        let root = home.join(".codex").join(sub);
+        let root = codex_dir.join(sub);
         if !root.is_dir() {
             continue;
         }

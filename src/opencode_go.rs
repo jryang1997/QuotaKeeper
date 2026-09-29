@@ -114,7 +114,7 @@ fn parse_report(json: &str, now_ms: i64) -> Result<Report> {
 
 pub fn fetch_report() -> Result<Report> {
     let key = api_key()?;
-    let response = ureq::get(USAGE_URL)
+    let response = crate::http::get(USAGE_URL)
         .set("Authorization", &format!("Bearer {key}"))
         .set("Accept", "application/json")
         .set("User-Agent", "tui-token-monitor/0.1")

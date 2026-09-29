@@ -19,7 +19,7 @@ anyhow = "1"
 # "undecorated" + "+verbatim"),在本机 WinLibs GCC(ld)的 windows-gnu 目标上生成
 # 坏导入 thunk,首次调用即 STATUS_ACCESS_VIOLATION(2026-09-25 实测).升级前先验证 Local.
 chrono = "=0.4.38"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "2", features = ["json", "proxy-from-env"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2"
 zstd = "0.13"

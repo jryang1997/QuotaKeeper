@@ -133,7 +133,7 @@ fn api_key() -> anyhow::Result<String> {
 }
 
 fn get_json<T: for<'de> Deserialize<'de>>(path: &str, key: &str) -> anyhow::Result<T> {
-    let resp = ureq::get(&format!("{API_BASE}{path}"))
+    let resp = crate::http::get(&format!("{API_BASE}{path}"))
         .set("Authorization", &format!("Bearer {key}"))
         .set("Accept", "application/json")
         .timeout(TIMEOUT)

@@ -99,26 +99,47 @@ fn parse_report(account: &Value, rates: &Value, now_ms: i64) -> Result<Report> {
     })
 }
 
+fn configure_and_spawn(mut cmd: Command) -> Option<std::process::Child> {
+    cmd.arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: 避免 app-server 后台闪烁控制台
+    }
+    cmd.spawn().ok()
+}
+
+fn spawn_app_server(program: String) -> Option<std::process::Child> {
+    configure_and_spawn(Command::new(program))
+}
+
+#[cfg(windows)]
+fn spawn_app_server_via_cmd() -> Option<std::process::Child> {
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/c", "codex"]);
+    configure_and_spawn(cmd)
+}
+
+#[cfg(not(windows))]
+fn spawn_app_server_via_cmd() -> Option<std::process::Child> {
+    None
+}
+
 pub fn fetch_report() -> Result<Report> {
+    // 候选按优先级:PATH 上的 codex(原生安装)、Windows 原生安装器路径、
+    // 经 cmd /c 的 npm shim——CreateProcess 不会执行 .cmd,npm 安装的用户
+    // 只能走第三条;cmd /c 对两种安装方式都有效,放最后兜底。
     let mut candidates = vec!["codex".to_string()];
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         candidates.push(format!("{local}\\Programs\\OpenAI\\Codex\\bin\\codex.exe"));
     }
     let mut child = candidates
         .into_iter()
-        .find_map(|program| {
-            let mut cmd = Command::new(program);
-            cmd.arg("app-server")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null());
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: 避免 app-server 后台闪烁控制台
-            }
-            cmd.spawn().ok()
-        })
+        .find_map(spawn_app_server)
+        .or_else(|| spawn_app_server_via_cmd())
         .ok_or_else(|| anyhow!("Codex 官方 app-server 未安装或无法启动"))?;
     let result = (|| -> Result<Report> {
         let stdout = child
