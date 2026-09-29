@@ -1,17 +1,14 @@
-# 固化:本机无 MSVC link.exe(Git usr/bin 的 GNU link.exe 同名遮蔽),
-# 且 rustup shims 在 MSYS bash 下解析失败。
+# windows-gnu 目标统一用工具链自带 rust-lld 链接:WinLibs GCC 的 GNU ld 对
+# chrono 0.4.40+ / windows-result 等 api-set raw-dylib 导入会生成坏导入表,
+# 进程初始化即 ACCESS_VIOLATION(chrono 已钉 0.4.38 双保险,见根 Cargo.toml)。
 #
-# 2026-09-26:链接器从 WinLibs GCC(ld)换成工具链自带 rust-lld。
-# 原因:GNU ld 链接出的二进制在进程初始化阶段随机/稳定 ACCESS_VIOLATION
-# (cargo test --list 都崩;gui crate 的 wry 冒烟同因,换 rust-lld 后正常)。
-# CC/AR 仍指 WinLibs GCC(rusqlite bundled 等 C 代码还是要 gcc 编译)。
-[build]
-target = "x86_64-pc-windows-gnu"
-
+# CC/AR(编译 bundled SQLite 等 C 代码)与本机默认 target 不在仓库固化:
+# 需要固定 GNU 目标的机器,在用户级 ~/.cargo/config.toml 里自行配置,例如
+#   [build]
+#   target = "x86_64-pc-windows-gnu"
+#   [env]
+#   CC_x86_64_pc_windows_gnu = "…/mingw64/bin/gcc.exe"
+#   AR_x86_64_pc_windows_gnu = "…/mingw64/bin/ar.exe"
+# 其余平台用宿主默认工具链即可(见 README「构建」一节)。
 [target.x86_64-pc-windows-gnu]
 linker = "rust-lld"
-ar = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/ar.exe"
-
-[env]
-CC_x86_64_pc_windows_gnu = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/gcc.exe"
-AR_x86_64_pc_windows_gnu = "C:/Users/dev/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/bin/ar.exe"

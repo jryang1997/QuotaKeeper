@@ -1,5 +1,7 @@
-# 固化:repo 内任何 cargo 调用自动用 GNU host 工具链,
-# 不再需要 `cargo +stable-x86_64-pc-windows-gnu` 前缀。
+# 宿主默认 stable;Windows GNU 目标的 std 一并预装——本项目以
+# x86_64-pc-windows-gnu 为第一公民目标(rust-lld 链接,见 .cargo/config.toml),
+# 本机固化 GNU 默认 target 的方法见该文件注释。
 [toolchain]
-channel = "stable-x86_64-pc-windows-gnu"
+channel = "stable"
+targets = ["x86_64-pc-windows-gnu"]
 components = ["rustfmt", "clippy"]

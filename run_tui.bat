@@ -19,7 +19,9 @@ exit /b 0
 
 :run
 rem 正常退出(q)= 窗口自动关闭;异常退出 = 暂停,方便看清报错。
+rem 优先 GNU 固化构建产物,其次 MSVC 默认路径。
 set "EXE=target\x86_64-pc-windows-gnu\debug\tui-token-monitor.exe"
+if not exist "%EXE%" set "EXE=target\debug\tui-token-monitor.exe"
 if not exist "%EXE%" (
   echo [!] 未找到 %EXE%
   echo     先在项目目录执行:cargo build

@@ -4,3 +4,9 @@
 # GUI 构建产物
 gui/target/
 gui/frontend/node_modules/
+
+# 编辑器与系统杂物
+.env
+Thumbs.db
+.DS_Store
+*.swp
