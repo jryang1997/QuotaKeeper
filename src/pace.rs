@@ -1,7 +1,7 @@
 //! Forecast only quota windows with a known duration, reset time, and enough observations.
 
 use chrono::{Datelike, Local, TimeZone};
-use tui_token_monitor::model::Limit;
+use crate::model::Limit;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Forecast {
@@ -66,7 +66,7 @@ pub fn forecast(limit: &Limit, now_ms: i64) -> Option<Forecast> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_token_monitor::model::Status;
+    use crate::model::Status;
 
     #[test]
     fn five_hour_forecast_has_pace_delta_and_eta() {

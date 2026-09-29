@@ -10,7 +10,6 @@
 pub mod desktop;
 pub mod export;
 pub mod ipc;
-pub mod pace;
 pub mod refresh;
 pub mod single_instance;
 
@@ -471,7 +470,7 @@ fn main() -> anyhow::Result<()> {
                                         if report.source == tui_token_monitor::model::QuotaSource::CpaLocal { continue; }
                                         for limit in &report.limits {
                                             let key = format!("{} · {}", report.provider.title(), limit.label);
-                                            let forecast = pace::forecast(limit, r.fetched_at_ms as i64);
+                                            let forecast = tui_token_monitor::pace::forecast(limit, r.fetched_at_ms as i64);
                                             let at_risk = forecast.is_some_and(|value| value.exhaust_in_ms.is_some());
                                             if pace_alerts_enabled && !(quiet_hours && in_quiet_hours())
                                                 && pace_risk.get(&key) == Some(&false) && at_risk

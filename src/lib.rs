@@ -8,6 +8,7 @@ pub mod http;
 pub mod ledger;
 pub mod model;
 pub mod opencode_go;
+pub mod pace;
 pub mod paths;
 pub mod settings;
 pub mod ui;
