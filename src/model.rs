@@ -55,6 +55,7 @@ pub enum ProviderId {
     Codex,
     Goat,
     Antigravity,
+    Claude,
 }
 
 impl ProviderId {
@@ -67,8 +68,14 @@ impl ProviderId {
     }
 
     /// 固定展示顺序.
-    pub fn all() -> [Self; 4] {
-        [Self::OpenCodeGo, Self::Codex, Self::Goat, Self::Antigravity]
+    pub fn all() -> [Self; 5] {
+        [
+            Self::OpenCodeGo,
+            Self::Codex,
+            Self::Goat,
+            Self::Antigravity,
+            Self::Claude,
+        ]
     }
 
     pub fn title(&self) -> &'static str {
@@ -77,20 +84,32 @@ impl ProviderId {
             Self::Codex => "Codex",
             Self::Goat => "Command Code GOAT",
             Self::Antigravity => "Antigravity · CPA",
+            Self::Claude => "Claude Pro/Max",
         }
     }
 
     pub fn missing_hint(&self) -> &'static str {
-        match self {
-            Self::OpenCodeGo => {
+        let zh = matches!(crate::ui::i18n::lang(), crate::ui::i18n::Lang::Zh);
+        match (self, zh) {
+            // OMP 20 个 usage provider 无 command-code(registry.ts),原生 GOAT 通道才有.
+            (Self::OpenCodeGo, true) => {
                 "配置 Go API key（应用设置、OPENCODE_API_KEY 或 OpenCode auth.json）；OMP 可作兼容兜底"
             }
-            Self::Codex => "未找到可用 Codex 登录态；请登录 Codex CLI 后刷新",
-            // OMP 20 个 usage provider 无 command-code(registry.ts),原生 GOAT 通道才有.
-            Self::Goat => {
+            (Self::OpenCodeGo, false) => {
+                "Set a Go API key (app settings, OPENCODE_API_KEY, or OpenCode auth.json); OMP is a fallback"
+            }
+            (Self::Codex, true) => "未找到可用 Codex 登录态；请登录 Codex CLI 后刷新",
+            (Self::Codex, false) => "No usable Codex login found; sign in with the Codex CLI and refresh",
+            (Self::Goat, true) => {
                 "配置 GOAT API key（应用设置或 COMMAND_CODE_API_KEY）；也可使用 cmdc 登录态"
             }
-            Self::Antigravity => "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
+            (Self::Goat, false) => {
+                "Set a GOAT API key (app settings or COMMAND_CODE_API_KEY), or use cmdc login"
+            }
+            (Self::Antigravity, true) => "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
+            (Self::Antigravity, false) => "CPA not running, or ~/.tui-token-monitor/cpa-key missing",
+            (Self::Claude, true) => "未找到 Claude Code 登录态；运行 `claude` 登录后刷新",
+            (Self::Claude, false) => "No Claude Code login found; run `claude` to sign in, then refresh",
         }
     }
 }
@@ -104,6 +123,7 @@ pub enum QuotaSource {
     CpaGoogleQuota,
     CpaLocal,
     OmpFallback,
+    ClaudeOauth,
 }
 
 impl QuotaSource {
@@ -116,6 +136,7 @@ impl QuotaSource {
             Self::CpaGoogleQuota => "CPA 代查 Google 上游配额 · 内部接口",
             Self::CpaLocal => "CPA 本机管理接口；若有 OMP stats.db 则附本机活动数据",
             Self::OmpFallback => "OMP usage --json · 兼容兜底",
+            Self::ClaudeOauth => "Claude 官方 oauth/usage · 本应用直连",
         }
     }
 }
@@ -283,7 +304,7 @@ mod tests {
     #[test]
     fn fixture_parses_to_expected_percentages() {
         let snap = parse_snapshot(FIXTURE).unwrap();
-        assert_eq!(snap.cards.len(), 4);
+        assert_eq!(snap.cards.len(), 5);
         let go = match &snap.cards[0] {
             Card::Live(r) => r,
             Card::Missing { .. } => panic!("go 应为 Live"),
@@ -298,6 +319,13 @@ mod tests {
         assert_eq!(codex.limits.len(), 2);
         assert!((codex.limits[0].used_pct - 7.0).abs() < 1e-9);
         assert!((codex.limits[1].used_pct - 70.0).abs() < 1e-9);
+        // fixture 无 Claude 数据:第五张卡按 Missing 兜底。
+        assert!(matches!(
+            snap.cards[4],
+            Card::Missing {
+                provider: ProviderId::Claude
+            }
+        ));
     }
 
     #[test]

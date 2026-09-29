@@ -95,6 +95,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                         "provider_fraction"
                     }
                     model::ProviderId::Antigravity => "activity_vs_average",
+                    model::ProviderId::Claude => "provider_fraction",
                 },
                 limits: r
                     .limits
@@ -116,6 +117,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Codex => "Codex 官方 app-server · 可选旧接口/OMP 兜底",
                     model::ProviderId::Goat => "Command Code billing API",
                     model::ProviderId::Antigravity => "CPA 管理接口 · 可代查 Google 上游配额",
+                    model::ProviderId::Claude => "Claude 官方 oauth/usage（Claude Code 登录态）",
                 },
                 method: "unavailable",
             },
@@ -129,6 +131,7 @@ fn provider_slug(p: model::ProviderId) -> &'static str {
         model::ProviderId::Codex => "codex",
         model::ProviderId::Goat => "goat",
         model::ProviderId::Antigravity => "antigravity",
+        model::ProviderId::Claude => "claude",
     }
 }
 
@@ -485,7 +488,7 @@ mod tests {
         let rep = ledger::collect(chrono::Local::now());
         let s = push(123, 120, 122, None, &snap, &rep, None);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(v["cards"].as_array().unwrap().len(), 4);
+        assert_eq!(v["cards"].as_array().unwrap().len(), 5);
         assert_eq!(v["quota_fetched_at_ms"], 120);
         assert_eq!(v["quota_checked_at_ms"], 122);
         assert!(v["goat_usage"].is_null());
