@@ -66,7 +66,7 @@ pub enum CardDto {
     Missing {
         provider: &'static str,
         title: &'static str,
-        hint: &'static str,
+        hints: [&'static str; 2],
         source: &'static str,
         method: &'static str,
     },
@@ -115,7 +115,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
             Card::Missing { provider } => CardDto::Missing {
                 provider: provider_slug(*provider),
                 title: provider.title(),
-                hint: provider.missing_hint(),
+                hints: provider.missing_hints(),
                 source: match provider {
                     model::ProviderId::OpenCodeGo => "OpenCode Go 官方 usage API · 可选 OMP 兜底",
                     model::ProviderId::Codex => "Codex 官方 app-server · 可选旧接口/OMP 兜底",
@@ -487,6 +487,20 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/usage.json");
+
+    #[test]
+    fn missing_card_carries_both_language_hints() {
+        let snap = Snapshot {
+            generated_at_ms: 0,
+            cards: vec![Card::Missing {
+                provider: model::ProviderId::Cursor,
+            }],
+        };
+        let value = serde_json::to_value(cards(&snap)).unwrap();
+        assert!(value[0]["hints"][0].as_str().unwrap().contains("Cursor"));
+        assert!(value[0]["hints"][1].as_str().unwrap().contains("Cursor"));
+        assert_ne!(value[0]["hints"][0], value[0]["hints"][1]);
+    }
 
     #[test]
     fn push_serializes_full_payload() {

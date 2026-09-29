@@ -2,7 +2,7 @@
 name = "tui-token-monitor-gui"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.90"
 description = "Windows desktop shell (WebView2) for tui-token-monitor"
 license = "MIT"
 repository = "https://github.com/jryang1997/tui-token-monitor"

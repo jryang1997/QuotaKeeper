@@ -395,8 +395,8 @@ fn render_card(
             }
         }
         Card::Missing { provider } => {
-            // 准确的缺卡原因(双语)由 model 统一给出,与 GUI 同源。
-            let hint = provider.missing_hint();
+            let hints = provider.missing_hints();
+            let hint = hints[usize::from(crate::ui::i18n::lang() == crate::ui::i18n::Lang::En)];
             let block = Block::default()
                 .title(format!(" {} ", provider.title()))
                 .borders(Borders::ALL)

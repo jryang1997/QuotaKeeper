@@ -3,7 +3,7 @@
 //! 不变量:
 //! - `used_pct` 恒为 0–100 百分制(OMP `amount.used` 已是该口径;GOAT `used/cap` 美元口径,见 tests/fixtures/goat.json).
 //! - 状态只由 `status_for` 按阈值推导:>=100 exhausted,>=80 warning,其余 ok.
-//! - 四家 provider 固定顺序展示,缺失的一律为 `Card::Missing`,保证 UI 永不缺卡.
+//! - 六家 provider 固定顺序展示,缺失的一律为 `Card::Missing`,保证 UI 永不缺卡.
 
 use serde::Deserialize;
 
@@ -91,32 +91,33 @@ impl ProviderId {
         }
     }
 
-    pub fn missing_hint(&self) -> &'static str {
-        let zh = matches!(crate::ui::i18n::lang(), crate::ui::i18n::Lang::Zh);
-        match (self, zh) {
+    pub fn missing_hints(&self) -> [&'static str; 2] {
+        match self {
             // OMP 20 个 usage provider 无 command-code(registry.ts),原生 GOAT 通道才有.
-            (Self::OpenCodeGo, true) => {
-                "配置 Go API key（应用设置、OPENCODE_API_KEY 或 OpenCode auth.json）；OMP 可作兼容兜底"
-            }
-            (Self::OpenCodeGo, false) => {
-                "Set a Go API key (app settings, OPENCODE_API_KEY, or OpenCode auth.json); OMP is a fallback"
-            }
-            (Self::Codex, true) => "未找到可用 Codex 登录态；请登录 Codex CLI 后刷新",
-            (Self::Codex, false) => "No usable Codex login found; sign in with the Codex CLI and refresh",
-            (Self::Goat, true) => {
-                "配置 GOAT API key（应用设置或 COMMAND_CODE_API_KEY）；也可使用 cmdc 登录态"
-            }
-            (Self::Goat, false) => {
-                "Set a GOAT API key (app settings or COMMAND_CODE_API_KEY), or use cmdc login"
-            }
-            (Self::Antigravity, true) => "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
-            (Self::Antigravity, false) => "CPA not running, or ~/.tui-token-monitor/cpa-key missing",
-            (Self::Claude, true) => "未找到 Claude Code 登录态；运行 `claude` 登录后刷新",
-            (Self::Claude, false) => "No Claude Code login found; run `claude` to sign in, then refresh",
-            (Self::Cursor, true) => "未找到 Cursor 登录态；启动 Cursor 编辑器或 `cursor-agent login` 后刷新",
-            (Self::Cursor, false) => {
-                "No Cursor login found; start the Cursor editor or run `cursor-agent login`, then refresh"
-            }
+            Self::OpenCodeGo => [
+                "配置 Go API key（应用设置、OPENCODE_API_KEY 或 OpenCode auth.json）；OMP 可作兼容兜底",
+                "Set a Go API key (app settings, OPENCODE_API_KEY, or OpenCode auth.json); OMP is a fallback",
+            ],
+            Self::Codex => [
+                "未找到可用 Codex 登录态；请登录 Codex CLI 后刷新",
+                "No usable Codex login found; sign in with the Codex CLI and refresh",
+            ],
+            Self::Goat => [
+                "配置 GOAT API key（应用设置或 COMMAND_CODE_API_KEY）；也可使用 cmdc 登录态",
+                "Set a GOAT API key (app settings or COMMAND_CODE_API_KEY), or use cmdc login",
+            ],
+            Self::Antigravity => [
+                "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
+                "CPA not running, or ~/.tui-token-monitor/cpa-key missing",
+            ],
+            Self::Claude => [
+                "未找到 Claude Code 登录态；运行 `claude` 登录后刷新",
+                "No Claude Code login found; run `claude` to sign in, then refresh",
+            ],
+            Self::Cursor => [
+                "未找到 Cursor 登录态；启动 Cursor 编辑器或 `cursor-agent login` 后刷新",
+                "No Cursor login found; start the Cursor editor or run `cursor-agent login`, then refresh",
+            ],
         }
     }
 }

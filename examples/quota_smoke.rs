@@ -35,7 +35,7 @@ fn print_snapshot(snap: &Snapshot) {
                 }
             }
             Card::Missing { provider } => {
-                println!("○ {} 缺卡:{}", provider.title(), provider.missing_hint());
+                println!("○ {} 缺卡:{}", provider.title(), provider.missing_hints()[0]);
             }
         }
     }

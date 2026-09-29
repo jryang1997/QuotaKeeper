@@ -4,6 +4,108 @@
 //! - 状态机:每条 (卡, 额度) 记录上一轮等级(0 正常 / 1 ≥80% / 2 ≥100%),
 //!   等级跃迁产生 Warn / Exhausted / Reset 事件,原状不产生。
 
+use std::collections::HashMap;
+
+use crate::model::{Card, ProviderId, QuotaSource, Snapshot};
+use crate::pace;
+
+#[derive(Default)]
+pub struct AlertTracker {
+    initialized: bool,
+    quota: HashMap<(ProviderId, String), u8>,
+    expiry: HashMap<ProviderId, u8>,
+    pace: HashMap<(ProviderId, String), bool>,
+}
+
+#[derive(Default)]
+pub struct AlertBatch {
+    pub quota: Vec<QuotaAlert>,
+    pub expiry: Vec<ExpiryAlert>,
+    pub pace: Vec<PaceAlert>,
+}
+
+pub struct QuotaAlert {
+    pub title: String,
+    pub used_pct: f64,
+    pub event: ToastEvent,
+}
+
+pub struct ExpiryAlert {
+    pub provider: String,
+    pub ends_at_ms: i64,
+}
+
+pub struct PaceAlert {
+    pub title: String,
+    pub delta_points: f64,
+    pub exhaust_in_ms: i64,
+}
+
+impl AlertTracker {
+    /// The first successful snapshot establishes a baseline; later snapshots emit transitions.
+    pub fn update(&mut self, snapshot: &Snapshot, now_ms: i64) -> AlertBatch {
+        let mut batch = AlertBatch::default();
+        let mut quota = HashMap::new();
+        let mut expiry = HashMap::new();
+        let mut pace_risk = HashMap::new();
+        for card in &snapshot.cards {
+            let Card::Live(report) = card else { continue };
+            let provider = report.provider;
+            let name = report.provider.title().split(" ·").next().unwrap_or("Token");
+            if let Some(ends_at_ms) = report.subscription_ends_at_ms {
+                let level = expiry_level(Some(ends_at_ms), now_ms);
+                let prior = self.expiry.get(&provider).copied().unwrap_or(0);
+                if self.initialized && level > prior {
+                    batch.expiry.push(ExpiryAlert {
+                        provider: name.to_string(),
+                        ends_at_ms,
+                    });
+                }
+                expiry.insert(provider, level);
+            }
+            if report.source == QuotaSource::CpaLocal {
+                continue;
+            }
+            for limit in &report.limits {
+                let key = (provider, limit.label.clone());
+                let title = format!("{name} · {}", limit.label);
+                let level = level_for(limit.used_pct);
+                let prior = self.quota.get(&key).copied().unwrap_or(0);
+                if self.initialized
+                    && let Some(event) = transition(prior, level)
+                {
+                    batch.quota.push(QuotaAlert {
+                        title: title.clone(),
+                        used_pct: limit.used_pct,
+                        event,
+                    });
+                }
+                quota.insert(key.clone(), level);
+
+                let forecast = pace::forecast(limit, now_ms);
+                let exhaust_in_ms = forecast.and_then(|value| value.exhaust_in_ms);
+                let at_risk = exhaust_in_ms.is_some();
+                if self.initialized
+                    && self.pace.get(&key) == Some(&false)
+                    && let (Some(value), Some(exhaust_in_ms)) = (forecast, exhaust_in_ms)
+                {
+                    batch.pace.push(PaceAlert {
+                        title,
+                        delta_points: value.delta_points,
+                        exhaust_in_ms,
+                    });
+                }
+                pace_risk.insert(key, at_risk);
+            }
+        }
+        self.quota = quota;
+        self.expiry = expiry;
+        self.pace = pace_risk;
+        self.initialized = true;
+        batch
+    }
+}
+
 /// 阈值等级:0 正常,1 ≥80%(警告),2 ≥100%(耗尽)。
 pub fn level_for(pct: f64) -> u8 {
     if pct >= 100.0 {
@@ -15,6 +117,7 @@ pub fn level_for(pct: f64) -> u8 {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum ToastEvent {
     Warn,
     Exhausted,
@@ -24,16 +127,20 @@ pub enum ToastEvent {
 impl ToastEvent {
     /// 事件文案(双语)。
     pub fn message(&self) -> &'static str {
+        self.message_for(crate::ui::i18n::lang())
+    }
+
+    pub fn message_for(&self, lang: crate::ui::i18n::Lang) -> &'static str {
         match self {
-            ToastEvent::Warn => match crate::ui::i18n::lang() {
+            ToastEvent::Warn => match lang {
                 crate::ui::i18n::Lang::Zh => "达到 80%",
                 crate::ui::i18n::Lang::En => "reached 80%",
             },
-            ToastEvent::Exhausted => match crate::ui::i18n::lang() {
+            ToastEvent::Exhausted => match lang {
                 crate::ui::i18n::Lang::Zh => "已耗尽",
                 crate::ui::i18n::Lang::En => "exhausted",
             },
-            ToastEvent::Reset => match crate::ui::i18n::lang() {
+            ToastEvent::Reset => match lang {
                 crate::ui::i18n::Lang::Zh => "已重置",
                 crate::ui::i18n::Lang::En => "reset",
             },
@@ -82,7 +189,11 @@ pub fn expiry_level(ends_at_ms: Option<i64>, now_ms: i64) -> u8 {
 
 /// 到期 toast 标题(双语):「GOAT 订阅」/「GOAT subscription」。
 pub fn expiry_title(provider: &str) -> String {
-    match crate::ui::i18n::lang() {
+    expiry_title_for(provider, crate::ui::i18n::lang())
+}
+
+pub fn expiry_title_for(provider: &str, lang: crate::ui::i18n::Lang) -> String {
+    match lang {
         crate::ui::i18n::Lang::Zh => format!("{provider} 订阅"),
         crate::ui::i18n::Lang::En => format!("{provider} subscription"),
     }
@@ -90,12 +201,16 @@ pub fn expiry_title(provider: &str) -> String {
 
 /// 到期 toast 正文(双语):「10-01 到期 · 剩 2 天」;剩 0 天「今日到期」。
 pub fn expiry_message(ends_at_ms: i64, now_ms: i64) -> String {
+    expiry_message_for(ends_at_ms, now_ms, crate::ui::i18n::lang())
+}
+
+pub fn expiry_message_for(ends_at_ms: i64, now_ms: i64, lang: crate::ui::i18n::Lang) -> String {
     let days_left = ((ends_at_ms - now_ms).max(0) + 86_399_999) / 86_400_000;
     let date = chrono::DateTime::from_timestamp_millis(ends_at_ms)
         .map(|dt| dt.with_timezone(&chrono::Local))
         .map(|dt| dt.format("%m-%d").to_string())
         .unwrap_or_default();
-    match crate::ui::i18n::lang() {
+    match lang {
         crate::ui::i18n::Lang::Zh => {
             if days_left == 0 {
                 format!("{date} 今日到期")
@@ -156,6 +271,67 @@ pub fn toast(_title: &str, _body: &str) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Limit, Report, Status};
+
+    fn snapshot(used_pct: f64, ends_at_ms: Option<i64>, source: QuotaSource) -> Snapshot {
+        Snapshot {
+            generated_at_ms: 0,
+            cards: vec![Card::Live(Report {
+                provider: ProviderId::Codex,
+                source,
+                plan_type: String::new(),
+                limits: vec![Limit {
+                    label: "5h".into(),
+                    used_pct,
+                    resets_in_ms: Some(2 * 3_600_000),
+                    status: Status::Ok,
+                }],
+                subscription_ends_at_ms: ends_at_ms,
+            })],
+        }
+    }
+
+    #[test]
+    fn tracker_baselines_then_emits_quota_expiry_and_pace_transitions() {
+        let now = 1_790_000_000_000;
+        let mut tracker = AlertTracker::default();
+        let first = tracker.update(
+            &snapshot(20.0, Some(now + 8 * 86_400_000), QuotaSource::CodexAppServer),
+            now,
+        );
+        assert!(first.quota.is_empty() && first.expiry.is_empty() && first.pace.is_empty());
+
+        let next = tracker.update(
+            &snapshot(85.0, Some(now + 7 * 86_400_000), QuotaSource::CodexAppServer),
+            now,
+        );
+        assert!(matches!(next.quota[0].event, ToastEvent::Warn));
+        assert_eq!(next.expiry[0].provider, "Codex");
+        assert_eq!(next.pace.len(), 1);
+        let repeated = tracker.update(
+            &snapshot(85.0, Some(now + 7 * 86_400_000), QuotaSource::CodexAppServer),
+            now,
+        );
+        assert!(repeated.quota.is_empty() && repeated.expiry.is_empty() && repeated.pace.is_empty());
+
+        let reset = tracker.update(
+            &snapshot(10.0, Some(now + 30 * 86_400_000), QuotaSource::CodexAppServer),
+            now,
+        );
+        assert!(matches!(reset.quota[0].event, ToastEvent::Reset));
+        assert!(reset.expiry.is_empty());
+    }
+
+    #[test]
+    fn tracker_ignores_cpa_activity_limits() {
+        let mut tracker = AlertTracker::default();
+        tracker.update(&snapshot(10.0, None, QuotaSource::CpaLocal), 1_790_000_000_000);
+        let alerts = tracker.update(
+            &snapshot(100.0, None, QuotaSource::CpaLocal),
+            1_790_000_000_000,
+        );
+        assert!(alerts.quota.is_empty() && alerts.pace.is_empty());
+    }
 
     #[test]
     fn levels_follow_thresholds() {

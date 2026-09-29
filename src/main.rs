@@ -2,13 +2,12 @@
 //!
 //! 布局为壳 + 三页(配额/Token 用量/热力图);宽窗口侧栏可点,窄窗口自动收起.
 //! 点击图表/热力格查看明细;键盘 ↑↓/Tab/1·2·3/?/r/q·Esc 等操作.
-//! 刷新线程一次带回 quota(可失败)与 ledger(永不完全失败,单源错误在 UI 展示),
-//! 因此 OMP 挂了 Token 页照常可用.
+//! 配额与账本独立刷新;远程配额慢时本地用量先显示.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, ledger, model, pace, ui};
+use tui_token_monitor::{backend, ledger, ui};
 
 use crossterm::{
     event::{
@@ -20,11 +19,12 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use model::Snapshot;
+use tui_token_monitor::model::Snapshot;
 use ui::{HitRegions, Page, TrendMetric, TrendRange};
 
 enum Msg {
-    Refreshed(Result<(Snapshot, u64), String>, Box<ledger::LedgerReport>),
+    Quota(Result<(Snapshot, u64), String>),
+    Ledger(Box<ledger::LedgerReport>),
 }
 
 fn now_ms() -> i64 {
@@ -35,111 +35,45 @@ fn now_ms() -> i64 {
 }
 
 fn spawn_refresh(tx: mpsc::Sender<Msg>) {
+    let quota_tx = tx.clone();
     std::thread::spawn(move || {
-        // 四家额度独立刷新；各卡的兼容兜底由 backend 管理。
-        let t = std::thread::spawn(backend::fetch_snapshot);
-        let quota = match t
-            .join()
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("配额采集线程 panic")))
-        {
+        let result = std::panic::catch_unwind(backend::fetch_snapshot)
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("配额采集线程 panic")));
+        let quota = match result {
             Ok(snap) => Ok((snap, now_ms() as u64)),
             Err(e) => Err(e.to_string()),
         };
-        // ledger 采集与 quota 无关:本地日志扫描 + SQLite 直查 + 可选估价
+        let _ = quota_tx.send(Msg::Quota(quota));
+    });
+    std::thread::spawn(move || {
         let rep = ledger::collect(chrono::Local::now());
-        let _ = tx.send(Msg::Refreshed(quota, Box::new(rep)));
+        let _ = tx.send(Msg::Ledger(Box::new(rep)));
     });
 }
 
-/// 配额阈值通知:等级跃迁才发 toast(避免每 60s 重复轰炸)。
-/// 订阅到期提醒:档位只升不降,上升时 toast;续费回落静默更新状态.
-/// 预测提醒(与 GUI pace 同逻辑):比匀速快且预计耗尽 → 首次触发 toast.
-fn notify_pace(snap: &Snapshot, fetched_at_ms: u64, risk: &mut std::collections::HashMap<String, bool>) {
+fn show_alerts(alerts: ui::notify::AlertBatch, now_ms: i64) {
+    for alert in alerts.quota {
+        ui::notify::toast(
+            &alert.title,
+            &format!("{:.0}% {}", alert.used_pct, alert.event.message()),
+        );
+    }
+    for alert in alerts.expiry {
+        ui::notify::toast(
+            &ui::notify::expiry_title(&alert.provider),
+            &ui::notify::expiry_message(alert.ends_at_ms, now_ms),
+        );
+    }
     let zh = ui::i18n::lang() == ui::i18n::Lang::Zh;
-    let mut next: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
-    for card in &snap.cards {
-        let model::Card::Live(r) = card else { continue };
-        if r.source == model::QuotaSource::CpaLocal {
-            continue;
-        }
-        let provider = r.provider.title().split(" ·").next().unwrap_or("").to_string();
-        for l in &r.limits {
-            let key = format!("{provider} · {}", l.label);
-            let forecast = pace::forecast(l, fetched_at_ms as i64);
-            let at_risk = forecast.is_some_and(|v| v.exhaust_in_ms.is_some());
-            if at_risk
-                && risk.get(&key) != Some(&true)
-                && let Some(v) = forecast
-            {
-                let mins = v.exhaust_in_ms.unwrap_or(0) / 60_000;
-                let title = format!("{key}");
-                let body = if zh {
-                    format!("比匀速快 {:.0} 个百分点;预计 {} 分钟后耗尽", v.delta_points, mins)
-                } else {
-                    format!(
-                        "{:.0} points ahead of pace; may run out in {} min",
-                        v.delta_points, mins
-                    )
-                };
-                ui::notify::toast(&title, &body);
-            }
-            next.insert(key, at_risk);
-        }
+    for alert in alerts.pace {
+        let minutes = alert.exhaust_in_ms / 60_000;
+        let body = if zh {
+            format!("比匀速快 {:.0} 个百分点;预计 {minutes} 分钟后耗尽", alert.delta_points)
+        } else {
+            format!("{:.0} points ahead of pace; may run out in {minutes} min", alert.delta_points)
+        };
+        ui::notify::toast(&alert.title, &body);
     }
-    *risk = next;
-}
-
-fn notify_expiry(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
-    let now = now_ms();
-    let mut next = Vec::with_capacity(prev.len());
-    for card in &snap.cards {
-        let model::Card::Live(r) = card else { continue };
-        let Some(ends) = r.subscription_ends_at_ms else { continue };
-        let provider = r.provider.title().split(" ·").next().unwrap_or("subscription");
-        let level = ui::notify::expiry_level(Some(ends), now);
-        let before = prev
-            .iter()
-            .find(|(k, _)| *k == provider)
-            .map(|(_, v)| *v)
-            .unwrap_or(0);
-        if level > before {
-            ui::notify::toast(
-                &ui::notify::expiry_title(provider),
-                &ui::notify::expiry_message(ends, now),
-            );
-        }
-        next.push((provider.to_string(), level));
-    }
-    *prev = next;
-}
-
-fn notify_quota(snap: &Snapshot, prev: &mut Vec<(String, u8)>) {
-    let mut next = Vec::with_capacity(prev.len());
-    for card in &snap.cards {
-        let model::Card::Live(r) = card else { continue };
-        if r.source == model::QuotaSource::CpaLocal {
-            continue;
-        }
-        // toast 标题用短名("OpenCode Go · $10/mo" → "OpenCode Go")
-        let provider = r.provider.title().split(" ·").next().unwrap_or("usage");
-        for l in &r.limits {
-            let key = format!("{provider}·{}", l.label);
-            let now = ui::notify::level_for(l.used_pct);
-            let before = prev
-                .iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, v)| *v)
-                .unwrap_or(0);
-            if let Some(ev) = ui::notify::transition(before, now) {
-                ui::notify::toast(
-                    &format!("{provider} · {}", l.label),
-                    &format!("{:.0}% {}", l.used_pct, ev.message()),
-                );
-            }
-            next.push((key, now));
-        }
-    }
-    *prev = next;
 }
 
 fn main() -> anyhow::Result<()> {
@@ -174,7 +108,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut fetched_at_ms: Option<u64> = None;
     let mut last_error: Option<String> = None;
     let mut refreshing = true;
-    let mut in_flight = true;
+    let mut pending_refreshes = 2_u8;
     let mut next_refresh = Instant::now();
     let mut tick: u64 = 0;
 
@@ -191,12 +125,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut trend_metric = TrendMetric::Tokens;
     let mut dim: usize = 0; // 用量页维度:0 Agent / 1 会话 / 2 项目 / 3 模型
     let mut model_offset: usize = 0;
-    // 配额阈值通知状态机:每 (卡, 额度) 记上一轮等级,跃迁才发 toast
-    let mut prev_levels: Vec<(String, u8)> = Vec::new();
-    // 订阅到期通知状态机:每卡记上一轮档位,只升不降(续费回落静默)
-    let mut prev_expiry: Vec<(String, u8)> = Vec::new();
-    // 预测提醒:每 (卡, 窗口) 记风险位,进入风险首次 toast,回落后再入才再发
-    let mut pace_risk: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut alerts = ui::notify::AlertTracker::default();
     let mut ledger_report: Option<ledger::LedgerReport> = None;
     let mut hits = HitRegions::default();
 
@@ -204,18 +133,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
 
     loop {
         // 注意:不用 next_refresh.elapsed(),未来时刻会 panic;直接比较 Instant.
-        if !in_flight && Instant::now() >= next_refresh {
+        if pending_refreshes == 0 && Instant::now() >= next_refresh {
             spawn_refresh(tx.clone());
-            in_flight = true;
+            pending_refreshes = 2;
             refreshing = true;
         }
         match rx.try_recv() {
-            Ok(Msg::Refreshed(quota, rep)) => {
+            Ok(Msg::Quota(quota)) => {
                 match quota {
                     Ok((snap, at)) => {
-                        notify_quota(&snap, &mut prev_levels);
-                        notify_expiry(&snap, &mut prev_expiry);
-                        notify_pace(&snap, at, &mut pace_risk);
+                        show_alerts(alerts.update(&snap, at as i64), at as i64);
                         snapshot = Some(snap);
                         fetched_at_ms = Some(at);
                         last_error = None;
@@ -224,13 +151,18 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         last_error = Some(e);
                     }
                 }
+                pending_refreshes = pending_refreshes.saturating_sub(1);
+            }
+            Ok(Msg::Ledger(rep)) => {
                 ledger_report = Some(*rep);
-                refreshing = false;
-                in_flight = false;
-                next_refresh = Instant::now() + Duration::from_secs(60);
+                pending_refreshes = pending_refreshes.saturating_sub(1);
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => break,
+        }
+        if refreshing && pending_refreshes == 0 {
+            refreshing = false;
+            next_refresh = Instant::now() + Duration::from_secs(60);
         }
 
         let age_secs = fetched_at_ms.map(|at| {
@@ -281,9 +213,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         sel_trend = None;
                         sel_heat = None;
                     }
-                    KeyCode::Char('r') if !in_flight => {
+                    KeyCode::Char('r') if pending_refreshes == 0 => {
                         spawn_refresh(tx.clone());
-                        in_flight = true;
+                        pending_refreshes = 2;
                         refreshing = true;
                     }
                     KeyCode::Char('g') if page == Page::Usage => {

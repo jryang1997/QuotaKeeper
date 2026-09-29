@@ -106,18 +106,6 @@ fn in_quiet_hours() -> bool {
     !(8..22).contains(&hour)
 }
 
-fn alert_text(event: tui_token_monitor::ui::notify::ToastEvent, lang: u8) -> &'static str {
-    use tui_token_monitor::ui::notify::ToastEvent;
-    match (event, lang) {
-        (ToastEvent::Warn, 1) => "reached 80%",
-        (ToastEvent::Exhausted, 1) => "exhausted",
-        (ToastEvent::Reset, 1) => "reset",
-        (ToastEvent::Warn, _) => "达到 80%",
-        (ToastEvent::Exhausted, _) => "已耗尽",
-        (ToastEvent::Reset, _) => "已重置",
-    }
-}
-
 pub static FRONTEND: Dir = include_dir!("$CARGO_MANIFEST_DIR/frontend/dist");
 
 fn mime(name: &str) -> &'static str {
@@ -295,11 +283,9 @@ fn main() -> anyhow::Result<()> {
     let mut next_quota_refresh = std::time::Instant::now() + refresh::QUOTA_PERIOD;
     let mut latest_snapshot = fallback_snapshot();
     let mut quota_error = None;
-    let mut notification_levels: Option<Vec<(String, u8, f64)>> = None;
-    let mut notification_expiry_levels: Option<Vec<(String, u8)>> = None;
+    let mut alert_tracker = tui_token_monitor::ui::notify::AlertTracker::default();
     let mut notify_enabled = false;
     let mut pace_alerts_enabled = false;
-    let mut pace_risk = std::collections::HashMap::<String, bool>::new();
     let mut quiet_hours = false;
     let mut close_behavior = String::from("tray");
     let mut notify_lang = 0;
@@ -464,30 +450,7 @@ fn main() -> anyhow::Result<()> {
                                     }
                                     tray_level = Some(level);
                                 }
-                                let mut next_pace_risk = std::collections::HashMap::new();
-                                for card in &snapshot.cards {
-                                    if let tui_token_monitor::model::Card::Live(report) = card {
-                                        if report.source == tui_token_monitor::model::QuotaSource::CpaLocal { continue; }
-                                        for limit in &report.limits {
-                                            let key = format!("{} · {}", report.provider.title(), limit.label);
-                                            let forecast = tui_token_monitor::pace::forecast(limit, r.fetched_at_ms as i64);
-                                            let at_risk = forecast.is_some_and(|value| value.exhaust_in_ms.is_some());
-                                            if pace_alerts_enabled && !(quiet_hours && in_quiet_hours())
-                                                && pace_risk.get(&key) == Some(&false) && at_risk
-                                                && let Some(value) = forecast
-                                            {
-                                                let message = if notify_lang == 1 {
-                                                    format!("Current pace is {:.0} points ahead; quota may run out in {} min", value.delta_points, value.exhaust_in_ms.unwrap_or(0) / 60_000)
-                                                } else {
-                                                    format!("比匀速快 {:.0} 个百分点；预计 {} 分钟后耗尽", value.delta_points, value.exhaust_in_ms.unwrap_or(0) / 60_000)
-                                                };
-                                                tui_token_monitor::ui::notify::toast(&key, &message);
-                                            }
-                                            next_pace_risk.insert(key, at_risk);
-                                        }
-                                    }
-                                }
-                                pace_risk = next_pace_risk;
+                                let alerts = alert_tracker.update(&snapshot, r.fetched_at_ms as i64);
                                 if let Some(tray_icon) = tray.as_ref() {
                                     let tooltip = current
                                         .iter()
@@ -500,97 +463,39 @@ fn main() -> anyhow::Result<()> {
                                         });
                                     let _ = tray_icon.set_tooltip(Some(tooltip));
                                 }
-                                if let Some(previous) = notification_levels.as_ref() {
-                                    for (title, level, used_pct) in &current {
-                                        let prior = previous
-                                            .iter()
-                                            .find(|(old, _, _)| old == title)
-                                            .map(|(_, value, _)| *value)
-                                            .unwrap_or(0);
-                                        if notify_enabled && !(quiet_hours && in_quiet_hours())
-                                            && let Some(event) = tui_token_monitor::ui::notify::transition(prior, *level)
-                                        {
+                                let lang = if notify_lang == 1 {
+                                    tui_token_monitor::ui::i18n::Lang::En
+                                } else {
+                                    tui_token_monitor::ui::i18n::Lang::Zh
+                                };
+                                if !(quiet_hours && in_quiet_hours()) {
+                                    if notify_enabled {
+                                        for alert in alerts.quota {
                                             tui_token_monitor::ui::notify::toast(
-                                                title,
-                                                &format!("{used_pct:.0}% {}", alert_text(event, notify_lang)),
+                                                &alert.title,
+                                                &format!("{:.0}% {}", alert.used_pct, alert.event.message_for(lang)),
+                                            );
+                                        }
+                                        for alert in alerts.expiry {
+                                            tui_token_monitor::ui::notify::toast(
+                                                &tui_token_monitor::ui::notify::expiry_title_for(&alert.provider, lang),
+                                                &tui_token_monitor::ui::notify::expiry_message_for(
+                                                    alert.ends_at_ms, r.fetched_at_ms as i64, lang,
+                                                ),
                                             );
                                         }
                                     }
-                                }
-                                notification_levels = Some(current);
-                                // 订阅到期提醒:档位只升不降,上升时 toast(复用通知开关与夜间静默).
-                                {
-                                    let now_ms = r.fetched_at_ms as i64;
-                                    let expiry_current: Vec<(String, u8)> = snapshot
-                                        .cards
-                                        .iter()
-                                        .filter_map(|card| {
-                                            let tui_token_monitor::model::Card::Live(report) = card
-                                            else {
-                                                return None;
+                                    if pace_alerts_enabled {
+                                        for alert in alerts.pace {
+                                            let minutes = alert.exhaust_in_ms / 60_000;
+                                            let message = if notify_lang == 1 {
+                                                format!("Current pace is {:.0} points ahead; quota may run out in {minutes} min", alert.delta_points)
+                                            } else {
+                                                format!("比匀速快 {:.0} 个百分点；预计 {minutes} 分钟后耗尽", alert.delta_points)
                                             };
-                                            let ends = report.subscription_ends_at_ms?;
-                                            let provider = report
-                                                .provider
-                                                .title()
-                                                .split(" ·")
-                                                .next()
-                                                .unwrap_or("subscription")
-                                                .to_string();
-                                            Some((
-                                                provider,
-                                                tui_token_monitor::ui::notify::expiry_level(
-                                                    Some(ends),
-                                                    now_ms,
-                                                ),
-                                            ))
-                                        })
-                                        .collect();
-                                    if let Some(previous) = notification_expiry_levels.as_ref() {
-                                        for (provider, level) in &expiry_current {
-                                            let prior = previous
-                                                .iter()
-                                                .find(|(old, _)| old == provider)
-                                                .map(|(_, value)| *value)
-                                                .unwrap_or(0);
-                                            if *level > prior
-                                                && notify_enabled
-                                                && !(quiet_hours && in_quiet_hours())
-                                                && let Some(ends) = snapshot
-                                                    .cards
-                                                    .iter()
-                                                    .find_map(|card| {
-                                                        let tui_token_monitor::model::Card::Live(
-                                                            report,
-                                                        ) = card
-                                                        else {
-                                                            return None;
-                                                        };
-                                                        let name = report
-                                                            .provider
-                                                            .title()
-                                                            .split(" ·")
-                                                            .next()
-                                                            .unwrap_or("");
-                                                        (name == *provider)
-                                                            .then_some(report.subscription_ends_at_ms)
-                                                            .flatten()
-                                                    })
-                                            {
-                                                let title = if notify_lang == 1 {
-                                                    format!("{provider} subscription")
-                                                } else {
-                                                    format!("{provider} 订阅")
-                                                };
-                                                let body =
-                                                    tui_token_monitor::ui::notify::expiry_message(
-                                                        ends, now_ms,
-                                                    );
-                                                tui_token_monitor::ui::notify::toast(&title, &body);
-                                            }
+                                            tui_token_monitor::ui::notify::toast(&alert.title, &message);
                                         }
                                     }
-                                    notification_expiry_levels = Some(expiry_current);
                                 }
                                 latest_snapshot = snapshot;
                                 quota_error = None;
