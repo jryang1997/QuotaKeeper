@@ -26,7 +26,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 
 ## 数据源
 
-### 配额(五卡,独立采集)
+### 配额(六卡,独立采集)
 
 | 卡 | 路径 | 凭据来源 |
 |---|---|---|
@@ -35,6 +35,9 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 | Command Code GOAT | billing API | Windows 凭据管理器 / `COMMAND_CODE_API_KEY` / `cmdc login` 登录态 |
 | Antigravity | 经 [CPA](https://github.com/luispater/CLIProxyAPI) 代查 Google 上游配额 | `~/.tui-token-monitor/cpa-key` |
 | Claude Pro/Max | 官方 `oauth/usage` 接口 | Claude Code 登录态(`~/.claude/.credentials.json`) |
+| Cursor | usage-summary(未文档化接口) | Cursor 登录态(state.vscdb / `cursor-agent login`) |
+
+有订阅周期的卡(GOAT / Codex / Cursor)会显示**订阅到期日**,到期前 7/3/1 天分级弹系统提醒(档位去重,续费后静默)。各家的订阅期可得性依据见[订阅周期数据来源调研](docs/research/subscription-period-sources.md)。
 
 ### Token 账本(六源,纯本地)
 

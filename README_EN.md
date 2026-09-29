@@ -28,7 +28,7 @@ A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 
 ## Data sources
 
-### Quota (five cards, collected independently)
+### Quota (six cards, collected independently)
 
 | Card | Path | Credentials |
 |---|---|---|
@@ -37,6 +37,9 @@ A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 | Command Code GOAT | billing API | Credential Manager / `COMMAND_CODE_API_KEY` / `cmdc login` |
 | Antigravity | Google upstream via [CPA](https://github.com/luispater/CLIProxyAPI) | `~/.tui-token-monitor/cpa-key` |
 | Claude Pro/Max | official `oauth/usage` endpoint | Claude Code login (`~/.claude/.credentials.json`) |
+| Cursor | usage-summary (undocumented endpoint) | Cursor login (state.vscdb / `cursor-agent login`) |
+
+Cards with a billing cycle (GOAT / Codex / Cursor) show their **subscription end date** and fire tiered system reminders 7/3/1 days before expiry (deduplicated; silent after renewal). See the [subscription-period research notes](docs/research/subscription-period-sources.md).
 
 ### Token ledger (six sources, purely local)
 
