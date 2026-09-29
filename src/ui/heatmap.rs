@@ -365,6 +365,7 @@ mod tests {
             last_error: None,
             age_secs: None,
             ledger: Some(ledger),
+            period: crate::ui::overview::Period::D30,
             sel_agent: None,
             sel_day: None,
             sel_trend: None,
@@ -453,6 +454,7 @@ mod tests {
             tokens: 1,
             cost: 0.5,
             messages: 2,
+            agg: crate::ledger::Agg::default(),
         };
         assert_eq!(d.tokens, 1);
         assert_eq!(d.messages, 2);

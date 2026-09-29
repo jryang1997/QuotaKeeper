@@ -77,6 +77,8 @@ pub struct DailyTotal {
     pub cost: f64,
     /// 当日请求数(GUI 月度 RUNS minibar 用;TUI 热力图不消费).
     pub messages: u64,
+    /// 当日完整聚合(input/output/cache 五桶+成本),总览页分段条与周期聚合用.
+    pub agg: Agg,
 }
 
 /// 可筛选的每日账本。保留来源和项目维度，供任意日期分析及导出使用。
@@ -563,6 +565,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
             tokens: sum.total(),
             cost: sum.cost(),
             messages: sum.messages,
+            agg: sum.clone(),
         });
         if sum.total() > 0 {
             daily_detail.insert(date_str, detail);
