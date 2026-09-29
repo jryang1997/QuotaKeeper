@@ -1,3 +1,4 @@
+import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import React, { useEffect, useMemo, useState } from 'react';
 
 const dayNumber = (date) => {
@@ -28,8 +29,9 @@ export default function AnalysisPanel({ ledger, lang }) {
   const [project, setProject] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   useEffect(() => {
-    window.__onExportResult = (status) => setExportStatus(status === 'canceled' ? '' : status);
-    return () => { delete window.__onExportResult; };
+    return registerNativeCallbacks({
+      __onExportResult: (status) => setExportStatus(status === 'canceled' ? '' : status),
+    });
   }, []);
 
   const agents = useMemo(() => [...new Set(rows.map((row) => row.client))].sort(), [rows]);
@@ -55,7 +57,7 @@ export default function AnalysisPanel({ ledger, lang }) {
   const requestExport = (format) => {
     if (!validRange) return;
     setExportStatus('');
-    window.ipc?.postMessage?.(JSON.stringify({ cmd: 'exportUsage', format, start, end, agent: agent || null, project: project || null }));
+    sendCommand({ cmd: 'exportUsage', format, start, end, agent: agent || null, project: project || null });
   };
 
   return <section className="analysis-panel" aria-label={zh ? '区间分析' : 'Range analysis'}>
