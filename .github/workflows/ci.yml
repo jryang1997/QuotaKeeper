@@ -26,7 +26,9 @@ jobs:
       - name: 检查内嵌前端与源码一致
         shell: pwsh
         run: |
-          if (git status --porcelain -- gui/frontend/dist) {
+          $changes = git status --porcelain -- gui/frontend/dist
+          if ($changes) {
+            $changes | ForEach-Object { Write-Host $_ }
             throw 'gui/frontend/dist 与前端源码不一致；请重新运行 npm run build 并提交产物'
           }
       - name: TUI 测试
