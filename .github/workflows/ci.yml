@@ -23,6 +23,9 @@ jobs:
     env:
       CC_x86_64_pc_windows_gnu: gcc
       AR_x86_64_pc_windows_gnu: ar
+      # runner 的 gcc 在 PATH 上,rustc auto 模式会假定外部 mingw CRT 而不捆绑
+      # self-contained;rust-lld 又不认外部 mingw 库路径 → 强制捆绑(与本机等价)。
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: -Clink-self-contained=yes
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
