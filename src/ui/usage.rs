@@ -1281,7 +1281,7 @@ mod tests {
             cost: Some(0.2),
             cost_is_estimate: false,
             session: Some("sess0123456789abcdef".into()),
-            project: Some("C:\\Users\\dev\\Desktop\\tui_token_moniter".into()),
+            project: Some("C:\\Users\\dev\\demo-project".into()),
         }];
         let ledger = aggregate(records, now);
         let backend = TestBackend::new(100, 30);
@@ -1302,13 +1302,13 @@ mod tests {
         };
 
         assert!(flat(&term).contains("89abcdef"), "缺会话短 id");
-        assert!(flat(&term).contains("tui_token_moniter"), "缺项目名");
+        assert!(flat(&term).contains("demo-project"), "缺项目名");
 
         // 项目维度
         st.dim = 2;
         term.draw(|f| crate::ui::render(f, &st, &mut hits)).unwrap();
         let text = flat(&term);
-        assert!(text.contains("tui_token_moniter"), "缺项目行");
+        assert!(text.contains("demo-project"), "缺项目行");
         assert!(text.contains("1"), "缺会话数");
         // 维度标签命中区
         assert_eq!(hits.dim_tabs.len(), 4);
