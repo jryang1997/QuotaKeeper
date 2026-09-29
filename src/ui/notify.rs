@@ -4,8 +4,6 @@
 //! - 状态机:每条 (卡, 额度) 记录上一轮等级(0 正常 / 1 ≥80% / 2 ≥100%),
 //!   等级跃迁产生 Warn / Exhausted / Reset 事件,原状不产生。
 
-use std::process::{Command, Stdio};
-
 /// 阈值等级:0 正常,1 ≥80%(警告),2 ≥100%(耗尽)。
 pub fn level_for(pct: f64) -> u8 {
     if pct >= 100.0 {
@@ -74,10 +72,13 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// 发送 Windows toast(后台线程,不阻塞调用方;失败静默)。
+/// 非 Windows 平台暂无系统 toast 通道,空实现(阈值状态机照常运行)。
+#[cfg(windows)]
 pub fn toast(title: &str, body: &str) {
     let title = title.to_string();
     let body = body.to_string();
     std::thread::spawn(move || {
+        use std::process::{Command, Stdio};
         // PS 单引号 here-string 原样保留,占位符由 Rust 侧替换
         let script = r#"
 $ErrorActionPreference = 'SilentlyContinue'
@@ -100,6 +101,9 @@ $n.Show($t)
             .status();
     });
 }
+
+#[cfg(not(windows))]
+pub fn toast(_title: &str, _body: &str) {}
 
 #[cfg(test)]
 mod tests {
