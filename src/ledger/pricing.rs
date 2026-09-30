@@ -1,12 +1,18 @@
-//! LiteLLM 开放价目数据集估价(与 tokscale 同源),带 7 天磁盘缓存.
+//! LiteLLM 开放价目数据集估价(与 tokscale 同源),带磁盘缓存 + 后台自动刷新.
 //!
 //! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘);
-//! - 新鲜期内直接读缓存;过期/缺失才联网拉,失败回退旧缓存,全失败返回空表(显示 "—");
-//! - 查找顺序:精确模型名 → 唯一的大小写不敏感全名 → 唯一的 provider 后缀。
-//!   多个 provider 同后缀时不估价，避免套用不确定的费率。
+//! - 读取永不联网:有缓存(无论新旧)直接返回,面板不被网络卡住;只有首次安装
+//!   完全没有缓存时才同步拉一次,失败返回空表(显示 "—");
+//! - `spawn_refresher` 进程内只启动一次后台线程:打开应用即拉最新价写缓存,
+//!   之后每 24h 续拉,失败静默保留旧缓存;只落盘不改内存表,下一轮 collect
+//!   重新 load 自然读到新价;
+//! - 查找顺序:精确模型名 → canonical 别名 → 唯一的大小写不敏感全名 → 唯一的
+//!   provider 后缀 → 家族兜底(剥 minor 版本,gpt-6.1-sol → gpt-6-sol)。
+//!   多个 provider 同后缀且无众数时不估价，避免套用不确定的费率。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 
@@ -17,8 +23,16 @@ const PRICING_URLS: [&str; 2] = [
     "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json",
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
 ];
-const TTL_MS: i64 = 7 * 24 * 3_600 * 1_000;
+/// 后台刷新周期:应用长时间开着时每 24h 自动续拉一次.
+const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 3_600);
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, Default)]
 pub struct ModelPrice {
@@ -53,22 +67,38 @@ pub fn cache_path(home: &Path) -> PathBuf {
     home.join(".tui-token-monitor").join("litellm-pricing.json")
 }
 
+/// 打开应用即后台拉最新价:进程内只 spawn 一次,先立即拉一轮,之后每 24h 续拉.
+/// 失败静默保留旧缓存,下个周期重试。只写磁盘缓存,不碰内存表——下一轮
+/// collect 的 load 自然读到新价,因此永不阻塞采集/渲染。
+pub fn spawn_refresher(home: &Path) {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    if STARTED.set(()).is_err() {
+        return;
+    }
+    let home = home.to_path_buf();
+    let _ = std::thread::Builder::new()
+        .name("pricing-refresh".into())
+        .spawn(move || loop {
+            if let Some(fresh) = fetch() {
+                let _ = write_cache(&cache_path(&home), now_ms(), &fresh);
+            }
+            std::thread::sleep(REFRESH_INTERVAL);
+        });
+}
+
 impl Pricing {
-    /// 永不失败:新鲜缓存 → 联网刷新 → 旧缓存 → 空表.
-    pub fn load(home: &Path, now_ms: i64) -> Pricing {
+    /// 永不失败也永不因网络阻塞:有缓存(新旧皆可)直接用,无缓存才同步拉一次.
+    pub fn load(home: &Path) -> Pricing {
         let path = cache_path(home);
-        let cached = read_cache(&path);
-        if let Some((fetched_at, _)) = cached.as_ref()
-            && now_ms - fetched_at < TTL_MS
-        {
-            return cached.unwrap().1;
+        if let Some((_, pricing)) = read_cache(&path) {
+            return pricing;
         }
         match fetch() {
             Some(fresh) => {
-                let _ = write_cache(&path, now_ms, &fresh);
+                let _ = write_cache(&path, now_ms(), &fresh);
                 fresh
             }
-            None => cached.map(|(_, p)| p).unwrap_or_else(|| build(HashMap::new())),
+            None => build(HashMap::new()),
         }
     }
 
@@ -111,8 +141,43 @@ impl Pricing {
         if self.ambiguous_suffixes.contains(suffix) {
             return None;
         }
-        self.unique_suffixes.get(suffix)
+        if let Some(price) = self.unique_suffixes.get(suffix) {
+            return Some(price);
+        }
+        // 全部落空:家族兜底,剥 minor 版本再查一轮(gpt-6.1-sol → gpt-6-sol)。
+        // 新模型发布到 LiteLLM 收录之间的空窗期,按同家族上一档估价总比 "—" 强;
+        // 输出无点不会二次进入本分支,无递归风险。
+        let family = family_name(model)?;
+        self.lookup(&family)
     }
+}
+
+/// 剥掉版本段里的 minor 位:段内恰有一个点、两侧全为数字才认定是
+/// major.minor(只动第一处,其余段原样保留)。
+fn family_name(model: &str) -> Option<String> {
+    let mut out = String::with_capacity(model.len());
+    let mut stripped = false;
+    for seg in model.split('-') {
+        if !stripped
+            && seg.matches('.').count() == 1
+            && let Some((major, minor)) = seg.split_once('.')
+            && !major.is_empty()
+            && !minor.is_empty()
+            && major.chars().all(|c| c.is_ascii_digit())
+            && minor.chars().all(|c| c.is_ascii_digit())
+        {
+            out.push_str(major);
+            stripped = true;
+        } else {
+            out.push_str(seg);
+        }
+        out.push('-');
+    }
+    if !stripped {
+        return None;
+    }
+    out.pop();
+    Some(out)
 }
 
 fn read_cache(path: &Path) -> Option<(i64, Pricing)> {
@@ -167,6 +232,26 @@ fn fetch_one(url: &str) -> Option<Pricing> {
 /// 补充 LiteLLM 缺失的官方或主流模型定价 (来源: OpenRouter / DeepInfra 官方公开定价 / 限免模型)
 /// 注意: 只作为 fallback 补齐; LiteLLM 原有条目具有优先权，不被覆盖。
 const SUPPLEMENT: &[(&str, ModelPrice)] = &[
+    // OpenAI GPT-6.1 系列(LiteLLM 尚未收录;来源: OpenRouter 官方挂牌 2026-09-30,
+    // 与 gpt-6-sol 同价: 输入 $2/M, 输出 $10/M, 缓存读 $0.1/M)
+    (
+        "gpt-6.1-sol",
+        ModelPrice {
+            input: 2e-6,
+            output: 1e-5,
+            cache_read: Some(1e-7),
+            cache_write: None,
+        },
+    ),
+    (
+        "openai/gpt-6.1-sol",
+        ModelPrice {
+            input: 2e-6,
+            output: 1e-5,
+            cache_read: Some(1e-7),
+            cache_write: None,
+        },
+    ),
     // Xiaomi MiMo (来源: OpenRouter / DeepInfra 官方定盘价: 输入 $0.14/M, 输出 $0.28/M, 缓存读 $0.0028/M)
     (
         "mimo-v2.6-flash",
@@ -376,6 +461,35 @@ mod tests {
         );
     }
 
+    /// 目录只有上一代时,剥 minor 版本走家族兜底估价(新模型收录空窗期)。
+    /// 注意不能选 gpt-6.1-sol:它在 SUPPLEMENT 里,build() 时就会精确命中。
+    #[test]
+    fn family_fallback_estimates_from_previous_minor() {
+        let p = pricing_with(&[("glm-5-flash", 2.0, 10.0)]);
+        let t = TokenBreakdown {
+            input: 1_000_000,
+            ..Default::default()
+        };
+        assert_eq!(p.estimate("glm-5.3-flash", &t), Some(2_000_000.0));
+        assert_eq!(p.estimate("zai/glm-5.3-flash", &t), Some(2_000_000.0));
+        // 精确名命中时优先于家族兜底
+        assert_eq!(p.estimate("glm-5-flash", &t), Some(2_000_000.0));
+    }
+
+    #[test]
+    fn family_name_strips_only_version_minor() {
+        assert_eq!(family_name("gpt-6.1-sol").as_deref(), Some("gpt-6-sol"));
+        assert_eq!(family_name("glm-5.3-flash").as_deref(), Some("glm-5-flash"));
+        assert_eq!(family_name("openai/gpt-5.1-codex-max").as_deref(), Some("openai/gpt-5-codex-max"));
+        // 无版本点 / 非数字点段不动
+        assert_eq!(family_name("gpt-6-sol"), None);
+        assert_eq!(family_name("gpt-4o"), None);
+        assert_eq!(family_name("qwen3-235b-a22b"), None);
+        assert_eq!(family_name("claude-sonnet-4.5").as_deref(), Some("claude-sonnet-4"));
+        // 只剥第一处
+        assert_eq!(family_name("x-1.2-y-3.4").as_deref(), Some("x-1-y-3.4"));
+    }
+
     /// 目录缺名时经 canonical 别名表命中:deepseek-flash → deepseek-v4.1-flash。
     #[test]
     fn canonical_alias_recovers_missing_catalog_names() {
@@ -547,6 +661,13 @@ mod tests {
         // hy3: 1e6 * 1.3e-7 + 1e6 * 5.3e-7 + 1e6 * 3.3e-8 = 0.13 + 0.53 + 0.033 = 0.693
         let cost_hy3 = p.estimate("hy3", &t).unwrap();
         assert!((cost_hy3 - 0.693).abs() < 1e-6);
+
+        // gpt-6.1-sol(LiteLLM 收录空窗期补的 OpenRouter 官价):
+        // 1e6 * 2e-6 + 1e6 * 1e-5 + 1e6 * 1e-7 = 2 + 10 + 0.1 = 12.1
+        let cost_61 = p.estimate("gpt-6.1-sol", &t).unwrap();
+        assert!((cost_61 - 12.1).abs() < 1e-9);
+        let cost_61_prefixed = p.estimate("openai/gpt-6.1-sol", &t).unwrap();
+        assert!((cost_61_prefixed - 12.1).abs() < 1e-9);
 
         // 官方限免/隐身模型为 0 元
         let cost_free = p.estimate("big-pickle", &t).unwrap();
