@@ -218,8 +218,7 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
         }
     }
 
-    // 打开应用即后台拉最新价(进程内只 spawn 一次,之后每 24h 续拉);
-    // 估价本身只读缓存,永不因网络阻塞。
+    // 估价只读缓存;新价由后台线程刷新写入。
     pricing::spawn_refresher(&home);
     if records.iter().any(|r| r.cost.is_none()) {
         let pricing = pricing::Pricing::load(&home);

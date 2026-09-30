@@ -1,14 +1,8 @@
-//! LiteLLM 开放价目数据集估价(与 tokscale 同源),带磁盘缓存 + 后台自动刷新.
+//! LiteLLM 开放价目数据集估价(与 tokscale 同源),磁盘缓存 + 后台自动刷新.
 //!
-//! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘);
-//! - 读取永不联网:有缓存(无论新旧)直接返回,面板不被网络卡住;只有首次安装
-//!   完全没有缓存时才同步拉一次,失败返回空表(显示 "—");
-//! - `spawn_refresher` 进程内只启动一次后台线程:打开应用即拉最新价写缓存,
-//!   之后每 24h 续拉,失败静默保留旧缓存;只落盘不改内存表,下一轮 collect
-//!   重新 load 自然读到新价;
-//! - 查找顺序:精确模型名 → canonical 别名 → 唯一的大小写不敏感全名 → 唯一的
-//!   provider 后缀 → 家族兜底(剥 minor 版本,gpt-6.1-sol → gpt-6-sol)。
-//!   多个 provider 同后缀且无众数时不估价，避免套用不确定的费率。
+//! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
+//! - 查找:精确名 → canonical 别名 → 唯一全名 → 唯一 provider 后缀 → 家族兜底;
+//!   多个 provider 同后缀且无众数时不估价。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -67,9 +61,7 @@ pub fn cache_path(home: &Path) -> PathBuf {
     home.join(".tui-token-monitor").join("litellm-pricing.json")
 }
 
-/// 打开应用即后台拉最新价:进程内只 spawn 一次,先立即拉一轮,之后每 24h 续拉.
-/// 失败静默保留旧缓存,下个周期重试。只写磁盘缓存,不碰内存表——下一轮
-/// collect 的 load 自然读到新价,因此永不阻塞采集/渲染。
+/// 打开应用即后台拉最新价,每 24h 续拉;只写缓存,不碰内存表.
 pub fn spawn_refresher(home: &Path) {
     static STARTED: OnceLock<()> = OnceLock::new();
     if STARTED.set(()).is_err() {
@@ -87,7 +79,7 @@ pub fn spawn_refresher(home: &Path) {
 }
 
 impl Pricing {
-    /// 永不失败也永不因网络阻塞:有缓存(新旧皆可)直接用,无缓存才同步拉一次.
+    /// 有缓存(新旧皆可)直接用;无缓存才同步拉一次.
     pub fn load(home: &Path) -> Pricing {
         let path = cache_path(home);
         if let Some((_, pricing)) = read_cache(&path) {
@@ -121,8 +113,7 @@ impl Pricing {
         if let Some(price) = self.entries.get(model) {
             return Some(price);
         }
-        // 原始名未命中时先试 canonical 名(别名表能补 deepseek-flash 等
-        // 目录缺名),再落回大小写/唯一后缀。
+        // 原始名未命中先试 canonical 别名,补目录缺名.
         let canonical = crate::ledger::model_alias::canonical(model);
         if canonical != model && canonical != "unknown" {
             if let Some(price) = self.entries.get(&canonical) {
@@ -144,16 +135,13 @@ impl Pricing {
         if let Some(price) = self.unique_suffixes.get(suffix) {
             return Some(price);
         }
-        // 全部落空:家族兜底,剥 minor 版本再查一轮(gpt-6.1-sol → gpt-6-sol)。
-        // 新模型发布到 LiteLLM 收录之间的空窗期,按同家族上一档估价总比 "—" 强;
-        // 输出无点不会二次进入本分支,无递归风险。
+        // 家族兜底:剥 minor 版本再查一轮(gpt-6.1-sol → gpt-6-sol).
         let family = family_name(model)?;
         self.lookup(&family)
     }
 }
 
-/// 剥掉版本段里的 minor 位:段内恰有一个点、两侧全为数字才认定是
-/// major.minor(只动第一处,其余段原样保留)。
+/// 剥掉版本段里的 minor 位:段内恰有一个点、两侧全为数字才认定是 major.minor(只动第一处).
 fn family_name(model: &str) -> Option<String> {
     let mut out = String::with_capacity(model.len());
     let mut stripped = false;
