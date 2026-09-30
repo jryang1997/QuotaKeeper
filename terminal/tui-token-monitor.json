@@ -1,0 +1,12 @@
+{
+    "profiles": [
+        {
+            "name": "tui-token-monitor",
+            "commandline": "cmd.exe",
+            "font": {
+                "face": "Sarasa Term SC"
+            },
+            "colorScheme": "Campbell Powershell"
+        }
+    ]
+}

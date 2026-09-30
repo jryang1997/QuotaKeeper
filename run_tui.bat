@@ -13,11 +13,28 @@ if defined WT_SESSION goto run
 if /i "%~1"=="nowt" goto run
 set "WT=%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe"
 if not exist "%WT%" set "WT=wt.exe"
-start "" "%WT%" -d "%CD%" cmd /c ""%~f0" nowt"
+rem Register the dedicated profile (Sarasa Term SC) via a WT fragment,
+rem best effort. WT reads fragments at startup, so the very first run
+rem may need one WT restart before the profile is registered.
+set "FRAGDIR=%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments	ui-token-monitor"
+if exist "terminal	ui-token-monitor.json" (
+  mkdir "%FRAGDIR%" >nul 2>&1
+  copy /Y "terminal	ui-token-monitor.json" "%FRAGDIR%\" >nul 2>&1
+)
+set "PARG="
+if exist "%FRAGDIR%	ui-token-monitor.json" set "PARG=-p tui-token-monitor"
+start "" "%WT%" -d "%CD%" %PARG% cmd /c ""%~f0" nowt"
 timeout /t 5 /nobreak >nul
 tasklist | findstr /i "tui-token-monitor.exe" >nul
-if errorlevel 1 goto run
-exit /b 0
+if not errorlevel 1 exit /b 0
+rem Profile not registered yet (WT was already running): retry plain.
+if defined PARG (
+  start "" "%WT%" -d "%CD%" cmd /c ""%~f0" nowt"
+  timeout /t 5 /nobreak >nul
+  tasklist | findstr /i "tui-token-monitor.exe" >nul
+  if not errorlevel 1 exit /b 0
+)
+goto run
 
 :run
 rem Normal exit (q) closes the window; non-zero exit pauses to show the error.
