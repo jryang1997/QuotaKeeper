@@ -7,6 +7,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use tui_token_monitor::goat::UsageSummary;
+use tui_token_monitor::deepseek_balance::BalanceState;
 use tui_token_monitor::ledger::{self, Agg};
 use tui_token_monitor::model::{self, Card, Snapshot};
 use tui_token_monitor::settings;
@@ -221,6 +222,15 @@ pub struct AnalysisRowDto {
 }
 
 #[derive(Serialize)]
+pub struct IntradayRowDto {
+    pub date: String,
+    pub hour: u8,
+    pub client: &'static str,
+    pub agg: AggDto,
+    pub unpriced_messages: u64,
+}
+
+#[derive(Serialize)]
 pub struct SessionRowDto {
     pub client: &'static str,
     pub label: &'static str,
@@ -254,6 +264,7 @@ pub struct LedgerDto {
     pub daily_totals: Vec<DailyTotalDto>,
     pub daily_detail: HashMap<String, Vec<(&'static str, AggDto)>>,
     pub analysis_rows: Vec<AnalysisRowDto>,
+    pub intraday_rows: Vec<IntradayRowDto>,
     pub hourly: Vec<i64>,
     pub weekday: Vec<i64>,
     pub weekday_hour: [[i64; 24]; 7],
@@ -274,6 +285,7 @@ pub struct PushDto {
     pub quota_error: Option<String>,
     pub cards: Vec<CardDto>,
     pub goat_usage: Option<GoatUsageDto>,
+    pub deepseek_balance: BalanceState,
     pub monthly_value: MonthlyValueDto,
     pub ledger: LedgerDto,
 }
@@ -424,6 +436,17 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                 unpriced_messages: row.unpriced_messages,
             })
             .collect(),
+        intraday_rows: r
+            .intraday_rows
+            .iter()
+            .map(|row| IntradayRowDto {
+                date: row.date.clone(),
+                hour: row.hour,
+                client: row.client,
+                agg: agg_dto(&row.agg),
+                unpriced_messages: row.unpriced_messages,
+            })
+            .collect(),
         hourly: r.hourly.to_vec(),
         weekday: r.weekday.to_vec(),
         weekday_hour: r.weekday_hour,
@@ -462,6 +485,7 @@ pub fn push(
     snap: &Snapshot,
     rep: &ledger::LedgerReport,
     goat_usage: Option<UsageSummary>,
+    deepseek_balance: BalanceState,
 ) -> String {
     serde_json::to_string(&PushDto {
         fetched_at_ms,
@@ -474,6 +498,7 @@ pub fn push(
             requests: u.total_count as u64,
             cost: u.total_cost,
         }),
+        deepseek_balance,
         monthly_value: monthly_value_dto(rep),
         ledger: ledger_dto(rep),
     })
@@ -506,7 +531,7 @@ mod tests {
     fn push_serializes_full_payload() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
-        let s = push(123, 120, 122, None, &snap, &rep, None);
+        let s = push(123, 120, 122, None, &snap, &rep, None, BalanceState::MissingKey);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["cards"].as_array().unwrap().len(), 6);
         assert_eq!(v["quota_fetched_at_ms"], 120);
@@ -514,6 +539,7 @@ mod tests {
         assert!(v["goat_usage"].is_null());
         assert!(v["ledger"]["today"]["total"].is_i64());
         assert!(v["ledger"]["trend_24h"].as_array().unwrap().len() == 24);
+        assert!(v["ledger"]["intraday_rows"].is_array());
         assert!(v["ledger"]["daily_totals"].as_array().unwrap().len() > 100);
         let benchmark = settings::monthly_plan_benchmark();
         assert_eq!(
@@ -553,7 +579,7 @@ mod tests {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
         let rep = ledger::collect(chrono::Local::now());
         let v: serde_json::Value =
-            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep, None))
+            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep, None, BalanceState::MissingKey))
                 .unwrap();
         assert_eq!(v["quotaError"], "omp down");
     }
@@ -568,7 +594,7 @@ mod tests {
             total_cost: 59.05,
         };
         let v: serde_json::Value = serde_json::from_str(&push(
-            1, 0, 1, None, &snap, &rep, Some(summary),
+            1, 0, 1, None, &snap, &rep, Some(summary), BalanceState::MissingKey,
         ))
         .unwrap();
         assert_eq!(v["goat_usage"]["tokens"], 1_054_688_077_u64);

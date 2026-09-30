@@ -90,6 +90,15 @@ pub struct AnalysisRow {
     pub unpriced_messages: u64,
 }
 
+/// 今天与昨天按本地整点拆分，供单日趋势图按两小时绘制。
+pub struct IntradayRow {
+    pub date: String,
+    pub hour: u8,
+    pub client: &'static str,
+    pub agg: Agg,
+    pub unpriced_messages: u64,
+}
+
 /// 会话维度行(近 30 天,按最后活跃排序).
 pub struct SessionRow {
     pub client: &'static str,
@@ -133,6 +142,7 @@ pub struct LedgerReport {
     /// 近 26 周内有数据日期的按 agent 拆分(热力图点击下钻用).
     pub daily_detail: HashMap<String, Vec<(&'static str, Agg)>>,
     pub analysis_rows: Vec<AnalysisRow>,
+    pub intraday_rows: Vec<IntradayRow>,
     /// 近 30 天按本地小时(0-23)的 token 合计.
     pub hourly: [i64; 24],
     /// 近 30 天按星期(周一=0)的 token 合计.
@@ -307,6 +317,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut heat_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
     let mut analysis_raw: HashMap<(String, &'static str, Option<String>), (Agg, u64)> =
         HashMap::new();
+    let mut intraday_raw: HashMap<(String, u8, &'static str), (Agg, u64)> = HashMap::new();
 
     let mut today_agg = Agg::default();
     let mut week_agg = Agg::default();
@@ -344,6 +355,15 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         if date <= today {
             let entry = analysis_raw
                 .entry((date_str.clone(), r.client, r.project.clone()))
+                .or_default();
+            entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
+            if r.cost.is_none() {
+                entry.1 += 1;
+            }
+        }
+        if date >= today - Duration::days(1) && date <= today && r.ts_ms <= now_ms {
+            let entry = intraday_raw
+                .entry((date_str.clone(), ts.with_timezone(&Local).hour() as u8, r.client))
                 .or_default();
             entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
             if r.cost.is_none() {
@@ -628,6 +648,18 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     analysis_rows
         .sort_by(|a, b| (&a.date, a.client, &a.project).cmp(&(&b.date, b.client, &b.project)));
 
+    let mut intraday_rows: Vec<IntradayRow> = intraday_raw
+        .into_iter()
+        .map(|((date, hour, client), (agg, unpriced_messages))| IntradayRow {
+            date,
+            hour,
+            client,
+            agg,
+            unpriced_messages,
+        })
+        .collect();
+    intraday_rows.sort_by(|a, b| (&a.date, a.hour, a.client).cmp(&(&b.date, b.hour, b.client)));
+
     let mut month_by_client: Vec<(&'static str, Agg)> = month_by_client_raw.into_iter().collect();
     month_by_client.sort_by(|a, b| b.1.total().cmp(&a.1.total()));
 
@@ -646,6 +678,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         daily_totals,
         daily_detail,
         analysis_rows,
+        intraday_rows,
         hourly,
         weekday,
         weekday_hour,
@@ -786,6 +819,22 @@ mod tests {
             .unwrap();
         assert_eq!(beta.agg.cost_reported, 1.25);
         assert_eq!(beta.unpriced_messages, 0);
+    }
+
+    #[test]
+    fn intraday_rows_keep_local_hour_and_agent_totals() {
+        let now = Local.with_ymd_and_hms(2026, 9, 29, 16, 0, 0).unwrap();
+        let at = Local.with_ymd_and_hms(2026, 9, 29, 13, 25, 0).unwrap();
+        let record = rec("codex", "model", at.timestamp_millis(), TokenBreakdown {
+            input: 12,
+            ..Default::default()
+        });
+        let report = aggregate(vec![record], now);
+        assert_eq!(report.intraday_rows.len(), 1);
+        assert_eq!(report.intraday_rows[0].date, "2026-09-29");
+        assert_eq!(report.intraday_rows[0].hour, 13);
+        assert_eq!(report.intraday_rows[0].client, "codex");
+        assert_eq!(report.intraday_rows[0].agg.total(), 12);
     }
 
     fn now() -> DateTime<Local> {

@@ -1090,7 +1090,7 @@ mod tests {
         assert!(compact_text.contains("API≈$2.00"), "缺本月估值");
         assert!(compact_text.contains("0.05×"), "缺套餐倍数");
         assert!(
-            compact_text.contains("$40.00月基准"),
+            compact_text.contains("$40.00我的月费"),
             "缺套餐基础标价参照: {text}"
         );
         assert_eq!(hits.agent_rows.len(), ledger.by_agent.len());

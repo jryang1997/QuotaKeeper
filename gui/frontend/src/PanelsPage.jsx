@@ -1,188 +1,255 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react';
 import { STR } from './ui-data.js';
 import { PANEL_BODIES, PanelErrorBoundary, panelMeta } from './PanelBodies.jsx';
-import { PANEL_COLS, PANEL_ROW_H, PANEL_GAP, PANELS_MAX, PANEL_CATALOG, DEFAULT_PANELS, panelOverlap, panelOverlapArea, compactPanels, resolvePanelMove, resolvePanelResize, collectAlignLines, readPanelState, savePanelState } from './panel-layout.js';
+import { PANEL_COLS, PANEL_ROW_H, PANEL_GAP, PANELS_MAX, PANEL_CATALOG, DEFAULT_PANELS, compactPanels, resolvePanelMove, resolvePanelResize, collectAlignLines, readPanelState, savePanelState } from './panel-layout.js';
+import { FADE, CONTROL_SPRING, LAYOUT_SPRING, panelRect, project, releaseVelocity, rubberband } from './motion-tuning.js';
+import { useMotionPreference } from './ui-motion.jsx';
 
-export default function PanelsPage({ ledger, lang }) {
-  const t = (k) => STR[k][lang];
+const PanelContent = memo(function PanelContent({ id, ledger, lang, currency }) {
+  const Body = PANEL_BODIES[id];
+  return <div className="panel-body"><PanelErrorBoundary>{ledger && Body ? <Body ledger={ledger} lang={lang} currency={currency} /> : null}</PanelErrorBoundary></div>;
+});
+
+function FluidPanel({ panel, gridWidth, active, ledger, lang, currency, reduced, onStart, onLock, onRemove }) {
+  const rect = panelRect(panel, gridWidth);
+  const x = useMotionValue(rect.x);
+  const y = useMotionValue(rect.y);
+  const width = useMotionValue(rect.width);
+  const height = useMotionValue(rect.height);
+  const controls = useRef([]);
+  const previousGridWidth = useRef(null);
+  const values = useRef({ x, y, width, height, release: null, stop: () => controls.current.forEach((control) => control.stop()) }).current;
+  useLayoutEffect(() => {
+    values.stop();
+    if (active) return;
+    const viewportResize = previousGridWidth.current !== gridWidth;
+    previousGridWidth.current = gridWidth;
+    const velocity = values.release || {};
+    values.release = null;
+    controls.current = Object.entries(rect).map(([key, target]) => {
+      if (reduced || viewportResize) { values[key].set(target); return { stop() {} }; }
+      return animate(values[key], target, { ...LAYOUT_SPRING, ...(velocity[key] != null ? { velocity: velocity[key] } : {}) });
+    });
+    return values.stop;
+  }, [rect.x, rect.y, rect.width, rect.height, active, reduced, values]);
+  const t = (key) => STR[key][lang];
+  const lockTitle = lang === 0 ? '锁定/解锁拖拽' : 'Lock/unlock';
+  const removeTitle = lang === 0 ? '移除面板' : 'Remove panel';
+  return <motion.div data-panel-id={panel.id} className={`panel-card${active ? ` is-${active === 'move' ? 'dragging' : 'resizing'}` : ''}${panel.locked ? ' is-locked' : ''}`}
+    style={{ x, y, width, height }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE}>
+    <div className="panel-head" onPointerDown={(event) => onStart(event, panel.id, 'move', values)}>
+      <span className="panel-title" title={t(`panel_${panel.id}`)}>{t(`panel_${panel.id}`)}</span>
+      <span className="panel-meta" title={panelMeta(panel.id, ledger, lang)}>{panelMeta(panel.id, ledger, lang)}</span>
+      <span className="panel-head-btns" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className={`panel-btn${panel.locked ? ' is-on' : ''}`} onClick={() => onLock(panel.id)} title={lockTitle} aria-label={lockTitle}>
+          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+        </button>
+        <button type="button" className="panel-btn" onClick={() => onRemove(panel.id)} title={removeTitle} aria-label={removeTitle}>×</button>
+      </span>
+    </div>
+    <PanelContent id={panel.id} ledger={ledger} lang={lang} currency={currency} />
+    {!panel.locked && <div className="panel-resize" role="slider" tabIndex={0} aria-label={`${t(`panel_${panel.id}`)} ${lang === 0 ? '调整大小，方向键调整' : 'resize, use arrow keys'}`} aria-valuemin={1} aria-valuemax={12} aria-valuenow={panel.w} aria-valuetext={`${panel.w} × ${panel.h}`}
+      onPointerDown={(event) => onStart(event, panel.id, 'resize', values)} onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        onStart(null, panel.id, 'keyboard', { dw: event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0, dh: event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0 });
+      }} />}
+  </motion.div>;
+}
+
+export default function PanelsPage({ ledger, lang, currency }) {
+  const t = (key) => STR[key][lang];
+  const reduced = useMotionPreference();
   const gridRef = useRef(null);
-  const panelsRef = useRef(null);
-  const dragRef = useRef(null);
-  const [panels, setPanels] = useState(() => readPanelState()?.panels || DEFAULT_PANELS.map((p) => ({ ...p })));
-  const [enabled, setEnabled] = useState(() => readPanelState()?.enabled || PANEL_CATALOG.map((c) => c.id));
+  const [initial] = useState(readPanelState);
+  const [panels, setPanels] = useState(() => initial?.panels || DEFAULT_PANELS.map((panel) => ({ ...panel })));
+  const [enabled, setEnabled] = useState(() => initial?.enabled || PANEL_CATALOG.map(({ id }) => id));
+  const panelsRef = useRef(panels);
+  panelsRef.current = panels;
+  const gesture = useRef(null);
+  const finishRef = useRef(null);
   const [drag, setDrag] = useState(null);
-  const [align, setAlign] = useState({ v: [], h: [] });
+  const [gridWidth, setGridWidth] = useState(920);
   const [menuOpen, setMenuOpen] = useState(false);
-  useEffect(() => { panelsRef.current = panels; }, [panels]);
-  useEffect(() => {
-    savePanelState(panels, enabled);
-  }, [panels, enabled]);
+  useEffect(() => { savePanelState(panels, enabled); }, [panels, enabled]);
+  useLayoutEffect(() => {
+    let measuredWidth = gridRef.current?.clientWidth || 920;
+    const observer = new ResizeObserver(([entry]) => {
+      if (Math.abs(entry.contentRect.width - measuredWidth) < 0.5) return;
+      measuredWidth = entry.contentRect.width;
+      if (gesture.current) finishRef.current?.(true);
+      setGridWidth(entry.contentRect.width);
+    });
+    if (gridRef.current) { setGridWidth(gridRef.current.clientWidth); observer.observe(gridRef.current); }
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    const close = (event) => { if (event.type !== 'keydown' || event.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
   }, [menuOpen]);
 
-  const startDrag = (e, id, mode) => {
-    const list = panelsRef.current || [];
-    const panel = list.find((p) => p.id === id);
-    if (!panel || (mode === 'move' && panel.locked)) return;
-    e.preventDefault();
-    const grid = gridRef.current?.getBoundingClientRect();
-    if (!grid) return;
-    const colW = (grid.width - (PANEL_COLS - 1) * PANEL_GAP) / PANEL_COLS;
-    dragRef.current = { id, mode, panel, startX: e.clientX, startY: e.clientY, colW, stepY: PANEL_ROW_H + PANEL_GAP };
-    setDrag({ id, mode, dx: 0, dy: 0, swapWith: null, w: panel.w, h: panel.h, nx: panel.x, ny: panel.y });
-  };
-
   useEffect(() => {
-    if (!drag) return;
-    const onMove = (e) => {
-      const d = dragRef.current;
+    const resolve = (d, projected = false) => {
+      const velocity = projected && !reduced ? releaseVelocity(d.samples, performance.now()) : { x: 0, y: 0 };
+      const offsetX = projected ? Math.max(-d.stepX * 0.75, Math.min(d.stepX * 0.75, project(velocity.x))) : 0;
+      const offsetY = projected ? Math.max(-d.stepY * 0.75, Math.min(d.stepY * 0.75, project(velocity.y))) : 0;
+      const target = d.mode === 'move' ? { ...d.panel,
+        x: Math.max(0, Math.min(PANEL_COLS - d.panel.w, Math.round((d.values.x.get() + offsetX) / d.stepX))),
+        y: Math.max(0, Math.min(400, Math.round((d.values.y.get() + offsetY) / d.stepY))),
+      } : { ...d.panel,
+        w: Math.max(1, Math.min(PANEL_COLS - d.panel.x, Math.round((d.values.width.get() + PANEL_GAP) / d.stepX))),
+        h: Math.max(1, Math.min(10, Math.round((d.values.height.get() + PANEL_GAP) / d.stepY))),
+      };
+      const key = `${target.x}:${target.y}:${target.w}:${target.h}`;
+      if (key === d.candidate) return;
+      d.candidate = key;
+      d.preview = d.mode === 'move' ? resolvePanelMove(d.list, d.id, target)
+        : compactPanels(d.list.map((panel) => panel.id === d.id ? resolvePanelResize(d.list, d.id, target) : panel));
+      d.target = d.preview.find((panel) => panel.id === d.id);
+      setDrag({ id: d.id, mode: d.mode, panels: d.preview, target: d.target, align: collectAlignLines(d.preview, d.id, d.target.x, d.target.y) });
+    };
+    const update = () => {
+      const d = gesture.current;
       if (!d) return;
-      const list = panelsRef.current || [];
-      const dx = e.clientX - d.startX;
-      const dy = e.clientY - d.startY;
+      d.frame = null;
+      const grid = gridRef.current?.getBoundingClientRect();
+      if (!grid) return;
+      const dx = d.pointer.x - d.startX + d.grid.left - grid.left;
+      const dy = d.pointer.y - d.startY + d.grid.top - grid.top;
+      d.moved ||= Math.hypot(dx, dy) >= 4;
+      if (!d.moved) return;
       if (d.mode === 'move') {
-        // 指针所在格位;拖拽卡跟手浮起,其余卡不动,仅当重叠时让一张卡平移到原位(iOS 式让位)
-        const nx = Math.max(0, Math.min(PANEL_COLS - d.panel.w, d.panel.x + Math.round(dx / (d.colW + PANEL_GAP))));
-        const ny = Math.max(0, d.panel.y + Math.round(dy / d.stepY));
-        const target = { ...d.panel, x: nx, y: ny };
-        const overlapping = list.filter((p) => p.id !== d.id && !p.locked && panelOverlap(target, p));
-        const swapWith = overlapping.length ? overlapping.reduce((best, p) => (panelOverlapArea(target, p) > panelOverlapArea(target, best) ? p : best), overlapping[0]).id : null;
-        setAlign(collectAlignLines(list, d.id, nx, ny));
-        setDrag((cur) => (cur ? { ...cur, dx, dy, nx, ny, swapWith } : cur));
+        d.values.x.set(rubberband(d.rect.x + dx, 0, grid.width - d.rect.width));
+        d.values.y.set(rubberband(d.rect.y + dy, 0, 400 * d.stepY));
       } else {
-        const nw = Math.max(1, Math.min(PANEL_COLS - d.panel.x, d.panel.w + Math.round(dx / (d.colW + PANEL_GAP))));
-        const nh = Math.max(1, Math.min(10, d.panel.h + Math.round(dy / d.stepY)));
-        setDrag((cur) => (cur ? { ...cur, w: nw, h: nh } : cur));
+        // Real dimensions keep text crisp; only the active card needs layout during resize.
+        d.values.width.set(rubberband(d.rect.width + dx, d.stepX - PANEL_GAP, grid.width - d.panel.x * d.stepX));
+        d.values.height.set(rubberband(d.rect.height + dy, PANEL_ROW_H, 10 * d.stepY - PANEL_GAP));
       }
+      resolve(d);
+      const scroller = gridRef.current.closest('.main');
+      let scrolling = false;
+      if (scroller) {
+        const box = scroller.getBoundingClientRect();
+        const speed = d.pointer.y < box.top + 48 ? -Math.min(12, (box.top + 48 - d.pointer.y) / 4)
+          : d.pointer.y > box.bottom - 48 ? Math.min(12, (d.pointer.y - box.bottom + 48) / 4) : 0;
+        const before = scroller.scrollTop;
+        if (speed) scroller.scrollTop += speed;
+        scrolling = before !== scroller.scrollTop;
+      }
+      if (scrolling) d.frame = requestAnimationFrame(update);
     };
-    const onUp = () => {
-      const d = dragRef.current;
-      const cur = drag;
-      if (d && cur) {
-        const list = panelsRef.current || [];
-        if (d.mode === 'move') {
-          const target = { ...d.panel, x: cur.nx, y: cur.ny };
-          setPanels(resolvePanelMove(list, d.id, target));
-        } else {
-          const target = resolvePanelResize(list, d.id, { ...d.panel, w: cur.w, h: cur.h });
-          setPanels(compactPanels(list.map((p) => (p.id === d.id ? target : p))));
-        }
-      }
-      dragRef.current = null;
+    const finish = (cancel = false, event) => {
+      const d = gesture.current;
+      if (!d || (event?.pointerId != null && event.pointerId !== d.pointerId)) return;
+      if (d.frame != null) cancelAnimationFrame(d.frame);
+      if (!cancel && event?.clientX != null) { d.pointer = { x: event.clientX, y: event.clientY }; update(); }
+      if (d.frame != null) cancelAnimationFrame(d.frame);
+      if (!cancel && d.moved) {
+        if (d.mode === 'move') resolve(d, true);
+        const velocity = reduced ? { x: 0, y: 0 } : releaseVelocity(d.samples, performance.now());
+        d.values.release = d.mode === 'move' ? velocity : { width: velocity.x, height: velocity.y };
+        setPanels(d.preview);
+      } else d.values.release = { x: 0, y: 0, width: 0, height: 0 };
+      gesture.current = null;
       setDrag(null);
-      setAlign({ v: [], h: [] });
+      if (d.capture.hasPointerCapture?.(d.pointerId)) d.capture.releasePointerCapture(d.pointerId);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    finishRef.current = finish;
+    const move = (event) => {
+      const d = gesture.current;
+      if (!d || event.pointerId !== d.pointerId) return;
+      d.pointer = { x: event.clientX, y: event.clientY };
+      d.samples.push({ ...d.pointer, t: performance.now() });
+      d.samples = d.samples.filter((sample) => performance.now() - sample.t <= 120);
+      if (d.frame == null) d.frame = requestAnimationFrame(update);
+    };
+    const up = (event) => finish(false, event);
+    const cancel = (event) => finish(true, event);
+    const key = (event) => { if (event.key === 'Escape' && gesture.current) { event.preventDefault(); finish(true); } };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', key);
+    const lost = (event) => { if (gesture.current?.pointerId === event.pointerId) finish(true); };
+    window.addEventListener('lostpointercapture', lost);
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      finish(true);
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', key); window.removeEventListener('lostpointercapture', lost);
     };
-  }, [drag]);
+  }, [reduced]);
 
+  const startDrag = (event, id, mode, values) => {
+    const panel = panelsRef.current.find((item) => item.id === id);
+    if (!panel || panel.locked || gesture.current || (event && (event.button !== 0 || !event.isPrimary))) return;
+    if (mode === 'keyboard') {
+      setPanels(compactPanels(panelsRef.current.map((item) => item.id === id ? { ...item,
+        w: Math.max(1, Math.min(PANEL_COLS - item.x, item.w + values.dw)),
+        h: Math.max(1, Math.min(10, item.h + values.dh)),
+      } : item)));
+      return;
+    }
+    const grid = gridRef.current.getBoundingClientRect();
+    event.preventDefault();
+    values.stop();
+    const rect = { x: values.x.get(), y: values.y.get(), width: values.width.get(), height: values.height.get() };
+    // Capture on the stable board, so React reordering a card cannot lose the pointer.
+    const capture = gridRef.current;
+    capture.setPointerCapture(event.pointerId);
+    gesture.current = { id, mode, panel, values, rect, capture, pointerId: event.pointerId, grid,
+      startX: event.clientX, startY: event.clientY, pointer: { x: event.clientX, y: event.clientY },
+      stepX: (grid.width + PANEL_GAP) / PANEL_COLS, stepY: PANEL_ROW_H + PANEL_GAP,
+      list: panelsRef.current, preview: panelsRef.current, target: panel, moved: false, candidate: null, frame: null,
+      samples: [{ x: event.clientX, y: event.clientY, t: performance.now() }],
+    };
+    setDrag({ id, mode, panels: panelsRef.current, target: panel, align: { v: [], h: [] } });
+  };
   const removePanel = (id) => {
-    setEnabled((es) => es.filter((x) => x !== id));
-    setPanels((ps) => ps.filter((p) => p.id !== id));
+    setEnabled((items) => items.filter((item) => item !== id));
+    setPanels((items) => compactPanels(items.filter((item) => item.id !== id)));
   };
   const addPanel = (id) => {
     if (enabled.includes(id)) { removePanel(id); return; }
     if (enabled.length >= PANELS_MAX) return;
-    setEnabled((es) => [...es, id]);
-    const cat = PANEL_CATALOG.find((c) => c.id === id);
-    const maxBottom = Math.max(0, ...(panelsRef.current || []).map((p) => p.y + p.h));
-    setPanels((ps) => compactPanels([...ps.filter((p) => p.id !== id), { id, x: 0, y: maxBottom, w: cat.w, h: cat.h, locked: false }]));
+    setEnabled((items) => [...items, id]);
+    const cat = PANEL_CATALOG.find((item) => item.id === id);
+    const bottom = Math.max(0, ...panelsRef.current.map((panel) => panel.y + panel.h));
+    setPanels((items) => compactPanels([...items.filter((panel) => panel.id !== id), { id, x: 0, y: bottom, w: cat.w, h: cat.h, locked: false }]));
   };
-  const toggleLock = (id) => setPanels((ps) => ps.map((p) => (p.id === id ? { ...p, locked: !p.locked } : p)));
-  const allLocked = panels.length > 0 && panels.every((p) => p.locked);
-  const toggleAllLock = () => setPanels((ps) => ps.map((p) => ({ ...p, locked: !allLocked })));
-  const resetLayout = () => {
-    setPanels(DEFAULT_PANELS.map((p) => ({ ...p })));
-    setEnabled(PANEL_CATALOG.map((c) => c.id));
-  };
-
-  const origin = drag ? panels.find((p) => p.id === drag.id) : null;
-  const renderList = panels
-    .filter((p) => enabled.includes(p.id))
-    .map((p) => {
-      if (drag?.mode === 'move' && drag.swapWith && p.id === drag.swapWith && origin) {
-        return { ...p, x: origin.x, y: origin.y };
-      }
-      if (drag?.mode === 'resize' && p.id === drag.id) {
-        return { ...p, w: drag.w, h: drag.h };
-      }
-      return p;
-    });
-  const bottomPanels = drag?.mode === 'move' && origin ? renderList.filter((p) => p.id !== drag.id) : renderList;
-  const maxBottom = Math.max(3, ...renderList.map((p) => p.y + p.h));
-  const lockTitle = lang === 0 ? '锁定/解锁拖拽' : 'Lock/unlock';
-  const removeTitle = lang === 0 ? '移除面板' : 'Remove panel';
-  const posStyle = (p) => ({
-    '--x': p.x, '--y': p.y, '--w': p.w, '--h': p.h,
-  });
-  return (
-    <div className="panel-page">
-      <div className="panel-tools">
-        <span className="panel-hint">{`${renderList.length}/${PANELS_MAX}`}</span>
-        <button type="button" className="panel-tool" onClick={toggleAllLock}>{allLocked ? t('panels_unlock_all') : t('panels_lock_all')}</button>
-        <button type="button" className="panel-tool" onClick={resetLayout}>{t('panels_reset')}</button>
-        <div className="panel-add" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="panel-tool panel-tool-primary" onClick={() => setMenuOpen((o) => !o)}>+ {t('panels_add')}</button>
-          {menuOpen && (
-            <div className="panel-menu">
-              {PANEL_CATALOG.map((c) => {
-                const on = enabled.includes(c.id);
-                return (
-                  <button key={c.id} type="button" className={`panel-menu-item${on ? ' is-on' : ''}`} onClick={() => addPanel(c.id)} disabled={!on && enabled.length >= PANELS_MAX}>
-                    <span className="panel-menu-copy"><b>{t(`panel_${c.id}`)}</b><small>{t(`catalog_${c.id}`)}</small></span>
-                    <i className={`panel-menu-dot${on ? ' is-on' : ''}`} />
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-      <div ref={gridRef} className="panel-grid" style={{ '--prow': `${PANEL_ROW_H}px`, height: maxBottom * PANEL_ROW_H + (maxBottom - 1) * PANEL_GAP }}>
-        {align.v.map((v, i) => <i key={`v${i}`} className="panel-align-v" style={{ left: `calc(${(v / PANEL_COLS) * 100}% + ${v * PANEL_GAP}px)` }} />)}
-        {align.h.map((y, i) => <i key={`h${i}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
-        {drag?.mode === 'move' && origin && <div className="panel-ghost" style={posStyle(origin)} />}
-        {bottomPanels.map((p) => {
-          const Body = PANEL_BODIES[p.id];
-          return (
-            <div key={p.id} className={`panel-card${drag?.mode === 'resize' && drag.id === p.id ? ' is-resizing' : ''}${p.locked ? ' is-locked' : ''}`} style={posStyle(p)}>
-              <div className="panel-head" onPointerDown={(e) => startDrag(e, p.id, 'move')}>
-                <span className="panel-title" title={t(`panel_${p.id}`)}>{t(`panel_${p.id}`)}</span>
-                <span className="panel-meta" title={panelMeta(p.id, ledger, lang)}>{panelMeta(p.id, ledger, lang)}</span>
-                <span className="panel-head-btns" onPointerDown={(e) => e.stopPropagation()}>
-                  <button type="button" className={`panel-btn${p.locked ? ' is-on' : ''}`} onClick={() => toggleLock(p.id)} title={lockTitle} aria-label={lockTitle}>
-                    <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-                  </button>
-                  <button type="button" className="panel-btn" onClick={() => removePanel(p.id)} title={removeTitle} aria-label={removeTitle}>×</button>
-                </span>
-              </div>
-              <div className="panel-body"><PanelErrorBoundary>{ledger ? <Body ledger={ledger} lang={lang} /> : null}</PanelErrorBoundary></div>
-              <div className="panel-resize" onPointerDown={(e) => startDrag(e, p.id, 'resize')} aria-hidden="true" />
-            </div>
-          );
-        })}
-        {drag && origin && (() => {
-          const Body = PANEL_BODIES[origin.id];
-          return (
-            <div className={`panel-card is-dragging${drag.mode === 'resize' ? ' is-resizing' : ''}`} style={{ ...posStyle(origin), transform: `translate(${drag.dx}px, ${drag.dy}px) scale(1.025)` }}>
-              <div className="panel-head">
-                <span className="panel-title" title={t(`panel_${origin.id}`)}>{t(`panel_${origin.id}`)}</span>
-                <span className="panel-meta" title={panelMeta(origin.id, ledger, lang)}>{panelMeta(origin.id, ledger, lang)}</span>
-              </div>
-              <div className="panel-body"><PanelErrorBoundary>{ledger ? <Body ledger={ledger} lang={lang} /> : null}</PanelErrorBoundary></div>
-            </div>
-          );
-        })()}
-        {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
+  const toggleLock = (id) => setPanels((items) => items.map((panel) => panel.id === id ? { ...panel, locked: !panel.locked } : panel));
+  const allLocked = panels.length > 0 && panels.every((panel) => panel.locked);
+  const resetLayout = () => { setPanels(DEFAULT_PANELS.map((panel) => ({ ...panel }))); setEnabled(PANEL_CATALOG.map(({ id }) => id)); };
+  const previewById = drag ? new Map(drag.panels.map((panel) => [panel.id, panel])) : null;
+  const renderList = panels.filter((panel) => enabled.includes(panel.id)).map((panel) => previewById?.get(panel.id) || panel);
+  const maxBottom = Math.max(3, ...renderList.map((panel) => panel.y + panel.h));
+  const ghost = drag?.target && panelRect(drag.target, gridWidth);
+  return <div className={`panel-page${drag ? ' is-manipulating' : ''}`}>
+    <div className="panel-tools">
+      <span className="panel-hint">{`${renderList.length}/${PANELS_MAX}`}</span>
+      <button type="button" className="panel-tool" onClick={() => setPanels((items) => items.map((panel) => ({ ...panel, locked: !allLocked })))}>{allLocked ? t('panels_unlock_all') : t('panels_lock_all')}</button>
+      <button type="button" className="panel-tool" onClick={resetLayout}>{t('panels_reset')}</button>
+      <div className="panel-add" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className="panel-tool panel-tool-primary" aria-expanded={menuOpen} aria-controls="panel-add-menu" onClick={() => setMenuOpen((open) => !open)}>+ {t('panels_add')}</button>
+        <AnimatePresence>{menuOpen && <motion.div id="panel-add-menu" className="panel-menu" initial={{ opacity: 0, scale: reduced ? 1 : 0.97, y: reduced ? 0 : -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: reduced ? 1 : 0.97, y: reduced ? 0 : -4 }} transition={{ ...CONTROL_SPRING, opacity: FADE }}>
+          {PANEL_CATALOG.map((cat) => <button key={cat.id} type="button" className={`panel-menu-item${enabled.includes(cat.id) ? ' is-on' : ''}`} onClick={() => addPanel(cat.id)} disabled={!enabled.includes(cat.id) && enabled.length >= PANELS_MAX}>
+            <span className="panel-menu-copy"><b>{t(`panel_${cat.id}`)}</b><small>{t(`catalog_${cat.id}`)}</small></span><i className={`panel-menu-dot${enabled.includes(cat.id) ? ' is-on' : ''}`} />
+          </button>)}
+        </motion.div>}</AnimatePresence>
       </div>
     </div>
-  );
+    <div ref={gridRef} className="panel-grid" style={{ height: maxBottom * (PANEL_ROW_H + PANEL_GAP) - PANEL_GAP }}>
+      {drag?.align.v.map((x) => <i key={`v${x}`} className="panel-align-v" style={{ left: x * (gridWidth + PANEL_GAP) / PANEL_COLS }} />)}
+      {drag?.align.h.map((y) => <i key={`h${y}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
+      {ghost && <motion.div className="panel-ghost" initial={false} animate={{ x: ghost.x, y: ghost.y, width: ghost.width, height: ghost.height }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} />}
+      <AnimatePresence initial={false}>{gridWidth != null && renderList.map((panel) => <FluidPanel key={panel.id} panel={panel} gridWidth={gridWidth} active={drag?.id === panel.id ? drag.mode : null} ledger={ledger} lang={lang} currency={currency} reduced={reduced} onStart={startDrag} onLock={toggleLock} onRemove={removePanel} />)}</AnimatePresence>
+      {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
+    </div>
+  </div>;
 }

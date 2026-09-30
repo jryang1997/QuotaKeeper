@@ -1,38 +1,21 @@
-import { AnimatePresence, LazyMotion, MotionConfig, domAnimation, m } from 'motion/react';
-import { useEffect, useState } from 'react';
+import React, { forwardRef } from 'react';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
+import { useMotionPreference } from './ui-motion.jsx';
+import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
+
+const PageSurface = forwardRef(function PageSurface({ children, reduced }, ref) {
+  const present = useIsPresent();
+  return <motion.div ref={ref} className="page-content" inert={!present ? true : undefined}
+    initial={{ opacity: 0, y: reduced ? 0 : 6 }} animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: reduced ? 0 : 6 }}
+    transition={{ y: LAYOUT_SPRING, opacity: FADE }} style={{ pointerEvents: present ? 'auto' : 'none' }}>
+    {children}
+  </motion.div>;
+});
 
 export default function PageTransition({ page, children, reduceMotion = false }) {
-  const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
-  );
-
-  useEffect(() => {
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const updatePreference = (event) => setSystemReducedMotion(event.matches);
-    preference.addEventListener('change', updatePreference);
-    return () => preference.removeEventListener('change', updatePreference);
-  }, []);
-
-  const reducedMotion = reduceMotion || systemReducedMotion;
-  const initial = reducedMotion ? { opacity: 0, y: 0 } : { opacity: 0, y: 7 };
-  const exit = reducedMotion ? { opacity: 0, y: 0 } : { opacity: 0, y: -3 };
-
-  return (
-    <MotionConfig reducedMotion="user">
-      <LazyMotion features={domAnimation} strict>
-        <AnimatePresence mode="wait" initial={false}>
-          <m.div
-            key={page}
-            className="page-content"
-            initial={initial}
-            animate={{ opacity: 1, y: 0 }}
-            exit={exit}
-            transition={{ duration: reducedMotion ? 0.14 : 0.2, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {children}
-          </m.div>
-        </AnimatePresence>
-      </LazyMotion>
-    </MotionConfig>
-  );
+  const reduced = useMotionPreference(reduceMotion);
+  return <div className="page-stage"><AnimatePresence mode="popLayout" initial={false}>
+    <PageSurface key={page} reduced={reduced}>{children}</PageSurface>
+  </AnimatePresence></div>;
 }

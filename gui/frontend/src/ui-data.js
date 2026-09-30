@@ -5,6 +5,7 @@ export const PROVIDER_ACCENT = {
   antigravity: 'var(--color-text-orange)',
   claude: 'var(--color-text-orange)',
   cursor: 'var(--color-text-primary)',
+  deepseek: '#2764d6',
 };
 
 export const STATUS_COLOR = {
@@ -14,9 +15,9 @@ export const STATUS_COLOR = {
 };
 
 export const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', deepseek: '#2764d6',
 };
-export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor'];
+export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'deepseek'];
 export const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
@@ -24,6 +25,7 @@ export const PROVIDER_LOGOS = {
   antigravity: 'logos/antigravity.png',
   claude: 'logos/claude.png',
   cursor: 'logos/cursor.png',
+  deepseek: 'logos/deepseek.svg',
 };
 
 export const SOURCE_PATHS = {
@@ -129,6 +131,14 @@ export const STR = {
   motion_system: ['跟随系统', 'Follow system'],
   motion_reduce: ['减少动态', 'Reduce motion'],
   settings_plan: ['套餐基准', 'Plan benchmark'],
+  settings_currency: ['显示货币', 'Display currency'],
+  settings_currency_hint: ['成本按最新参考汇率换算；原始价格与套餐基准以 USD 保存。', 'Costs use a reference rate; source prices and plan benchmark stay in USD.'],
+  settings_currency_rate: ['参考汇率', 'Reference rate'],
+  settings_currency_usd: ['原始计价单位 · USD', 'Source pricing unit · USD'],
+  settings_currency_stale: ['离线缓存', 'Cached offline'],
+  settings_currency_error: ['汇率暂不可用；金额暂不显示', 'Rate unavailable; converted amounts are hidden'],
+  settings_currency_loading: ['正在获取汇率…', 'Loading exchange rate…'],
+  settings_currency_source: ['汇率来源：', 'Rate source:'],
   settings_plan_hint: ['非实际省下的钱', 'Not actual cash saved'],
   settings_monthly: ['每月套餐费用', 'Monthly plan cost'],
   settings_default: ['默认基准', 'Default benchmark'],

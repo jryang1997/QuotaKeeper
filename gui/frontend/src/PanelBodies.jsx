@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
-import { CLIENT_COLORS, STR, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
+import { CLIENT_COLORS, STR, fmtInt, fmtTokens } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
+import { formatCurrency } from './currency.js';
 
 const WEEKDAY_ZH = ['一', '二', '三', '四', '五', '六', '日'];
 const WEEKDAY_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function HeatPanel({ ledger, lang }) {
+function HeatPanel({ ledger, lang, currency }) {
   const totals = ledger?.daily_totals || [];
   const [sel, setSel] = useState(null);
   const days = [...totals];
@@ -37,7 +38,7 @@ function HeatPanel({ ledger, lang }) {
             {weeks.map((w, wi) => (
               <div className="heat-col" key={wi}>
                 {w.map((d, di) => d.empty || !d.date ? <div key={di} className="heat-cell is-empty" /> : (
-                  <Tooltip key={di} content={`${d.date} · ${fmtTokens(d.tokens)} / ${fmtCost(d.cost)}`}>
+                  <Tooltip key={di} content={`${d.date} · ${fmtTokens(d.tokens)} / ${formatCurrency(d.cost, currency)}`}>
                     <button
                       type="button"
                       className={`heat-cell${sel === d.date ? ' is-sel' : ''}${d.date === todayStr ? ' is-today' : ''}`}
@@ -55,7 +56,7 @@ function HeatPanel({ ledger, lang }) {
       </div>
       <div className="heat-foot">
         <div className="heat-legend">{[1, 2, 3, 4, 5, 6].map((lv) => <i key={lv} style={{ background: `color-mix(in srgb, var(--color-text-blue) ${lv * 15}%, transparent)` }} />)}</div>
-        {selTotal && <span className="heat-sel">{selTotal.date} · {fmtTokens(selTotal.tokens)} · {fmtCost(selTotal.cost)}</span>}
+        {selTotal && <span className="heat-sel">{selTotal.date} · {fmtTokens(selTotal.tokens)} · {formatCurrency(selTotal.cost, currency)}</span>}
       </div>
       {sel && detail && (
         <div className="heat-drill">
@@ -214,14 +215,14 @@ function ProjectsPanel({ ledger }) {
   );
 }
 
-function AllTimePanel({ ledger }) {
+function AllTimePanel({ ledger, currency }) {
   const days = ledger?.daily_totals || [];
   const sum = (f) => days.reduce((s, d) => s + (f(d) || 0), 0);
   const active = days.filter((d) => d.tokens > 0).length;
   const cells = [
     [fmtTokens(sum((d) => d.tokens)), 'TOKENS'],
     [fmtInt(sum((d) => d.messages)), 'RUNS'],
-    [`~${fmtCost(sum((d) => d.cost))}`, 'COST'],
+    [`~${formatCurrency(sum((d) => d.cost), currency)}`, 'COST'],
     [String(active), 'DAYS'],
   ];
   return (
@@ -252,7 +253,7 @@ function StreakPanel({ ledger }) {
   );
 }
 
-function RecordsPanel({ ledger }) {
+function RecordsPanel({ ledger, currency }) {
   const days = ledger?.daily_totals || [];
   const maxDay = days.reduce((m, d) => (d.tokens > (m?.tokens || 0) ? d : m), null);
   const topSession = (ledger?.by_session || [])[0];
@@ -266,7 +267,7 @@ function RecordsPanel({ ledger }) {
     <div className="records">
       <div className="records-row"><span className="records-label">BUSIEST DAY</span><span className="records-value" title={maxDay?.date}>{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
       <div className="records-row"><span className="records-label">TOP SESSION</span><span className="records-value" title={topSession?.session}>{topSession?.session || '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
-      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value" title={priciest?.label}>{priciest?.label || '—'}</span><span className="records-sub">{priciest ? `$${priciest.r.toFixed(4)}/req` : ''}</span></div>
+      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value" title={priciest?.label}>{priciest?.label || '—'}</span><span className="records-sub">{priciest ? `${formatCurrency(priciest.r, currency)}/req` : ''}</span></div>
     </div>
   );
 }
@@ -297,14 +298,14 @@ function CachePanel({ ledger, lang }) {
   );
 }
 
-function DailyPanel({ ledger }) {
+function DailyPanel({ ledger, currency }) {
   const last30 = (ledger?.daily_totals || []).slice(-30);
   const max = Math.max(1, ...last30.map((d) => d.tokens));
   return (
     <div className="daily">
       <div className="daily-bars">
         {last30.map((d) => (
-          <Tooltip key={d.date} content={`${d.date} · ${fmtTokens(d.tokens)} / ${fmtCost(d.cost)}`}>
+          <Tooltip key={d.date} content={`${d.date} · ${fmtTokens(d.tokens)} / ${formatCurrency(d.cost, currency)}`}>
             <div className="daily-bar" style={{ height: `${Math.max(2, (d.tokens / max) * 100)}%` }} />
           </Tooltip>
         ))}

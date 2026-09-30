@@ -13,6 +13,7 @@ test('preferences recover from invalid values and keep valid provider choices', 
   const result = readGuiPreferences(store);
   assert.equal(result.lang, 1);
   assert.equal(result.theme, 'system');
+  assert.equal(result.currency, 'USD');
   assert.deepEqual(result.pinnedCards, ['codex']);
   assert.deepEqual(result.providerColors, { codex: '#123abc' });
 });

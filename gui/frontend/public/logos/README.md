@@ -10,6 +10,7 @@
 | `antigravity.png` | Antigravity · CPA 卡 | https://antigravity.google `<link rel="icon">` 指定的官方 mark (200×184, 官方站无正方形 mark 的 SVG) |
 | `claude.png` | Claude Pro/Max 卡 | https://claude.ai 官方 app icon `claude_app_icon.png` (338×338, 米底星芒) |
 | `cursor.png` | Cursor 卡 | https://cursor.com/apple-touch-icon.png 官方 app icon (180×180, 黑底立方体) |
+| `deepseek.svg` | DeepSeek API 余额卡 | https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/web/public/favicon.svg 官方仓库鲸鱼图标 |
 
-下载日期:2026-09-28(opencode-go / codex / commandcode / antigravity)、2026-09-29(claude / cursor)。
+下载日期:2026-09-28(opencode-go / codex / commandcode / antigravity)、2026-09-29(claude / cursor / deepseek)。
 各商标归其所有者所有;此处仅作为本地监控工具中对应服务的标识使用。

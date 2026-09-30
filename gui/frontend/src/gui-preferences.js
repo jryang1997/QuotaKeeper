@@ -1,4 +1,5 @@
 import { PROVIDERS } from './ui-data.js';
+import { CURRENCIES } from './currency.js';
 
 export const GUI_PREFERENCES_KEY = 'token-monitor.gui-preferences.v1';
 export const THEME_ORDER = ['system', 'light', 'dark', 'ink', 'sand'];
@@ -8,6 +9,7 @@ export const DEFAULT_GUI_PREFERENCES = {
   typeface: 'plex',
   density: 'comfortable',
   motion: 'system',
+  currency: 'USD',
   notifications: 'on',
   paceAlerts: false,
   quietHours: false,
@@ -28,6 +30,7 @@ export function readGuiPreferences(storage = globalThis.localStorage) {
       typeface: ['plex', 'pixel', 'system'].includes(stored.typeface) ? stored.typeface : DEFAULT_GUI_PREFERENCES.typeface,
       density: ['comfortable', 'compact'].includes(stored.density) ? stored.density : DEFAULT_GUI_PREFERENCES.density,
       motion: ['system', 'reduced'].includes(stored.motion) ? stored.motion : DEFAULT_GUI_PREFERENCES.motion,
+      currency: CURRENCIES.includes(stored.currency) ? stored.currency : DEFAULT_GUI_PREFERENCES.currency,
       notifications: ['on', 'off'].includes(stored.notifications) ? stored.notifications : DEFAULT_GUI_PREFERENCES.notifications,
       paceAlerts: stored.paceAlerts === true,
       quietHours: stored.quietHours === true,

@@ -10,8 +10,12 @@ import QuotaPage from './QuotaPage.jsx';
 import UsageDashboard from './UsageDashboard.jsx';
 import SettingsPage from './SettingsPage.jsx';
 import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPreferences } from './gui-preferences.js';
+import { fetchExchangeRate, readExchangeRates } from './currency.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import PanelsPage from './PanelsPage.jsx';
+import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
+import { MotionProvider, useMotionPreference } from './ui-motion.jsx';
+import { CONTROL_SPRING, FADE } from './motion-tuning.js';
 import { Card } from '@astryxdesign/core/Card';
 import { Text } from '@astryxdesign/core/Text';
 import { Button } from '@astryxdesign/core/Button';
@@ -36,7 +40,9 @@ function NavIcon({ page }) {
 }
 
 function PrimaryNav({ lang, page, onNavigate, variant }) {
+  const reduced = useMotionPreference();
   return (
+    <LayoutGroup id={`navigation-${variant}`}>
     <nav className={`primary-nav primary-nav-${variant}`} aria-label={lang === 0 ? '主导航' : 'Main navigation'}>
       {NAV_ITEMS.map((key) => {
         const active = page === key;
@@ -47,13 +53,14 @@ function PrimaryNav({ lang, page, onNavigate, variant }) {
             onClick={() => onNavigate(key)}
             aria-current={active ? 'page' : undefined}
           >
-            {active && <span className="nav-active-indicator" aria-hidden="true" />}
+            {active && <motion.span layoutId={reduced ? undefined : 'active-navigation'} className="nav-active-indicator" aria-hidden="true" transition={reduced ? { duration: 0 } : CONTROL_SPRING} />}
             <NavIcon page={key} />
             <span className="nav-label">{STR[`nav_${key}`][lang]}</span>
           </button>
         );
       })}
     </nav>
+    </LayoutGroup>
   );
 }
 
@@ -63,7 +70,9 @@ function SourceWelcome({ data, lang, onDone }) {
   useEffect(() => { firstButton.current?.focus(); }, []);
   const sources = data.ledger?.sources || [];
   const cards = data.cards || [];
-  return <div className="welcome-backdrop"><section className="welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+  const reduced = useMotionPreference();
+  const present = useIsPresent();
+  return <motion.div className="welcome-backdrop" inert={present ? undefined : true} style={{ pointerEvents: present ? 'auto' : 'none' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE}><motion.section className="welcome-panel" initial={{ scale: reduced ? 1 : 0.98, y: reduced ? 0 : 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: reduced ? 1 : 0.98, y: reduced ? 0 : 8 }} transition={CONTROL_SPRING} role="dialog" aria-modal="true" aria-labelledby="welcome-title">
     <div className="welcome-head"><div><span className="eyebrow">TOKEN MONITOR</span><h1 id="welcome-title">{t('welcome_title')}</h1><p>{t('welcome_intro')}</p></div><button ref={firstButton} type="button" onClick={onDone} aria-label={t('welcome_done')}>×</button></div>
     <h2>{t('freshness_quota')}</h2>
     <div className="welcome-source-list">{cards.map((card) => <div className="welcome-source" key={card.provider}>
@@ -79,7 +88,7 @@ function SourceWelcome({ data, lang, onDone }) {
       <details id={`repair-local-${source.client}`}><summary>{lang === 0 ? '修复步骤' : 'Repair steps'}</summary><p>{SOURCE_REPAIR[source.client]?.[lang]}</p>{source.error && <p>{source.error}</p>}</details>
     </div>)}</div>
     <button className="welcome-done" type="button" onClick={onDone}>{t('welcome_done')}</button>
-  </section></div>;
+  </motion.section></motion.div>;
 }
 
 const WELCOME_DONE_KEY = 'token-monitor.welcome-done.v1';
@@ -92,12 +101,33 @@ function App() {
   const [goKeyFeedback, setGoKeyFeedback] = useState('');
   const [goatKeyStored, setGoatKeyStored] = useState(false);
   const [goatKeyFeedback, setGoatKeyFeedback] = useState('');
+  const [deepseekKeyStored, setDeepSeekKeyStored] = useState(false);
+  const [deepseekKeyFeedback, setDeepSeekKeyFeedback] = useState('');
   const lang = preferences.lang;
+  const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(Date.now);
+  const [exchangeRate, setExchangeRate] = useState(() => readExchangeRates()[preferences.currency] || null);
+  const [exchangeError, setExchangeError] = useState(false);
   const refreshRequestedAt = useRef(0);
+  const mainRef = useRef(null);
+  const scrollByPage = useRef({});
+  useLayoutEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = scrollByPage.current[page] || 0;
+  }, [page]);
+
+  useEffect(() => {
+    let active = true;
+    const code = preferences.currency;
+    setExchangeRate(code === 'USD' ? { rate: 1, date: '' } : readExchangeRates()[code] || null);
+    setExchangeError(false);
+    fetchExchangeRate(code).then((rate) => {
+      if (active) { setExchangeRate(rate); setExchangeError(false); }
+    }).catch(() => { if (active) setExchangeError(true); });
+    return () => { active = false; };
+  }, [preferences.currency]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
@@ -117,6 +147,7 @@ function App() {
       __onNativeState: (state) => {
         setGoKeyStored(!!state.goKeyStored);
         setGoatKeyStored(!!state.goatKeyStored);
+        setDeepSeekKeyStored(!!state.deepseekKeyStored);
         setPreferences((current) => {
           const next = { ...current, autostart: !!state.autostart };
           saveGuiPreferences(next);
@@ -136,6 +167,10 @@ function App() {
       __onGoatKeyResult: ({ success, stored }) => {
         setGoatKeyStored(!!stored);
         setGoatKeyFeedback(success ? '' : STR.settings_go_key_failed[readGuiPreferences().lang]);
+      },
+      __onDeepSeekKeyResult: ({ success, stored }) => {
+        setDeepSeekKeyStored(!!stored);
+        setDeepSeekKeyFeedback(success ? '' : STR.settings_go_key_failed[readGuiPreferences().lang]);
       },
       __onShortcutStatus: (available) => {
         if (!available) {
@@ -262,25 +297,30 @@ function App() {
       goatKeyFeedback={goatKeyFeedback}
       onSaveGoatKey={(goatApiKey) => { setGoatKeyFeedback(''); sendCommand({ cmd: 'setGoatApiKey', goatApiKey }); }}
       onDeleteGoatKey={() => { setGoatKeyFeedback(''); sendCommand({ cmd: 'deleteGoatApiKey' }); }}
+      deepseekKeyStored={deepseekKeyStored}
+      deepseekKeyFeedback={deepseekKeyFeedback}
+      onSaveDeepSeekKey={(deepseekApiKey) => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'setDeepSeekApiKey', deepseekApiKey }); }}
+      onDeleteDeepSeekKey={() => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'deleteDeepSeekApiKey' }); }}
       monthlyValue={data?.monthly_value}
+      currency={{ code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError }}
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
-      {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} onOpenSettings={() => setPage('settings')} />}
-      {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} />}
+      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} reduceMotion={preferences.motion === 'reduced'} onOpenSettings={() => setPage('settings')} />}
+      {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} />}
     </>
   ) : null;
 
   return (
-    <div
+    <MotionProvider reduceMotion={reducedMotion}><div
       className="app"
       data-astryx-theme="neutral"
       data-language={lang === 0 ? 'zh' : 'en'}
       data-typeface={preferences.typeface}
       data-palette={preferences.theme}
       data-density={preferences.density}
-      data-motion={preferences.motion}
+      data-motion={reducedMotion ? 'reduced' : 'system'}
     >
       <aside className="sidebar">
         <div className="sidebar-title">
@@ -301,7 +341,7 @@ function App() {
         </div>
       </aside>
 
-      <main className="main">
+      <main ref={mainRef} className="main" onScroll={(event) => { scrollByPage.current[page] = event.currentTarget.scrollTop; }}>
         <div className="main-toolbar">
           <Text weight="medium" className="page-title">{t(page === 'quota' ? 'nav_quota' : page === 'usage' ? 'nav_usage' : page === 'heat' ? 'nav_heat' : 'nav_settings')}</Text>
           <div className="main-toolbar-spacer" />
@@ -329,8 +369,9 @@ function App() {
         )}
       </main>
       <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="mobile" />
-      {showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome data={data} lang={lang} onDone={dismissWelcome} />}
+      <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
     </div>
+    </MotionProvider>
   );
 }
 

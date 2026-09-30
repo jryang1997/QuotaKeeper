@@ -2,10 +2,12 @@ import { sendCommand } from './gui-bridge.js';
 import React, { useEffect, useState } from 'react';
 import { Text } from '@astryxdesign/core/Text';
 import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, STR, fmtCost } from './ui-data.js';
+import { CURRENCIES, formatCurrency } from './currency.js';
+import { SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 
 function SettingsChoice({ label, value, onChange, options }) {
   return (
-    <div className={`settings-choice${options.length > 3 ? ' settings-choice-many' : ''}`} role="group" aria-label={label}>
+    <SelectionGroup><div className={`settings-choice${options.length > 3 ? ' settings-choice-many' : ''}`} role="group" aria-label={label}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -14,11 +16,13 @@ function SettingsChoice({ label, value, onChange, options }) {
           className={`settings-choice-option${value === option.value ? ' is-selected' : ''}`}
           onClick={() => onChange(option.value)}
         >
+          {value === option.value && <SelectionHighlight />}
           {option.icon && <span className={`settings-choice-icon ${option.icon}`} aria-hidden="true" />}
           <span>{option.label}</span>
         </button>
       ))}
     </div>
+    </SelectionGroup>
   );
 }
 
@@ -48,7 +52,7 @@ function SettingsRow({ title, hint, children, className = '' }) {
   );
 }
 
-export default function SettingsPage({ lang, preferences, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey }) {
+export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey }) {
   const t = (key) => STR[key][lang];
   const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
   const [benchmarkOverride, setBenchmarkOverride] = useState(null);
@@ -59,6 +63,8 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
   const [goKeyError, setGoKeyError] = useState('');
   const [goatKeyDraft, setGoatKeyDraft] = useState('');
   const [goatKeyError, setGoatKeyError] = useState('');
+  const [deepseekKeyDraft, setDeepSeekKeyDraft] = useState('');
+  const [deepseekKeyError, setDeepSeekKeyError] = useState('');
   const saveGoKey = (event) => {
     event.preventDefault();
     const key = goKeyDraft.trim();
@@ -74,6 +80,14 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
     onSaveGoatKey(key);
     setGoatKeyDraft('');
     setGoatKeyError('');
+  };
+  const saveDeepSeekKey = (event) => {
+    event.preventDefault();
+    const key = deepseekKeyDraft.trim();
+    if (!key || /\s/.test(key)) { setDeepSeekKeyError(t('settings_go_key_invalid')); return; }
+    onSaveDeepSeekKey(key);
+    setDeepSeekKeyDraft('');
+    setDeepSeekKeyError('');
   };
   useEffect(() => {
     setBenchmarkOverride(null);
@@ -137,7 +151,7 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
           </SettingsRow>
           <div className="settings-theme-preview" aria-hidden="true">
             <span className="settings-preview-window"><i /><i /><i /><b /><b /><b /></span>
-            <span className="settings-preview-copy"><strong>{t('settings_font_sample')}</strong><small>12,480 tokens · $3.84</small></span>
+              <span className="settings-preview-copy"><strong>{t('settings_font_sample')}</strong><small>12,480 tokens · {formatCurrency(3.84, currency)}</small></span>
             <span className="settings-preview-spark" />
           </div>
         </SettingsSection>
@@ -161,6 +175,15 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
             </form>
             {(goatKeyError || goatKeyFeedback) && <p className="settings-form-error" role="status">{goatKeyError || goatKeyFeedback}</p>}
           </SettingsSection>
+          <SettingsSection title={lang === 0 ? 'DeepSeek 官方余额' : 'DeepSeek official balance'} hint={lang === 0 ? '使用 DeepSeek 官方 API key 查询账户充值与赠送余额；密钥保存在 Windows 凭据管理器。' : 'Use an official DeepSeek API key to read prepaid and granted balances. The key is stored in Windows Credential Manager.'} className="settings-go-key">
+            <p className="settings-go-key-status">{deepseekKeyStored ? t('settings_go_key_stored') : (lang === 0 ? '尚未保存密钥；也可使用 DEEPSEEK_API_KEY 环境变量。' : 'No key saved; DEEPSEEK_API_KEY also works.')}</p>
+            <form className="settings-go-key-form" onSubmit={saveDeepSeekKey}>
+              <input type="password" autoComplete="off" spellCheck="false" value={deepseekKeyDraft} onChange={(event) => { setDeepSeekKeyDraft(event.target.value); setDeepSeekKeyError(''); }} placeholder="DeepSeek API key" aria-label="DeepSeek API key" />
+              <button className="settings-save" type="submit">{t('settings_save')}</button>
+              <button className="settings-reset" type="button" disabled={!deepseekKeyStored} onClick={onDeleteDeepSeekKey}>{t('settings_go_key_remove')}</button>
+            </form>
+            {(deepseekKeyError || deepseekKeyFeedback) && <p className="settings-form-error" role="status">{deepseekKeyError || deepseekKeyFeedback}</p>}
+          </SettingsSection>
           <SettingsSection title={t('settings_type')} className="settings-type">
             <SettingsRow title={t('settings_font')}>
               <SettingsChoice
@@ -178,7 +201,7 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
               <span className="settings-font-sample-label">TYPE SPECIMEN · 16</span>
               <div className="settings-font-sample-en">Token usage, at a glance</div>
               <div className="settings-font-sample-zh">令牌用量，一目了然</div>
-              <div className="settings-font-sample-numbers">12,480 tokens · $3.84</div>
+              <div className="settings-font-sample-numbers">12,480 tokens · {formatCurrency(3.84, currency)}</div>
             </div>
             <SettingsRow title={t('settings_density')}>
               <SettingsChoice
@@ -205,8 +228,15 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
           </SettingsSection>
 
           <SettingsSection title={t('settings_plan')} hint={t('settings_plan_hint')} className="settings-plan">
+            <SettingsRow title={t('settings_currency')} hint={t('settings_currency_hint')}>
+              <select className="settings-currency-select" value={preferences.currency} onChange={(event) => onPreferenceChange('currency', event.target.value)} aria-label={t('settings_currency')}>
+                {CURRENCIES.map((code) => <option key={code} value={code}>{code} · {new Intl.DisplayNames([lang === 0 ? 'zh-CN' : 'en'], { type: 'currency' }).of(code)}</option>)}
+              </select>
+              <p className="settings-currency-rate" role="status">{preferences.currency === 'USD' ? t('settings_currency_usd') : currency?.rate > 0 ? `${t('settings_currency_rate')} 1 USD ≈ ${formatCurrency(1, currency)} · ${currency.date || '—'}${currency.stale ? ` · ${t('settings_currency_stale')}` : ''}` : currency?.error ? t('settings_currency_error') : t('settings_currency_loading')}</p>
+              <small className="settings-currency-source">{t('settings_currency_source')} <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a></small>
+            </SettingsRow>
             <form className="settings-plan-form" onSubmit={saveBenchmark}>
-              <label htmlFor="settings-plan-input">{t('settings_monthly')}</label>
+              <label htmlFor="settings-plan-input">{t('settings_monthly')} (USD)</label>
               <div className="settings-plan-input-wrap">
                 <span>$</span>
                 <input
@@ -230,7 +260,7 @@ export default function SettingsPage({ lang, preferences, onPreferenceChange, on
             </form>
             <div className="settings-plan-note">
               <span className="settings-plan-note-dot" />
-              {isCustom ? `${t('settings_monthly')}: ${fmtCost(benchmark)}` : `${t('settings_default')}: ${fmtCost(benchmark)}`}
+              {isCustom ? `${t('settings_monthly')}: ${fmtCost(benchmark)}` : `${t('settings_default')}: ${fmtCost(benchmark)}`}{preferences.currency !== 'USD' && currency?.rate > 0 ? ` ≈ ${formatCurrency(benchmark, currency)}` : ''}
             </div>
           </SettingsSection>
 

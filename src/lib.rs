@@ -3,6 +3,7 @@ pub mod claude_quota;
 pub mod codex_app_server;
 pub mod credential;
 pub mod cursor_quota;
+pub mod deepseek_balance;
 pub mod goat;
 pub mod http;
 pub mod ledger;

@@ -3,6 +3,7 @@
 
 const GO_TARGET: &str = "TuiTokenMonitor/OpenCodeGo";
 const GOAT_TARGET: &str = "TuiTokenMonitor/CommandCodeGoat";
+const DEEPSEEK_TARGET: &str = "TuiTokenMonitor/DeepSeek";
 
 pub fn valid_api_key(key: &str) -> bool {
     let trimmed = key.trim();
@@ -60,7 +61,7 @@ mod win {
 
     pub(super) fn write(target: &str, key: &str) -> Result<()> {
         if !super::valid_api_key(key) {
-            return Err(anyhow!("Invalid OpenCode Go API key format"));
+            return Err(anyhow!("Invalid API key format"));
         }
         let mut name = wide(target);
         let mut blob = key.as_bytes().to_vec();
@@ -170,6 +171,31 @@ pub fn delete_command_code_key() -> anyhow::Result<()> {
 
 pub fn has_command_code_key() -> bool {
     command_code_key().ok().flatten().is_some()
+}
+
+pub fn deepseek_key() -> anyhow::Result<Option<String>> {
+    #[cfg(windows)]
+    { win::read(DEEPSEEK_TARGET) }
+    #[cfg(not(windows))]
+    { Ok(None) }
+}
+
+pub fn set_deepseek_key(key: &str) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    { win::write(DEEPSEEK_TARGET, key) }
+    #[cfg(not(windows))]
+    { let _ = key; anyhow::bail!("Windows Credential Manager unavailable") }
+}
+
+pub fn delete_deepseek_key() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    { win::delete(DEEPSEEK_TARGET) }
+    #[cfg(not(windows))]
+    { Ok(()) }
+}
+
+pub fn has_deepseek_key() -> bool {
+    deepseek_key().ok().flatten().is_some()
 }
 
 #[cfg(test)]

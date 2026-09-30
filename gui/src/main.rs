@@ -41,6 +41,7 @@ struct IpcCommand {
     autostart: Option<bool>,
     go_api_key: Option<String>,
     goat_api_key: Option<String>,
+    deepseek_api_key: Option<String>,
     lang: Option<u8>,
     format: Option<String>,
     start: Option<String>,
@@ -64,6 +65,7 @@ enum UserEvent {
     SetAutostart(bool),
     SetGoApiKey(Option<String>),
     SetGoatApiKey(Option<String>),
+    SetDeepSeekApiKey(Option<String>),
     QueryNativePreferences,
     GlobalShortcut,
     ShortcutStatus(bool),
@@ -260,6 +262,14 @@ fn main() -> anyhow::Result<()> {
                 "deleteGoatApiKey" => {
                     let _ = ipc_proxy.send_event(UserEvent::SetGoatApiKey(None));
                 }
+                "setDeepSeekApiKey" => {
+                    if let Some(key) = command.deepseek_api_key {
+                        let _ = ipc_proxy.send_event(UserEvent::SetDeepSeekApiKey(Some(key)));
+                    }
+                }
+                "deleteDeepSeekApiKey" => {
+                    let _ = ipc_proxy.send_event(UserEvent::SetDeepSeekApiKey(None));
+                }
                 "exportUsage" => {
                     if let Some(format) = command.format {
                         let selection = export::ExportSelection {
@@ -294,6 +304,7 @@ fn main() -> anyhow::Result<()> {
     let mut latest_ledger: Option<Box<tui_token_monitor::ledger::LedgerReport>> = None;
     let mut latest_ledger_fetched_at_ms = 0_u64;
     let mut latest_goat_usage = None::<tui_token_monitor::goat::UsageSummary>;
+    let mut latest_deepseek_balance = tui_token_monitor::deepseek_balance::BalanceState::MissingKey;
     let webview = std::cell::RefCell::new(webview);
     let mut tray = None;
     let mut tray_level = None::<u8>;
@@ -385,7 +396,8 @@ fn main() -> anyhow::Result<()> {
                 let enabled = desktop::autostart_enabled().unwrap_or(false);
                 let go_key_stored = tui_token_monitor::credential::has_open_code_go_key();
                 let goat_key_stored = tui_token_monitor::credential::has_command_code_key();
-                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored}}})"));
+                let deepseek_key_stored = tui_token_monitor::credential::has_deepseek_key();
+                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored}}})"));
             }
             Event::UserEvent(UserEvent::SetGoApiKey(key)) => {
                 let result = match key {
@@ -405,6 +417,16 @@ fn main() -> anyhow::Result<()> {
                 let success = result.is_ok();
                 let stored = tui_token_monitor::credential::has_command_code_key();
                 let _ = webview.borrow().evaluate_script(&format!("window.__onGoatKeyResult?.({{success:{success},stored:{stored}}})"));
+                if success { refresh::spawn_quota(tx.clone()); }
+            }
+            Event::UserEvent(UserEvent::SetDeepSeekApiKey(key)) => {
+                let result = match key {
+                    Some(key) => tui_token_monitor::credential::set_deepseek_key(&key),
+                    None => tui_token_monitor::credential::delete_deepseek_key(),
+                };
+                let success = result.is_ok();
+                let stored = tui_token_monitor::credential::has_deepseek_key();
+                let _ = webview.borrow().evaluate_script(&format!("window.__onDeepSeekKeyResult?.({{success:{success},stored:{stored}}})"));
                 if success { refresh::spawn_quota(tx.clone()); }
             }
             Event::UserEvent(UserEvent::Export(format, selection)) => {
@@ -521,6 +543,9 @@ fn main() -> anyhow::Result<()> {
                     if let Some(usage) = r.goat_usage {
                         latest_goat_usage = usage;
                     }
+                    if let Some(balance) = r.deepseek_balance {
+                        latest_deepseek_balance = balance;
+                    }
                     if let Some(ledger) = r.ledger {
                         latest_ledger = Some(ledger);
                         latest_ledger_fetched_at_ms = r.fetched_at_ms;
@@ -534,6 +559,7 @@ fn main() -> anyhow::Result<()> {
                             &latest_snapshot,
                             ledger,
                             latest_goat_usage,
+                            latest_deepseek_balance.clone(),
                         );
                         let js = format!("window.__onPush && window.__onPush({payload});");
                         // WebView 未就绪时 evaluate_script 出错;下轮采集会自然重推

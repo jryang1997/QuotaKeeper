@@ -59,6 +59,24 @@ export function aggregateUsage(rows, bounds, agent = '') {
   return { valid: true, total, days, unpriced };
 }
 
+export function aggregateIntraday(rows, date, agent = '') {
+  const buckets = Array.from({ length: 12 }, (_, index) => {
+    const hour = index * 2;
+    const start = `${String(hour).padStart(2, '0')}:00`;
+    const end = `${String(hour + 2).padStart(2, '0')}:00`;
+    return { date: `${date} ${start}–${end}`, label: start, agg: freshAgg(), agents: new Map(), unpriced: 0 };
+  });
+  for (const row of rows || []) {
+    if (row.date !== date || (agent && row.client !== agent) || !Number.isInteger(row.hour) || row.hour < 0 || row.hour > 23) continue;
+    const bucket = buckets[Math.floor(row.hour / 2)];
+    addAgg(bucket.agg, row.agg);
+    bucket.unpriced += Number(row.unpriced_messages || 0);
+    if (!bucket.agents.has(row.client)) bucket.agents.set(row.client, freshAgg());
+    addAgg(bucket.agents.get(row.client), row.agg);
+  }
+  return buckets;
+}
+
 export function usageMetric(agg, metric) {
   return metric === 'cost' ? agg.cost : metric === 'messages' ? agg.messages : agg.total;
 }
