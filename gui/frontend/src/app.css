@@ -49,13 +49,95 @@
   font-display: swap;
 }
 
+/* 成套字体套件(EN+CN 一套齐):本机已装优先 local(),没装落捆包 woff2 */
+
+@font-face {
+  font-family: 'IBM Plex Sans SC';
+  src: url('/fonts/IBMPlexSansSC-Medium.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans SC';
+  src: url('/fonts/IBMPlexSansSC-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarasa UI SC';
+  src: local('Sarasa UI SC'), url('/fonts/sarasa-ui-sc-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarasa UI SC';
+  src: local('Sarasa UI SC SemiBold'), url('/fonts/sarasa-ui-sc-semibold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarasa UI SC';
+  src: local('Sarasa UI SC Bold'), url('/fonts/sarasa-ui-sc-bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarasa Term SC';
+  src: local('Sarasa Term SC'), url('/fonts/sarasa-term-sc-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sarasa Term SC';
+  src: local('Sarasa Term SC Bold'), url('/fonts/sarasa-term-sc-bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Maple Mono CN';
+  src: local('Maple Mono CN'), url('/fonts/maple-mono-cn-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Maple Mono CN';
+  src: local('Maple Mono CN Bold'), url('/fonts/maple-mono-cn-bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Smiley Sans';
+  src: local('Smiley Sans'), url('/fonts/smiley-sans-oblique.woff2') format('woff2');
+  font-style: oblique;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light dark;
   --spring: cubic-bezier(0.22, 1, 0.36, 1);
-  /* 字体默认栈:.app 外渲染的文本(portal/错误层)不落浏览器衬线体;.app[data-typeface] 会覆盖 */
-  --font-family-body: 'IBM Plex Sans SC', 'Microsoft YaHei UI', system-ui, sans-serif;
-  --font-family-heading: 'IBM Plex Sans SC', 'Microsoft YaHei UI', system-ui, sans-serif;
-  --font-family-code: 'IBM Plex Mono', 'IBM Plex Sans SC', monospace;
+  /* 字体默认栈(= 默认套件 sarasa):.app 外渲染的文本(portal/错误层)不落浏览器衬线体;.app[data-typeface] 会覆盖 */
+  --font-family-body: 'Sarasa UI SC', 'Sarasa Term SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-family-heading: 'Sarasa UI SC', 'Sarasa Term SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-family-code: 'Sarasa Term SC', 'Sarasa UI SC', ui-monospace, monospace;
   /* 热力图五级:跟随主题的 accent 强度阶梯 */
   --heat-1: color-mix(in srgb, var(--color-text-blue) 25%, transparent);
   --heat-2: color-mix(in srgb, var(--color-text-blue) 45%, transparent);
@@ -100,6 +182,31 @@ html[data-theme='dark'] { color-scheme: dark; }
   --font-family-body: 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
   --font-family-heading: 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
   --font-family-code: 'IBM Plex Mono', 'IBM Plex Sans SC', monospace;
+}
+
+.app[data-typeface='sarasa'] {
+  --font-family-body: 'Sarasa UI SC', 'Sarasa Term SC', 'Microsoft YaHei UI', sans-serif;
+  --font-family-heading: 'Sarasa UI SC', 'Sarasa Term SC', 'Microsoft YaHei UI', sans-serif;
+  --font-family-code: 'Sarasa Term SC', 'Sarasa UI SC', ui-monospace, monospace;
+}
+
+.app[data-typeface='maple'] {
+  --font-family-body: 'Maple Mono CN', 'Microsoft YaHei UI', sans-serif;
+  --font-family-heading: 'Maple Mono CN', 'Microsoft YaHei UI', sans-serif;
+  --font-family-code: 'Maple Mono CN', ui-monospace, monospace;
+}
+
+/* MiSans 授权禁止再分发字体文件:只做本机检测,不落捆包 */
+.app[data-typeface='misans'] {
+  --font-family-body: 'MiSans', 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
+  --font-family-heading: 'MiSans', 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
+  --font-family-code: 'IBM Plex Mono', 'IBM Plex Sans SC', monospace;
+}
+
+.app[data-typeface='smiley'] {
+  --font-family-body: 'Smiley Sans', 'Microsoft YaHei UI', sans-serif;
+  --font-family-heading: 'Smiley Sans', 'Microsoft YaHei UI', sans-serif;
+  --font-family-code: 'IBM Plex Mono', 'Smiley Sans', ui-monospace, monospace;
 }
 
 
@@ -676,6 +783,20 @@ html[data-theme='dark'] { color-scheme: dark; }
 .settings-font-sample.is-plex .settings-font-sample-en,
 .settings-font-sample.is-plex .settings-font-sample-zh { font-family: 'IBM Plex Sans SC', sans-serif; }
 .settings-font-sample.is-plex .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
+.settings-font-sample.is-sarasa .settings-font-sample-en,
+.settings-font-sample.is-sarasa .settings-font-sample-zh { font-family: 'Sarasa UI SC', 'Sarasa Term SC', sans-serif; }
+.settings-font-sample.is-sarasa .settings-font-sample-label,
+.settings-font-sample.is-sarasa .settings-font-sample-numbers { font-family: 'Sarasa Term SC', monospace; }
+.settings-font-sample.is-maple .settings-font-sample-en,
+.settings-font-sample.is-maple .settings-font-sample-zh { font-family: 'Maple Mono CN', sans-serif; }
+.settings-font-sample.is-maple .settings-font-sample-label,
+.settings-font-sample.is-maple .settings-font-sample-numbers { font-family: 'Maple Mono CN', monospace; }
+.settings-font-sample.is-misans .settings-font-sample-en,
+.settings-font-sample.is-misans .settings-font-sample-zh { font-family: 'MiSans', 'IBM Plex Sans SC', sans-serif; }
+.settings-font-sample.is-misans .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
+.settings-font-sample.is-smiley .settings-font-sample-en,
+.settings-font-sample.is-smiley .settings-font-sample-zh { font-family: 'Smiley Sans', sans-serif; }
+.settings-font-sample.is-smiley .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
 
 
 .settings-plan { padding-bottom: 17px; }

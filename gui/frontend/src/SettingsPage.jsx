@@ -191,13 +191,17 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
                 value={preferences.typeface}
                 onChange={(value) => onPreferenceChange('typeface', value)}
                 options={[
+                  { value: 'sarasa', label: t('font_sarasa') },
+                  { value: 'maple', label: t('font_maple') },
                   { value: 'plex', label: t('font_plex') },
-                  { value: 'system', label: t('font_system') },
+                  { value: 'misans', label: t('font_misans') },
+                  { value: 'smiley', label: t('font_smiley') },
                   { value: 'pixel', label: t('font_pixel') },
+                  { value: 'system', label: t('font_system') },
                 ]}
               />
             </SettingsRow>
-            <div className={`settings-font-sample${preferences.typeface === 'pixel' ? ' is-pixel' : preferences.typeface === 'plex' ? ' is-plex' : ''}`}>
+            <div className={`settings-font-sample${preferences.typeface === 'system' ? '' : ` is-${preferences.typeface}`}`}>
               <span className="settings-font-sample-label">TYPE SPECIMEN · 16</span>
               <div className="settings-font-sample-en">Token usage, at a glance</div>
               <div className="settings-font-sample-zh">令牌用量，一目了然</div>
