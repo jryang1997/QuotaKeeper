@@ -1,3 +1,4 @@
+import ModuleBoard from './ModuleBoard.jsx';
 import React, { useState } from 'react';
 import { Card } from '@astryxdesign/core/Card';
 import { Text } from '@astryxdesign/core/Text';
@@ -49,7 +50,7 @@ function TrendBars({ values, color }) {
   );
 }
 
-function UsageSummaryRow({ ledger, goat, lang }) {
+function UsageSummaryRow({ ledger, goat, lang, part }) {
   const t = (k) => STR[k][lang];
   const zh = lang === 0;
   const now = new Date();
@@ -58,7 +59,7 @@ function UsageSummaryRow({ ledger, goat, lang }) {
   const tokens = goat ? goat.tokens : ledger?.month.total ?? 0;
   const requests = goat ? goat.requests : ledger?.month.messages ?? 0;
   const caption = goat ? t('usage_sum_official') : t('usage_sum_local');
-  return (
+  const content = (
     <div className="usage-summary-row">
       <div className="usage-summary-card">
         <div className="usage-summary-head" style={{ color: 'var(--sum-purple)' }}>
@@ -80,6 +81,7 @@ function UsageSummaryRow({ ledger, goat, lang }) {
       </div>
     </div>
   );
+  return part ? content.props.children[part === 'tokens' ? 0 : 1] : content;
 }
 
 function ProviderLogo({ provider }) {
@@ -156,12 +158,12 @@ function DeepSeekBalanceCard({ balance, lang, pinned, accent, onTogglePin, onTog
   </Card>;
 }
 
-function QuotaCards({ cards, deepseekBalance, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings }) {
+function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings }) {
   const t = (k) => STR[k][lang];
   const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   return (
     <div className="quota-grid">
-      {pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
+      {showDeepseek && pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
       {ordered.filter((c) => !hiddenCards.includes(c.provider)).map((c) => {
         const accent = providerColors[c.provider] || PROVIDER_ACCENT[c.provider] || 'var(--color-text-primary)';
         const isActivity = c.method === 'activity_vs_average';
@@ -223,7 +225,7 @@ function QuotaCards({ cards, deepseekBalance, lang, allowPace = false, pinnedCar
           </Card>
         );
       })}
-      {!pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned={false} accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
+      {showDeepseek && !pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned={false} accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
     </div>
   );
 }
@@ -244,8 +246,8 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
   const nextReset = limits.filter((limit) => limit.resets_in_ms > 0).sort((a, b) => a.resets_in_ms - b.resets_in_ms)[0];
   const attention = limits.filter((limit) => limit.status !== 'ok').length;
   const pct = tightest ? Math.max(0, Math.min(100, tightest.used_pct)) : 0;
-  return <div className="quota-page">
-    <section className="quota-overview" aria-label={t('quota_overview')}>
+  const modules = [
+    { id: 'overview', title: t('quota_overview'), w: 12, h: 2, minW: 6, minH: 2, content: (<section className="quota-overview" aria-label={t('quota_overview')}>
       <div className="quota-overview-copy">
         <span className="eyebrow">// {t('quota_overview')}</span>
         <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
@@ -256,11 +258,12 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
         <strong>{tightest ? `${Math.round(pct)}%` : '—'}</strong>
         <span>{t('quota_used')}</span>
       </div>
-    </section>
-    <UsageSummaryRow ledger={ledger} goat={goatUsage} lang={lang} />
-    <QuotaCards cards={currentCards} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={preferences.hiddenCards} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />
-    {preferences.hiddenCards.length > 0 && <button className="quota-hidden-link" type="button" onClick={onOpenSettings}>{lang === 0 ? `已隐藏 ${preferences.hiddenCards.length} 张卡片 · 在设置中恢复` : `${preferences.hiddenCards.length} hidden cards · restore in Settings`}</button>}
-    {sources?.length > 0 && <section className="source-section" aria-label={t('source_health')}>
+    </section>) },
+    { id: 'tokens', title: t('usage_sum_tokens'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="tokens" ledger={ledger} goat={goatUsage} lang={lang} />) },
+    { id: 'requests', title: t('usage_sum_runs'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="requests" ledger={ledger} goat={goatUsage} lang={lang} />) },
+    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) })),
+    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) },
+    { id: 'sources', title: t('source_health'), w: 12, h: 3, minW: 6, minH: 2, content: (<section className="source-section" aria-label={t('source_health')}>
       <div className="source-heading"><h2>{t('source_health')}</h2></div>
       <div className="source-grid">{sources.map((source) => {
         const state = source.error ? 'error' : source.records > 0 ? 'ready' : 'idle';
@@ -275,7 +278,20 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
         <span>{t('source_location')} · <code>{SOURCE_PATHS[sourceDetail.client] || '—'}</code></span>
         <span>{t('source_diagnostic')} · {sourceDetail.error || (sourceDetail.records ? t('source_ok_detail') : t('source_no_records'))}</span>
       </motion.div>}</AnimatePresence>
-    </section>}
+    </section>) },
+  ];
+  let row = 0, col = 0;
+  const defaultLayout = modules.filter((item) => !preferences.hiddenCards.includes(item.id)).map((item) => {
+    if (col + item.w > 12) { row += 3; col = 0; }
+    const panel = { id: item.id, x: col, y: row, w: item.w, h: item.h, locked: false };
+    col += item.w;
+    if (col === 12) { row += item.h; col = 0; }
+    return panel;
+  });
+  return <div className="quota-page">
+    <ModuleBoard storageKey="token-monitor.quota-layout.v1" lang={lang} catalog={modules} hiddenIds={preferences.hiddenCards} defaults={defaultLayout} renderModule={(id) => modules.find((item) => item.id === id)?.content} />
+    {preferences.hiddenCards.length > 0 && <button className="quota-hidden-link" type="button" onClick={onOpenSettings}>{lang === 0 ? `已隐藏 ${preferences.hiddenCards.length} 张卡片 · 在设置中恢复` : `${preferences.hiddenCards.length} hidden cards · restore in Settings`}</button>}
+
   </div>;
 }
 

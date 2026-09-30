@@ -86,19 +86,20 @@ export function collectAlignLines(panels, id, nx, ny) {
 }
 
 // Invalid or outdated layouts fall back to defaults instead of rendering off-grid cards.
-export function readPanelState(storage = globalThis.localStorage) {
+export function readPanelState(storage = globalThis.localStorage, key = PANELS_KEY, catalog = PANEL_CATALOG) {
   try {
-    const raw = JSON.parse(storage.getItem(PANELS_KEY) || 'null');
+    const raw = JSON.parse(storage.getItem(key) || 'null');
     if (!raw || !Array.isArray(raw.panels) || !Array.isArray(raw.enabled)) return null;
     if (raw.panels.length > PANELS_MAX || raw.enabled.length > PANELS_MAX) return null;
-    const known = new Set(PANEL_CATALOG.map((c) => c.id));
+    const known = new Set(catalog.map((c) => c.id));
+    const specs = new Map(catalog.map((c) => [c.id, c]));
     const panelIds = new Set();
     for (const p of raw.panels) {
       if (!p || !known.has(p.id) || panelIds.has(p.id)
         || !Number.isInteger(p.x) || p.x < 0
         || !Number.isInteger(p.y) || p.y < 0 || p.y > 400
-        || !Number.isInteger(p.w) || p.w < 1 || p.x + p.w > PANEL_COLS
-        || !Number.isInteger(p.h) || p.h < 1 || p.h > 10
+        || !Number.isInteger(p.w) || p.w < (specs.get(p.id)?.minW || 1) || p.x + p.w > PANEL_COLS
+        || !Number.isInteger(p.h) || p.h < (specs.get(p.id)?.minH || 1) || p.h > 10
         || typeof p.locked !== 'boolean') return null;
       panelIds.add(p.id);
     }
@@ -110,8 +111,25 @@ export function readPanelState(storage = globalThis.localStorage) {
   }
 }
 
-export function savePanelState(panels, enabled, storage = globalThis.localStorage) {
+export function savePanelState(panels, enabled, storage = globalThis.localStorage, key = PANELS_KEY) {
   try {
-    storage.setItem(PANELS_KEY, JSON.stringify({ panels, enabled }));
+    storage.setItem(key, JSON.stringify({ panels, enabled }));
   } catch { /* Layout remains available for this session. */ }
+}
+
+// Keep the selected module exactly where it was placed; move only obstructing free modules.
+export function resolveModuleLayout(panels, id, target) {
+  const fixed = panels.filter((panel) => panel.id !== id && panel.locked);
+  if (fixed.some((panel) => panelOverlap(target, panel))) return panels;
+  const placed = [...fixed, target];
+  for (const panel of panels.filter((item) => item.id !== id && !item.locked).sort((a, b) => a.y - b.y || a.x - b.x)) {
+    let candidate = { ...panel };
+    let collisions;
+    while ((collisions = placed.filter((item) => panelOverlap(candidate, item))).length) {
+      candidate.y = Math.max(...collisions.map((item) => item.y + item.h));
+      if (candidate.y > 400) return panels;
+    }
+    placed.push(candidate);
+  }
+  return placed.sort((a, b) => a.y - b.y || a.x - b.x);
 }

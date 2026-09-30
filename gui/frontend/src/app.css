@@ -1161,3 +1161,47 @@ html[data-theme='dark'] { color-scheme: dark; }
 .panel-page.is-manipulating .panel-grid { cursor: grabbing; }
 .panel-page.is-manipulating:has(.is-resizing) .panel-grid { cursor: nwse-resize; }
 .quota-ring circle { transition: stroke 140ms var(--spring); }
+
+/* Personalized page modules share the panel gesture engine and keep content readable. */
+.module-board { overflow-x: visible; }
+.module-board .panel-grid { min-width: 0; }
+.module-board .panel-card { padding: 14px 18px; container-type: inline-size; }
+.module-board .panel-head { margin-bottom: 12px; flex-shrink: 0; }
+.module-board .panel-title { font-size: .8125rem; }
+.module-body { overflow: auto; scrollbar-width: thin; padding-right: 2px; }
+.module-body > .quota-grid { display: block; }
+.module-body .quota-card, .module-body > .quota-overview,
+.module-body > .usage-surface, .module-body > .usage-summary-card,
+.module-body .usage-summary-row > .usage-summary-card { background: transparent; border: 0; box-shadow: none; border-radius: 0; padding: 4px 0; min-height: 0; }
+.module-body .quota-card-actions { display: none; }
+.module-body .usage-hero { justify-content: center; flex: 1; }
+.module-body .usage-summary-card { flex: 1; }
+.module-body .usage-summary-row { flex: 1; align-items: center; }
+.module-body .usage-chart-card { display: flex; flex-direction: column; flex: 1; min-height: 260px; }
+.module-body .usage-trend { display: flex; flex-direction: column; flex: 1; }
+.module-body .usage-plot { flex: 1; height: auto; min-height: 160px; }
+.module-body .usage-models { margin: 0; }
+.module-body .usage-model-grid > .usage-surface { background: transparent; padding: 8px 0; }
+.module-body .source-section { margin: 0; }
+.module-body .usage-more { margin: 0; }
+.module-board .panel-tools { flex-wrap: wrap; }
+.module-board .panel-menu { max-height: min(540px, 70vh); overflow-y: auto; z-index: 50; }
+.module-board.is-narrow .panel-grid { display: flex; flex-direction: column; gap: 14px; }
+.module-board.is-narrow .panel-card { position: relative; transform: none !important; width: 100% !important; height: auto !important; min-height: 160px; }
+.module-board.is-narrow .panel-head { cursor: default; }
+.module-board.is-narrow .module-body { overflow: visible; }
+.module-board.is-narrow .usage-plot { height: 230px; flex: auto; }
+@container (max-width: 520px) {
+  .module-body .usage-model-grid, .module-body .usage-more-grid, .module-body .source-grid { grid-template-columns: minmax(0, 1fr); }
+  .module-body .usage-chart-heading { flex-wrap: wrap; gap: 10px; }
+  .module-body .usage-hero-number, .module-body .usage-summary-card > strong { font-size: clamp(22px, 7cqw, 34px); overflow-wrap: anywhere; }
+  .module-body .quota-overview h1 { font-size: 22px; }
+}
+.module-body > .usage-hero > span, .module-body > .usage-summary-card > span,
+.module-body > .usage-summary-card > .usage-summary-head,
+.module-body .usage-chart-heading h2 { display: none; }
+.module-body > .usage-model-list, .module-body > .usage-model-detail { background: transparent; padding: 6px 0; }
+.module-body > .usage-model-list > h3 { display: none; }
+.module-board.is-narrow .panel-empty { position: relative; min-height: 180px; }
+.module-board .panel-tools { min-width: 0; }
+.module-board .module-body > .usage-summary-card { padding: 4px 0; background: transparent; border-radius: 0; }
