@@ -41,11 +41,11 @@ function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, mod
       <span className="panel-title" title={title}>{title}</span>
       <span className="panel-meta">{meta?.(panel.id)}</span>
       <span className="panel-head-btns" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" className="panel-btn" disabled={panel.locked} onClick={() => onTop(panel.id)} aria-label={`${title} ${lang === 0 ? '移到顶部' : 'Move to top'}`} title={lang === 0 ? '移到顶部' : 'Move to top'}>↑</button>
+        <button type="button" className="panel-btn" disabled={panel.locked} onClick={() => onTop(panel.id)} aria-label={`${title} ${lang === 0 ? '移到顶部' : 'Move to top'}`} title={lang === 0 ? '移到顶部' : 'Move to top'}><svg viewBox="0 0 24 24"><path d="M12 19V5" /><path d="M5 12l7-7 7 7" /></svg></button>
         <button type="button" className={`panel-btn${panel.locked ? ' is-on' : ''}`} onClick={() => onLock(panel.id)} title={lockTitle} aria-label={lockTitle}>
           <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
         </button>
-        <button type="button" className="panel-btn" onClick={() => onRemove(panel.id)} title={removeTitle} aria-label={removeTitle}>×</button>
+        <button type="button" className="panel-btn" onClick={() => onRemove(panel.id)} title={removeTitle} aria-label={removeTitle}><svg viewBox="0 0 24 24"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></svg></button>
       </span>
     </div>
     <ModuleContent id={panel.id} renderModule={renderModule} modular={modular} />

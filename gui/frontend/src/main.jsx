@@ -349,7 +349,7 @@ function App() {
             <span className={`toolbar-theme-swatch toolbar-theme-${preferences.theme}`} aria-hidden="true" />
             <span>{t(`theme_${preferences.theme}`)}</span>
           </button>
-          <Button size="sm" onClick={refresh} disabled={refreshing}>
+          <Button size="sm" className="toolbar-refresh" onClick={refresh} disabled={refreshing}>
             {t('refresh')}
           </Button>
         </div>
