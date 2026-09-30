@@ -27,7 +27,7 @@ export function readGuiPreferences(storage = globalThis.localStorage) {
     return {
       lang: stored.lang === 1 ? 1 : 0,
       theme: THEME_ORDER.includes(stored.theme) ? stored.theme : DEFAULT_GUI_PREFERENCES.theme,
-      typeface: ['sarasa', 'maple', 'plex', 'misans', 'smiley', 'pixel', 'system'].includes(stored.typeface) ? stored.typeface : DEFAULT_GUI_PREFERENCES.typeface,
+      typeface: ['sarasa', 'plex'].includes(stored.typeface) ? stored.typeface : DEFAULT_GUI_PREFERENCES.typeface,
       density: ['comfortable', 'compact'].includes(stored.density) ? stored.density : DEFAULT_GUI_PREFERENCES.density,
       motion: ['system', 'reduced'].includes(stored.motion) ? stored.motion : DEFAULT_GUI_PREFERENCES.motion,
       currency: CURRENCIES.includes(stored.currency) ? stored.currency : DEFAULT_GUI_PREFERENCES.currency,

@@ -192,12 +192,7 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
                 onChange={(value) => onPreferenceChange('typeface', value)}
                 options={[
                   { value: 'sarasa', label: t('font_sarasa') },
-                  { value: 'maple', label: t('font_maple') },
                   { value: 'plex', label: t('font_plex') },
-                  { value: 'misans', label: t('font_misans') },
-                  { value: 'smiley', label: t('font_smiley') },
-                  { value: 'pixel', label: t('font_pixel') },
-                  { value: 'system', label: t('font_system') },
                 ]}
               />
             </SettingsRow>

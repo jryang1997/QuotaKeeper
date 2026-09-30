@@ -2,22 +2,6 @@
    CSS easing is reserved for short color and press feedback. */
 
 @font-face {
-  font-family: 'Sixtyfour';
-  src: url('/fonts/sixtyfour-variable.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'QiuYeYuanTi16';
-  src: url('/fonts/qiu-ye-yuan-ti-16.ttf') format('truetype');
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-}
-
-@font-face {
   font-family: 'IBM Plex Sans SC';
   src: url('/fonts/IBMPlexSansSC-Regular.woff2') format('woff2');
   font-style: normal;
@@ -107,29 +91,6 @@
   font-display: swap;
 }
 
-@font-face {
-  font-family: 'Maple Mono CN';
-  src: local('Maple Mono CN'), url('/fonts/maple-mono-cn-regular.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Maple Mono CN';
-  src: local('Maple Mono CN Bold'), url('/fonts/maple-mono-cn-bold.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 600 700;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Smiley Sans';
-  src: local('Smiley Sans'), url('/fonts/smiley-sans-oblique.woff2') format('woff2');
-  font-style: oblique;
-  font-weight: 400;
-  font-display: swap;
-}
 
 :root {
   color-scheme: light dark;
@@ -172,11 +133,6 @@ html[data-theme='dark'] { color-scheme: dark; }
   min-width: 0;
 }
 
-.app[data-typeface='pixel'] {
-  --font-family-body: 'Sixtyfour', 'QiuYeYuanTi16', system-ui, sans-serif;
-  --font-family-heading: 'Sixtyfour', 'QiuYeYuanTi16', system-ui, sans-serif;
-  --font-family-code: 'Sixtyfour', 'QiuYeYuanTi16', ui-monospace, monospace;
-}
 
 .app[data-typeface='plex'] {
   --font-family-body: 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
@@ -190,24 +146,6 @@ html[data-theme='dark'] { color-scheme: dark; }
   --font-family-code: 'Sarasa Term SC', 'Sarasa UI SC', ui-monospace, monospace;
 }
 
-.app[data-typeface='maple'] {
-  --font-family-body: 'Maple Mono CN', 'Microsoft YaHei UI', sans-serif;
-  --font-family-heading: 'Maple Mono CN', 'Microsoft YaHei UI', sans-serif;
-  --font-family-code: 'Maple Mono CN', ui-monospace, monospace;
-}
-
-/* MiSans 授权禁止再分发字体文件:只做本机检测,不落捆包 */
-.app[data-typeface='misans'] {
-  --font-family-body: 'MiSans', 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
-  --font-family-heading: 'MiSans', 'IBM Plex Sans SC', 'Microsoft YaHei UI', sans-serif;
-  --font-family-code: 'IBM Plex Mono', 'IBM Plex Sans SC', monospace;
-}
-
-.app[data-typeface='smiley'] {
-  --font-family-body: 'Smiley Sans', 'Microsoft YaHei UI', sans-serif;
-  --font-family-heading: 'Smiley Sans', 'Microsoft YaHei UI', sans-serif;
-  --font-family-code: 'IBM Plex Mono', 'Smiley Sans', ui-monospace, monospace;
-}
 
 
 .app[data-density='compact'] .main { gap: 10px; }
@@ -778,8 +716,6 @@ html[data-theme='dark'] { color-scheme: dark; }
 .settings-font-sample-en { color: var(--color-text-primary); font-size: 16px; line-height: 1.5; }
 .settings-font-sample-zh { margin-top: 3px; color: var(--color-text-secondary); font-family: var(--font-family-body); font-size: 16px; line-height: 1.5; }
 .settings-font-sample-numbers { margin-top: 8px; color: var(--color-text-secondary); font-family: var(--font-family-code); font-size: 13px; }
-.settings-font-sample.is-pixel .settings-font-sample-en { font-family: 'Sixtyfour', sans-serif; }
-.settings-font-sample.is-pixel .settings-font-sample-zh { font-family: 'QiuYeYuanTi16', sans-serif; }
 .settings-font-sample.is-plex .settings-font-sample-en,
 .settings-font-sample.is-plex .settings-font-sample-zh { font-family: 'IBM Plex Sans SC', sans-serif; }
 .settings-font-sample.is-plex .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
@@ -787,16 +723,6 @@ html[data-theme='dark'] { color-scheme: dark; }
 .settings-font-sample.is-sarasa .settings-font-sample-zh { font-family: 'Sarasa UI SC', 'Sarasa Term SC', sans-serif; }
 .settings-font-sample.is-sarasa .settings-font-sample-label,
 .settings-font-sample.is-sarasa .settings-font-sample-numbers { font-family: 'Sarasa Term SC', monospace; }
-.settings-font-sample.is-maple .settings-font-sample-en,
-.settings-font-sample.is-maple .settings-font-sample-zh { font-family: 'Maple Mono CN', sans-serif; }
-.settings-font-sample.is-maple .settings-font-sample-label,
-.settings-font-sample.is-maple .settings-font-sample-numbers { font-family: 'Maple Mono CN', monospace; }
-.settings-font-sample.is-misans .settings-font-sample-en,
-.settings-font-sample.is-misans .settings-font-sample-zh { font-family: 'MiSans', 'IBM Plex Sans SC', sans-serif; }
-.settings-font-sample.is-misans .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
-.settings-font-sample.is-smiley .settings-font-sample-en,
-.settings-font-sample.is-smiley .settings-font-sample-zh { font-family: 'Smiley Sans', sans-serif; }
-.settings-font-sample.is-smiley .settings-font-sample-label { font-family: 'IBM Plex Mono', monospace; }
 
 
 .settings-plan { padding-bottom: 17px; }
