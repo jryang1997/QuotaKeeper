@@ -121,11 +121,10 @@ function QuotaRing({ pct, tone }) {
   );
 }
 
-function ExpiryChip({ endsInMs, lang }) {
-  if (endsInMs == null) return null;
-  // endsInMs 已是绝对时间戳(QuotaPage 减过 elapsed),不能再叠加 Date.now()
-  const days = Math.max(0, Math.ceil((endsInMs - Date.now()) / 86_400_000));
-  const date = new Date(endsInMs);
+function ExpiryChip({ endsAtMs, lang }) {
+  if (endsAtMs == null) return null;
+  const days = Math.max(0, Math.ceil((endsAtMs - Date.now()) / 86_400_000));
+  const date = new Date(endsAtMs);
   const md = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   return <span className={`quota-expiry${days <= 7 ? ' quota-expiry-warning' : ''}`}>{lang === 0 ? `${md} 到期` : `expires ${md}`}</span>;
 }
@@ -181,7 +180,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
               <ProviderLogo provider={c.provider} />
               <Text weight="medium" className="quota-title" title={c.title}>{c.title}</Text>
               <span className="quota-plan-type" title={c.kind === 'Live' && c.plan_type ? c.plan_type : undefined}>{c.kind === 'Live' ? c.plan_type || '' : ''}</span>
-              {c.kind === 'Live' && <ExpiryChip endsInMs={c.subscription_ends_at_ms} lang={lang} />}
+              {c.kind === 'Live' && <ExpiryChip endsAtMs={c.subscription_ends_at_ms} lang={lang} />}
               <div className="quota-card-actions">
                 <button type="button" aria-label={`${pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} ${c.title}`} title={pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} onClick={() => onTogglePin?.(c.provider)}>{pinnedCards.includes(c.provider) ? '◆' : '◇'}</button>
                 <button type="button" aria-label={`${t('card_hide')} ${c.title}`} title={t('card_hide')} onClick={() => onToggleHidden?.(c.provider)}>×</button>
@@ -238,7 +237,6 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
   const currentCards = cards.map((card) => card.kind === 'Live' ? {
     ...card,
     limits: card.limits.map((limit) => ({ ...limit, resets_in_ms: limit.resets_in_ms == null ? null : Math.max(0, limit.resets_in_ms - elapsed) })),
-    subscription_ends_at_ms: card.subscription_ends_at_ms == null ? null : card.subscription_ends_at_ms - elapsed,
   } : card);
   const live = currentCards.filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average' && !preferences.hiddenCards.includes(card.provider));
   const limits = live.flatMap((card) => card.limits.map((limit) => ({ ...limit, provider: card.title.split(' ·')[0] })));

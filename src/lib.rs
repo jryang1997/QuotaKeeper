@@ -7,6 +7,7 @@ pub mod deepseek_balance;
 pub mod glm_quota;
 pub mod goat;
 pub mod http;
+pub mod kimi_quota;
 pub mod ledger;
 pub mod model;
 pub mod opencode_go;

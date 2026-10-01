@@ -5,6 +5,7 @@ const GO_TARGET: &str = "TuiTokenMonitor/OpenCodeGo";
 const GOAT_TARGET: &str = "TuiTokenMonitor/CommandCodeGoat";
 const DEEPSEEK_TARGET: &str = "TuiTokenMonitor/DeepSeek";
 const GLM_TARGET: &str = "TuiTokenMonitor/Glm";
+const KIMI_TARGET: &str = "TuiTokenMonitor/Kimi";
 
 pub fn valid_api_key(key: &str) -> bool {
     let trimmed = key.trim();
@@ -235,6 +236,44 @@ pub fn delete_glm_key() -> anyhow::Result<()> {
 
 pub fn has_glm_key() -> bool {
     glm_key().ok().flatten().is_some()
+}
+
+pub fn kimi_key() -> anyhow::Result<Option<String>> {
+    #[cfg(windows)]
+    {
+        win::read(KIMI_TARGET)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
+}
+
+pub fn set_kimi_key(key: &str) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        win::write(KIMI_TARGET, key)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = key;
+        anyhow::bail!("Windows Credential Manager unavailable")
+    }
+}
+
+pub fn delete_kimi_key() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        win::delete(KIMI_TARGET)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
+pub fn has_kimi_key() -> bool {
+    kimi_key().ok().flatten().is_some()
 }
 
 #[cfg(test)]

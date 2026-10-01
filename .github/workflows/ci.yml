@@ -10,9 +10,9 @@ jobs:
     # 用户视角的默认路径:stable 工具链宿主目标(MSVC),cargo build/test 开箱即用
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -47,7 +47,7 @@ jobs:
       CC_x86_64_pc_windows_gnu: gcc
       AR_x86_64_pc_windows_gnu: ar
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-gnu
@@ -64,20 +64,20 @@ jobs:
     # 跨平台门槛:核心 crate 在 Linux 上可编译可测试(cfg(windows) 路径全部旁路)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
 
   minimum-rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.88.0
       - run: cargo +1.88.0 check --locked
 
   minimum-gui-rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.90.0
       - run: cargo +1.90.0 check --locked --manifest-path gui/Cargo.toml

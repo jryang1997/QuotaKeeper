@@ -101,7 +101,8 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Antigravity => "activity_vs_average",
                     model::ProviderId::Claude
                     | model::ProviderId::Cursor
-                    | model::ProviderId::Glm => "provider_fraction",
+                    | model::ProviderId::Glm
+                    | model::ProviderId::Kimi => "provider_fraction",
                 },
                 subscription_ends_at_ms: r.subscription_ends_at_ms,
                 limits: r
@@ -127,6 +128,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Claude => "Claude 官方 oauth/usage（Claude Code 登录态）",
                     model::ProviderId::Cursor => "Cursor usage-summary（Cursor 登录态）",
                     model::ProviderId::Glm => "z.ai / bigmodel 官方 monitor 接口",
+                    model::ProviderId::Kimi => "Kimi 官方 coding usage 接口",
                 },
                 method: "unavailable",
             },
@@ -143,6 +145,7 @@ fn provider_slug(p: model::ProviderId) -> &'static str {
         model::ProviderId::Claude => "claude",
         model::ProviderId::Cursor => "cursor",
         model::ProviderId::Glm => "glm",
+        model::ProviderId::Kimi => "kimi",
     }
 }
 
@@ -517,6 +520,29 @@ mod tests {
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/usage.json");
 
+    fn fixture_ledger() -> ledger::LedgerReport {
+        let now = chrono::Local::now();
+        ledger::aggregate(
+            vec![ledger::UsageRecord {
+                client: "codex",
+                model: "test-model".into(),
+                ts_ms: now.timestamp_millis(),
+                tokens: ledger::TokenBreakdown {
+                    input: 100,
+                    output: 20,
+                    cache_read: 30,
+                    cache_write: 10,
+                    reasoning: 5,
+                },
+                cost: Some(0.5),
+                cost_is_estimate: false,
+                session: Some("test-session".into()),
+                project: Some("test-project".into()),
+            }],
+            now,
+        )
+    }
+
     #[test]
     fn missing_card_carries_both_language_hints() {
         let snap = Snapshot {
@@ -534,14 +560,23 @@ mod tests {
     #[test]
     fn push_serializes_full_payload() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
-        let rep = ledger::collect(chrono::Local::now());
-        let s = push(123, 120, 122, None, &snap, &rep, None, BalanceState::MissingKey);
+        let rep = fixture_ledger();
+        let s = push(
+            123,
+            120,
+            122,
+            None,
+            &snap,
+            &rep,
+            None,
+            BalanceState::MissingKey,
+        );
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(v["cards"].as_array().unwrap().len(), 7);
+        assert_eq!(v["cards"].as_array().unwrap().len(), 8);
         assert_eq!(v["quota_fetched_at_ms"], 120);
         assert_eq!(v["quota_checked_at_ms"], 122);
         assert!(v["goat_usage"].is_null());
-        assert!(v["ledger"]["today"]["total"].is_i64());
+        assert_eq!(v["ledger"]["today"]["total"], 160);
         assert!(v["ledger"]["trend_24h"].as_array().unwrap().len() == 24);
         assert!(v["ledger"]["intraday_rows"].is_array());
         assert!(v["ledger"]["daily_totals"].as_array().unwrap().len() > 100);
@@ -581,24 +616,39 @@ mod tests {
     #[test]
     fn quota_error_flows_through() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
-        let rep = ledger::collect(chrono::Local::now());
-        let v: serde_json::Value =
-            serde_json::from_str(&push(1, 0, 1, Some("omp down".into()), &snap, &rep, None, BalanceState::MissingKey))
-                .unwrap();
+        let rep = fixture_ledger();
+        let v: serde_json::Value = serde_json::from_str(&push(
+            1,
+            0,
+            1,
+            Some("omp down".into()),
+            &snap,
+            &rep,
+            None,
+            BalanceState::MissingKey,
+        ))
+        .unwrap();
         assert_eq!(v["quotaError"], "omp down");
     }
 
     #[test]
     fn goat_usage_flows_through_as_snake_case() {
         let snap = model::parse_snapshot(FIXTURE).unwrap();
-        let rep = ledger::collect(chrono::Local::now());
+        let rep = fixture_ledger();
         let summary = UsageSummary {
             total_count: 5752.0,
             total_tokens: 1_054_688_077,
             total_cost: 59.05,
         };
         let v: serde_json::Value = serde_json::from_str(&push(
-            1, 0, 1, None, &snap, &rep, Some(summary), BalanceState::MissingKey,
+            1,
+            0,
+            1,
+            None,
+            &snap,
+            &rep,
+            Some(summary),
+            BalanceState::MissingKey,
         ))
         .unwrap();
         assert_eq!(v["goat_usage"]["tokens"], 1_054_688_077_u64);

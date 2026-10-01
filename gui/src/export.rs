@@ -42,7 +42,16 @@ impl ExportSelection {
 }
 
 fn csv_field(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
+    // CSV 是电子表格展示格式;JSON 保留原始文本。
+    let trimmed = value.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let prefix = if trimmed.starts_with(['=', '+', '-', '@', '＝', '＋', '－', '＠'])
+        || value.starts_with(['\t', '\r', '\n'])
+    {
+        "'"
+    } else {
+        ""
+    };
+    format!("\"{prefix}{}\"", value.replace('"', "\"\""))
 }
 
 /// Collector identity, rather than an individual file path: rows are aggregated by day.
@@ -163,8 +172,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn csv_neutralizes_formulas_and_json_preserves_project_text() {
+        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
+        for project in [
+            "=1+1",
+            " +1",
+            "-1",
+            "@SUM(1)",
+            "\t=1",
+            "\r=1",
+            "\n=1",
+            "＝1+1",
+            "\u{feff}=1",
+        ] {
+            report.analysis_rows = vec![AnalysisRow {
+                date: "2026-10-01".into(),
+                client: "codex",
+                project: Some(project.into()),
+                agg: Default::default(),
+                unpriced_messages: 0,
+            }];
+            let text = csv(&report, "+08:00", &ExportSelection::default());
+            assert!(text.contains(&format!("\"'{project}\"")), "{project:?}");
+            let value: serde_json::Value = serde_json::from_slice(
+                &json(&report, "+08:00", &ExportSelection::default()).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(value["rows"][0]["project"], project);
+        }
+        assert_eq!(csv_field("a,\"b\""), "\"a,\"\"b\"\"\"");
+    }
+
+    #[test]
     fn csv_keeps_reported_and_estimated_cost_apart() {
-        let mut report = tui_token_monitor::ledger::collect(chrono::Local::now());
+        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows.clear();
         report
             .analysis_rows
@@ -186,13 +227,13 @@ mod tests {
             });
         let result = csv(&report, "+08:00", &ExportSelection::default());
         assert!(result.contains(
-            "\"2026-09-27\",\"codex\",\"demo\",8,3,2,0,0,13,1,1.500000,0.250000,1.750000,1,true,\"codex_rollout_jsonl\",\"+08:00\""
+            "\"2026-09-27\",\"codex\",\"demo\",8,3,2,0,0,13,1,1.500000,0.250000,1.750000,1,true,\"codex_rollout_jsonl\",\"'+08:00\""
         ));
     }
 
     #[test]
     fn export_selection_filters_date_agent_and_project() {
-        let mut report = tui_token_monitor::ledger::collect(chrono::Local::now());
+        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows = vec![
             tui_token_monitor::ledger::AnalysisRow {
                 date: "2026-09-26".into(),
@@ -231,7 +272,7 @@ mod tests {
 
     #[test]
     fn json_identifies_each_collectors_source() {
-        let mut report = tui_token_monitor::ledger::collect(chrono::Local::now());
+        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows = ["codex", "claude", "dsh", "omp", "opencode", "zcode"]
             .into_iter()
             .map(|client| AnalysisRow {

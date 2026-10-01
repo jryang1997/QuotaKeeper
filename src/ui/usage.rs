@@ -1074,6 +1074,7 @@ mod tests {
     #[test]
     fn renders_monthly_value_and_plan_multiple_at_80_columns() {
         let ledger = fixture_ledger();
+        let benchmark = crate::settings::monthly_plan_benchmark();
         let backend = TestBackend::new(80, 24);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();
@@ -1088,12 +1089,34 @@ mod tests {
             .collect();
         let compact_text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(compact_text.contains("API≈$2.00"), "缺本月估值");
-        assert!(compact_text.contains("0.05×"), "缺套餐倍数");
         assert!(
-            compact_text.contains("$40.00我的月费"),
+            compact_text.contains(&format!("{:.2}×", 2.0 / benchmark.monthly_usd)),
+            "缺套餐倍数"
+        );
+        let price_label = format!(
+            "{}{}",
+            format_usd(benchmark.monthly_usd),
+            if benchmark.is_custom { "我的月费" } else { "月基准" }
+        );
+        assert!(
+            compact_text.contains(&price_label),
             "缺套餐基础标价参照: {text}"
         );
         assert_eq!(hits.agent_rows.len(), ledger.by_agent.len());
+        for (monthly_usd, is_custom, expected) in [
+            (40.0, false, "API≈$2.00 · 0.05×$40.00月基准"),
+            (25.0, true, "API≈$2.00 · 0.08×$25.00我的月费"),
+            (100.0, true, "API≈$2.00 · 0.02×$100我的月费"),
+            (0.5, true, "API≈$2.00 · 4.00×$0.5000我的月费"),
+        ] {
+            assert_eq!(
+                monthly_value_label(
+                    &ledger,
+                    crate::settings::PlanBenchmark { monthly_usd, is_custom },
+                ),
+                expected
+            );
+        }
     }
 
     #[test]

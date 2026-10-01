@@ -19,7 +19,7 @@ fn omp_candidates() -> Vec<String> {
 
 /// Fetch all providers independently. One failed source cannot erase other live cards.
 pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
-    let (codex, go, goat, cpa, claude, cursor, glm) = std::thread::scope(|scope| {
+    let (codex, go, goat, cpa, claude, cursor, glm, kimi) = std::thread::scope(|scope| {
         let codex = scope.spawn(codex_card);
         let go = scope.spawn(crate::opencode_go::fetch_report);
         let goat = scope.spawn(crate::goat::fetch_report);
@@ -27,6 +27,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
         let claude = scope.spawn(crate::claude_quota::fetch_report);
         let cursor = scope.spawn(crate::cursor_quota::fetch_report);
         let glm = scope.spawn(crate::glm_quota::fetch_report);
+        let kimi = scope.spawn(crate::kimi_quota::fetch_report);
         (
             codex.join(),
             go.join(),
@@ -35,6 +36,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
             claude.join(),
             cursor.join(),
             glm.join(),
+            kimi.join(),
         )
     });
 
@@ -48,6 +50,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     fill_report(&mut cards, claude);
     fill_report(&mut cards, cursor);
     fill_report(&mut cards, glm);
+    fill_report(&mut cards, kimi);
 
     let needs_omp = [ProviderId::OpenCodeGo, ProviderId::Codex]
         .iter()

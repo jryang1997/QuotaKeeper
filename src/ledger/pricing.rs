@@ -1,7 +1,7 @@
 //! LiteLLM 开放价目数据集估价(与 tokscale 同源),磁盘缓存 + 后台自动刷新.
 //!
 //! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
-//! - 查找:精确名 → canonical 别名 → 唯一全名 → 唯一 provider 后缀 → 家族兜底;
+//! - 查找:精确名 → 大小写全名 → canonical 别名 → provider 后缀众数 → 家族兜底;
 //!   多个 provider 同后缀且无众数时不估价。
 
 use std::collections::{HashMap, HashSet};
@@ -30,9 +30,7 @@ fn now_ms() -> i64 {
 
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, Default)]
 pub struct ModelPrice {
-    #[serde(default)]
     input: f64,
-    #[serde(default)]
     output: f64,
     #[serde(default)]
     cache_read: Option<f64>,
@@ -79,31 +77,25 @@ pub fn spawn_refresher(home: &Path) {
 }
 
 impl Pricing {
-    /// 有缓存(新旧皆可)直接用;无缓存才同步拉一次.
+    /// 只读本地缓存;冷启动/离线使用补充价,网络刷新由 spawn_refresher 负责。
     pub fn load(home: &Path) -> Pricing {
         let path = cache_path(home);
         if let Some((_, pricing)) = read_cache(&path) {
             return pricing;
         }
-        match fetch() {
-            Some(fresh) => {
-                let _ = write_cache(&path, now_ms(), &fresh);
-                fresh
-            }
-            None => build(HashMap::new()),
-        }
+        build(HashMap::new())
     }
 
     pub fn estimate(&self, model: &str, t: &TokenBreakdown) -> Option<f64> {
         let p = self.lookup(model)?;
         let mut cost = t.input as f64 * p.input + t.output as f64 * p.output;
-        if let Some(r) = p.cache_read {
-            cost += t.cache_read as f64 * r;
+        if t.cache_read > 0 {
+            cost += t.cache_read as f64 * p.cache_read?;
         }
-        if let Some(w) = p.cache_write {
-            cost += t.cache_write as f64 * w;
+        if t.cache_write > 0 {
+            cost += t.cache_write as f64 * p.cache_write?;
         }
-        Some(cost)
+        cost.is_finite().then_some(cost)
     }
 
     fn lookup(&self, model: &str) -> Option<&ModelPrice> {
@@ -113,18 +105,19 @@ impl Pricing {
         if let Some(price) = self.entries.get(model) {
             return Some(price);
         }
-        // 原始名未命中先试 canonical 别名,补目录缺名.
-        let canonical = crate::ledger::model_alias::canonical(model);
-        if canonical != model && canonical != "unknown" {
-            if let Some(price) = self.entries.get(&canonical) {
-                return Some(price);
-            }
-        }
         let lower = model.to_lowercase();
         if self.ambiguous_names.contains(&lower) {
             return None;
         }
         if let Some(price) = self.case_insensitive.get(&lower) {
+            return Some(price);
+        }
+
+        // 保留已知 provider 的价格,再用聚合别名补目录缺名。
+        let canonical = crate::ledger::model_alias::canonical(model);
+        if canonical != model && canonical != "unknown"
+            && let Some(price) = self.entries.get(&canonical)
+        {
             return Some(price);
         }
 
@@ -135,7 +128,7 @@ impl Pricing {
         if let Some(price) = self.unique_suffixes.get(suffix) {
             return Some(price);
         }
-        // 家族兜底:剥 minor 版本再查一轮(gpt-6.1-sol → gpt-6-sol).
+        // ponytail: 家族价只近似相邻 minor;需审计估价时改为显式匹配来源。
         let family = family_name(model)?;
         self.lookup(&family)
     }
@@ -330,6 +323,10 @@ const SUPPLEMENT: &[(&str, ModelPrice)] = &[
 /// the same model ID, often with different prices; choosing the first suffix
 /// encountered in a HashMap would make the estimate nondeterministic.
 fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
+    entries.retain(|_, price| {
+        [Some(price.input), Some(price.output), price.cache_read, price.cache_write]
+            .into_iter().flatten().all(|value| value.is_finite() && value >= 0.0)
+    });
     for (name, price) in SUPPLEMENT {
         entries.entry((*name).to_string()).or_insert(*price);
     }
@@ -361,17 +358,12 @@ fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
             unique_suffixes.insert(suffix, *group[0]);
             continue;
         }
-        // 以 (input, output, cache_read, cache_write) 全等做众数统计
-        let key = |p: &ModelPrice| {
-            format!(
-                "{}/{}/{}/{}",
-                p.input.to_bits(),
-                p.output.to_bits(),
-                p.cache_read.map(|v| v.to_bits()).unwrap_or(0),
-                p.cache_write.map(|v| v.to_bits()).unwrap_or(0)
-            )
-        };
-        let mut counts: HashMap<String, (usize, ModelPrice)> = HashMap::new();
+        // 以四桶价格全等做众数统计;缺价和明确零价是不同状态。
+        let key = |p: &ModelPrice| (
+            p.input.to_bits(), p.output.to_bits(),
+            p.cache_read.map(f64::to_bits), p.cache_write.map(f64::to_bits),
+        );
+        let mut counts = HashMap::new();
         for price in &group {
             let e = counts.entry(key(price)).or_insert((0, **price));
             e.0 += 1;
@@ -415,6 +407,36 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    fn consumed_cache_buckets_need_prices_and_zero_is_explicit() {
+        for json in ["{}", r#"{"input":0}"#, r#"{"output":0}"#] {
+            assert!(serde_json::from_str::<ModelPrice>(json).is_err());
+        }
+        assert!(serde_json::from_str::<ModelPrice>(r#"{"input":0,"output":0}"#).is_ok());
+        let price = ModelPrice { input: 1.0, output: 2.0, ..Default::default() };
+        let p = build(HashMap::from([("test".into(), price)]));
+        let mut t = TokenBreakdown { input: 10, ..Default::default() };
+        assert_eq!(p.estimate("test", &t), Some(10.0));
+        t.cache_read = 5;
+        assert_eq!(p.estimate("test", &t), None);
+        t.cache_read = 0;
+        t.cache_write = 5;
+        assert_eq!(p.estimate("test", &t), None);
+        let p = build(HashMap::from([("test".into(), ModelPrice { cache_read: Some(0.0), cache_write: Some(0.0), ..price })]));
+        assert_eq!(p.estimate("test", &t), Some(10.0));
+        for input in [-1.0, f64::NAN, f64::INFINITY] {
+            let p = build(HashMap::from([("invalid".into(), ModelPrice { input, ..price })]));
+            assert_eq!(p.estimate("invalid", &t), None);
+        }
+    }
+
+    #[test]
+    fn qualified_case_insensitive_name_precedes_bare_alias() {
+        let p = pricing_with(&[("test-model", 1.0, 2.0), ("provider/test-model", 3.0, 4.0)]);
+        let t = TokenBreakdown { input: 10, ..Default::default() };
+        assert_eq!(p.estimate("Provider/Test-Model", &t), Some(30.0));
     }
 
     #[test]

@@ -6,6 +6,7 @@ export const PROVIDER_ACCENT = {
   claude: 'var(--color-text-orange)',
   cursor: 'var(--color-text-primary)',
   glm: 'var(--color-text-blue)',
+  kimi: 'var(--color-text-orange)',
   deepseek: '#2764d6',
 };
 
@@ -16,9 +17,9 @@ export const STATUS_COLOR = {
 };
 
 export const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', glm: '#2f6bff', deepseek: '#2764d6',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', glm: '#2f6bff', kimi: '#ff8d1a', deepseek: '#2764d6',
 };
-export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'glm', 'deepseek'];
+export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'glm', 'kimi', 'deepseek'];
 export const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
@@ -50,14 +51,16 @@ export const QUOTA_REPAIR = {
   codex: ['登录 Codex 官方程序后刷新；应用通过 app-server 读取限额。', 'Sign in to the official Codex app and refresh; quotas come from app-server.'],
   goat: ['在设置页保存 Command Code API key，或配置 COMMAND_CODE_API_KEY；也可使用 cmdc 登录态。', 'Save a Command Code API key in Settings, set COMMAND_CODE_API_KEY, or use a cmdc login.'],
   antigravity: ['启动本机 CPA，并将管理密钥放在 ~/.tui-token-monitor/cpa-key；应用会通过 CPA 代查 Google 上游配额。', 'Start local CPA and place the management key in ~/.tui-token-monitor/cpa-key. The app reads upstream Google quotas through CPA.'],
-  glm: ['在设置页保存 GLM Coding API key（bigmodel.cn 或 api.z.ai 控制台创建）；国际站需设置环境变量 GLM_API_BASE=https://api.z.ai。', 'Save a GLM Coding API key in Settings (create one in the bigmodel.cn or api.z.ai console); for the global region set GLM_API_BASE=https://api.z.ai.'],
+  glm: ['设置环境变量 GLM_API_KEY 后重启应用（bigmodel.cn 或 api.z.ai 控制台创建）；国际站还需 GLM_API_BASE=https://api.z.ai。', 'Set GLM_API_KEY and restart the app (create a key in the bigmodel.cn or api.z.ai console); the global region also needs GLM_API_BASE=https://api.z.ai.'],
+  kimi: ['设置环境变量 KIMI_CODE_API_KEY 后重启应用（kimi.com 控制台创建，sk-kimi- 开头；与 Moonshot 开放平台 key 不通用）。', 'Set KIMI_CODE_API_KEY and restart the app (from kimi.com, sk-kimi- prefix; not interchangeable with Moonshot platform keys).'],
 };
 export const QUOTA_HINT = {
   'opencode-go': ['未连接 · 保存 Go API key 或登录 OpenCode', 'Not connected · save a Go API key or sign in to OpenCode'],
   codex: ['未连接 · 登录 Codex 后刷新', 'Not connected · sign in to Codex and refresh'],
   goat: ['未连接 · 保存 Command Code key 或登录 cmdc', 'Not connected · save a Command Code key or use cmdc login'],
   antigravity: ['未连接 · 启动 CPA 并放置管理密钥', 'Not connected · start CPA with its management key'],
-  glm: ['未连接 · 保存 GLM Coding API key', 'Not connected · save a GLM Coding API key'],
+  glm: ['未连接 · 设置 GLM_API_KEY 后重启', 'Not connected · set GLM_API_KEY and restart'],
+  kimi: ['未连接 · 设置 KIMI_CODE_API_KEY 后重启', 'Not connected · set KIMI_CODE_API_KEY and restart'],
 };
 
 export const CLIENT_COLORS = {

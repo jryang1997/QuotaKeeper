@@ -15,7 +15,7 @@
 
 ## 它做什么
 
-面向重度 AI coding CLI 用户(Claude Code、Codex、OpenCode、z.ai GLM、Kimi、DeepSeek 等):配额从各服务的官方/登录态接口直采,token 账本读本机会话文件,美元估价用 LiteLLM 公开价目(7 天缓存)。全部数据留在本机,无遥测、无上报。
+面向重度 AI coding CLI 用户(Claude Code、Codex、OpenCode、z.ai GLM、Kimi、DeepSeek 等):配额从各服务的官方/登录态接口直采,token 账本读本机会话文件,美元估价用 LiteLLM 公开价目(后台每 24 小时刷新,离线复用旧缓存)。全部数据留在本机,无遥测、无上报。
 
 Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 
@@ -26,7 +26,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 
 ## 数据源
 
-### 配额(六卡,独立采集)
+### 配额(独立采集)
 
 | 卡 | 路径 | 凭据来源 |
 |---|---|---|
@@ -36,6 +36,10 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 | Antigravity | 经 [CPA](https://github.com/luispater/CLIProxyAPI) 代查 Google 上游配额 | `~/.tui-token-monitor/cpa-key` |
 | Claude Pro/Max | 官方 `oauth/usage` 接口 | Claude Code 登录态(`~/.claude/.credentials.json`) |
 | Cursor | usage-summary(未文档化接口) | Cursor 登录态(state.vscdb / `cursor-agent login`) |
+| GLM Coding | z.ai / bigmodel monitor 接口 | `GLM_API_KEY`;国际站另设 `GLM_API_BASE=https://api.z.ai` |
+| Kimi Coding(开发中) | coding usage 接口 | `KIMI_CODE_API_KEY`(Kimi For Coding key,不是 Moonshot 开放平台 key) |
+
+GLM/Kimi 的设置页 key 输入尚未接入,设置环境变量后需重启应用。DeepSeek API 余额另作余额卡展示,与订阅配额不同。
 
 有订阅周期的卡(GOAT / Codex / Cursor)会显示**订阅到期日**,到期前 7/3/1 天分级弹系统提醒(档位去重,续费后静默)。各家的订阅期可得性依据见[订阅周期数据来源调研](docs/research/subscription-period-sources.md)。
 
@@ -52,7 +56,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 
 > **未文档化接口声明**:Codex wham、GOAT `/alpha/billing`、Google `retrieveUserQuotaSummary` 为无稳定性承诺的内部接口,随时可变;失败时各自降级为 Missing 卡,不影响其他卡与本地账本。一手调研记录见 [docs/research/](docs/research/)。
 
-所有出站请求遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 环境变量(企业代理、镜像网络可用)。
+外网请求遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 环境变量。环回地址(含本机 CPA)强制直连且不跟随重定向,管理密钥不会发给环境代理。
 
 ## 安装
 
@@ -105,7 +109,7 @@ cargo test                                    # fixture 回放 / 内存 SQLite /
 cargo test --manifest-path gui/Cargo.toml     # GUI 壳测试
 npm --prefix gui/frontend test                 # GUI 布局、偏好与通信契约
 cargo run --example ledger_smoke              # 对本机真实数据源跑一遍 ledger,打印汇总
-cargo run --example quota_smoke               # 对本机真实凭据跑一遍六卡配额快照
+cargo run --example quota_smoke               # 对本机真实凭据跑一遍配额快照
 ```
 
 ## 已知口径
@@ -113,11 +117,15 @@ cargo run --example quota_smoke               # 对本机真实凭据跑一遍�
 - Token 页 token 计数(本地)与配额页百分比(服务商)不同源,对不上是正常的。
 - 周一为每周起点;日界按本地时区;input/output/cache_read/cache_write 四个计数桶互不重叠,reasoning 已包含在 output 中,仅单独展示。
 - 美元估价为 LiteLLM 第三方公开价目,未逐项由厂商核验,不反映时段/上下文档位/订阅折扣;OMP 来源报告价与估价分开记录。
+- 消耗的缓存桶缺少单价时标记未估价,不按免费处理;现有后缀众数/家族兜底仍是近似值。初次无缓存时先显示本地 token 与补充价,后台下载后下一次刷新补全估价。
+- 所有账本视图与导出只统计采集时刻之前的记录。CSV 对公式前缀文本加单引号以供电子表格查看,JSON 保留原文;重新保存 CSV 后仍需遵循所用电子表格的导入规则。
 - chrono 钉 0.4.38:0.4.40+ 的 Windows Local 走 raw-dylib,在 WinLibs GCC 的 windows-gnu 目标上首次调用即崩(见根 Cargo.toml 注释)。
 
 ## 致谢与来源
 
 项目的配额采集与展示调研参考了 [CodexBar](https://github.com/steipete/CodexBar)、[CodeBurn](https://github.com/getagentseal/codeburn)、[tokscale](https://github.com/junhoyeo/tokscale) 和 [ccusage](https://github.com/ccusage/ccusage) 的公开实现与文档。具体数据来源及取舍见 [研究记录](docs/research/);品牌图标来源见 [图标清单](gui/frontend/public/logos/README.md)。
+
+最近一次[代码审计](docs/research/codebase-audit-2026-10-01.md)与[竞品成熟度对标](docs/research/codebase-audit-landscape-2026-10-01.md)记录了已修复问题和后续补强顺序。
 
 ## License
 

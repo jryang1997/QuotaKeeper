@@ -20,5 +20,5 @@
 ## 已接受的风险(非漏洞)
 
 - 部分配额端点为未文档化内部接口(Codex wham、GOAT `/alpha/billing`、Google `retrieveUserQuotaSummary`、Claude `oauth/usage`):无稳定性承诺,随时可变,失败降级为 Missing 卡。
-- `CRED_PERSIST_LOCAL_MACHINE`:同一台机器的其他本地账户在 Windows 上可读取凭据管理器中该持久化级别的条目。如不接受,请改用环境变量传递 key。
+- `CRED_PERSIST_LOCAL_MACHINE`:凭据可供同一 Windows 用户在本机后续登录会话读取,不随用户漫游到其他电脑;该标志不表示向其他本地账户共享。[Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw)
 - Windows 凭据管理器存储按当前用户会话解密;请勿在不受信任的机器上保存 key。

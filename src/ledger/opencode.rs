@@ -38,13 +38,34 @@ pub fn collect(path: &Path) -> Result<Vec<UsageRecord>, String> {
 pub fn collect_conn(con: &Connection) -> Result<Vec<UsageRecord>, String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut recs = Vec::new();
-    // v2:session_message(JOIN session_v2 拿 directory 作项目)
-    if let Ok(mut stmt) = con.prepare(
-        "SELECT sm.id, sm.session_id, sm.data, s.directory FROM session_message sm \
-         LEFT JOIN session_v2 s ON s.id = sm.session_id \
-         WHERE sm.type = 'assistant' \
-         AND json_extract(sm.data, '$.tokens') IS NOT NULL ORDER BY sm.id",
-    ) {
+    let mut supported = false;
+    // SQL 名称仅来自下列常量;v2 优先,跨 schema 同 id 只记一次。
+    for (table, session_table, assistant) in [
+        ("session_message", "session_v2", "m.type = 'assistant'"),
+        (
+            "message",
+            "session",
+            "json_extract(m.data, '$.role') = 'assistant'",
+        ),
+    ] {
+        let exists: bool = con
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [table],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            continue;
+        }
+        supported = true;
+        let mut stmt = con
+            .prepare(&format!(
+                "SELECT m.id, m.session_id, m.data, s.directory FROM {table} m \
+             LEFT JOIN {session_table} s ON s.id = m.session_id \
+             WHERE {assistant} AND json_extract(m.data, '$.tokens') IS NOT NULL ORDER BY m.id"
+            ))
+            .map_err(|e| format!("opencode {table}: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -66,35 +87,11 @@ pub fn collect_conn(con: &Connection) -> Result<Vec<UsageRecord>, String> {
             }
         }
     }
-    // v1:legacy message 表(存在才贡献)
-    if let Ok(mut stmt) = con.prepare(
-        "SELECT m.id, m.session_id, m.data, s.directory FROM message m \
-         LEFT JOIN session s ON s.id = m.session_id \
-         WHERE json_extract(m.data, '$.role') = 'assistant' \
-         AND json_extract(m.data, '$.tokens') IS NOT NULL ORDER BY m.id",
-    ) {
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        for r in rows {
-            let (id, session, data, directory) = r.map_err(|e| e.to_string())?;
-            if seen.insert(id)
-                && let Some(mut rec) = parse_data(&data)
-            {
-                rec.session = session;
-                rec.project = directory.filter(|d| !d.is_empty());
-                recs.push(rec);
-            }
-        }
+    if supported {
+        Ok(recs)
+    } else {
+        Err("opencode.db 无支持的 message/session_message 表".into())
     }
-    Ok(recs)
 }
 
 fn parse_data(data: &str) -> Option<UsageRecord> {
@@ -205,8 +202,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_tables_yield_empty_not_error() {
+    fn unsupported_or_broken_schema_is_an_error_but_empty_supported_schema_is_valid() {
         let con = Connection::open_in_memory().unwrap();
+        assert!(collect_conn(&con).is_err());
+        let con = setup_v2();
         assert!(collect_conn(&con).unwrap().is_empty());
+        con.execute_batch("ALTER TABLE session_message RENAME COLUMN data TO incompatible_data")
+            .unwrap();
+        assert!(collect_conn(&con).unwrap_err().contains("session_message"));
     }
 }

@@ -232,6 +232,11 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('\'', "&apos;")
+        .replace('‘', "&#x2018;")
+        .replace('’', "&#x2019;")
+        .replace('‚', "&#x201a;")
+        .replace('‛', "&#x201b;")
 }
 
 /// 发送 Windows toast(后台线程,不阻塞调用方;失败静默)。
@@ -242,19 +247,21 @@ pub fn toast(title: &str, body: &str) {
     let body = body.to_string();
     std::thread::spawn(move || {
         use std::process::{Command, Stdio};
-        // PS 单引号 here-string 原样保留,占位符由 Rust 侧替换
-        let script = r#"
+        // XML 文本先编码所有 PS 单引号;format 避免二次替换正文中的占位符。
+        let script = format!(
+            r#"
 $ErrorActionPreference = 'SilentlyContinue'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 $x = New-Object Windows.Data.Xml.Dom.XmlDocument
-$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>__TITLE__</text><text>__BODY__</text></binding></visual></toast>')
+$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text></binding></visual></toast>')
 $t = [Windows.UI.Notifications.ToastNotification]::new($x)
 $n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Token Monitor')
 $n.Show($t)
-"#
-        .replace("__TITLE__", &xml_escape(&title))
-        .replace("__BODY__", &xml_escape(&body));
+"#,
+            title = xml_escape(&title),
+            body = xml_escape(&body)
+        );
         use std::os::windows::process::CommandExt;
         let _ = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
@@ -272,6 +279,15 @@ pub fn toast(_title: &str, _body: &str) {}
 mod tests {
     use super::*;
     use crate::model::{Limit, Report, Status};
+
+    #[test]
+    fn toast_text_cannot_end_a_powershell_literal_or_add_xml() {
+        let escaped = xml_escape("O'Brien ‘quota’ <&> __BODY__");
+        assert!(!escaped.contains(['\'', '‘', '’', '<', '>']));
+        assert!(escaped.contains("&apos;"));
+        assert!(escaped.contains("&lt;&amp;&gt;"));
+        assert!(escaped.contains("__BODY__"));
+    }
 
     fn snapshot(used_pct: f64, ends_at_ms: Option<i64>, source: QuotaSource) -> Snapshot {
         Snapshot {

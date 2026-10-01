@@ -58,6 +58,7 @@ pub enum ProviderId {
     Claude,
     Cursor,
     Glm,
+    Kimi,
 }
 
 impl ProviderId {
@@ -70,7 +71,7 @@ impl ProviderId {
     }
 
     /// 固定展示顺序.
-    pub fn all() -> [Self; 7] {
+    pub fn all() -> [Self; 8] {
         [
             Self::OpenCodeGo,
             Self::Codex,
@@ -79,6 +80,7 @@ impl ProviderId {
             Self::Claude,
             Self::Cursor,
             Self::Glm,
+            Self::Kimi,
         ]
     }
 
@@ -91,6 +93,7 @@ impl ProviderId {
             Self::Claude => "Claude Pro/Max",
             Self::Cursor => "Cursor",
             Self::Glm => "GLM Coding",
+            Self::Kimi => "Kimi Coding",
         }
     }
 
@@ -122,8 +125,12 @@ impl ProviderId {
                 "No Cursor login found; start the Cursor editor or run `cursor-agent login`, then refresh",
             ],
             Self::Glm => [
-                "配置 GLM Coding API key（应用设置或 GLM_API_KEY）；国内 bigmodel.cn / 国际 api.z.ai 控制台可创建，国际站设 GLM_API_BASE=https://api.z.ai",
-                "Set a GLM Coding API key (app settings or GLM_API_KEY); create one in the bigmodel.cn or api.z.ai console, and set GLM_API_BASE=https://api.z.ai for the global region",
+                "设置环境变量 GLM_API_KEY 后重启应用；国内 bigmodel.cn / 国际 api.z.ai 控制台可创建，国际站设 GLM_API_BASE=https://api.z.ai",
+                "Set GLM_API_KEY and restart the app; create a key in the bigmodel.cn or api.z.ai console, and set GLM_API_BASE=https://api.z.ai for the global region",
+            ],
+            Self::Kimi => [
+                "设置环境变量 KIMI_CODE_API_KEY 后重启应用；kimi.com 控制台创建，sk-kimi- 开头，与 Moonshot 开放平台 key 不通用",
+                "Set KIMI_CODE_API_KEY and restart the app; create it in the kimi.com console (sk-kimi- prefix, not interchangeable with Moonshot platform keys)",
             ],
         }
     }
@@ -141,6 +148,7 @@ pub enum QuotaSource {
     ClaudeOauth,
     CursorUsageSummary,
     ZaiMonitorApi,
+    KimiCodingApi,
 }
 
 impl QuotaSource {
@@ -156,6 +164,7 @@ impl QuotaSource {
             Self::ClaudeOauth => "Claude 官方 oauth/usage · 本应用直连",
             Self::CursorUsageSummary => "Cursor usage-summary · 本应用直连（未文档化接口）",
             Self::ZaiMonitorApi => "z.ai / bigmodel 官方 monitor 接口 · 本应用直连（未文档化接口）",
+            Self::KimiCodingApi => "Kimi 官方 coding usage 接口 · 本应用直连",
         }
     }
 }
@@ -243,7 +252,7 @@ struct OmpWindow {
 #[serde(rename_all = "camelCase")]
 struct OmpAmount {
     #[serde(default)]
-    used: f64,
+    used: Option<f64>,
     #[serde(default)]
     used_fraction: Option<f64>,
 }
@@ -256,24 +265,28 @@ pub fn parse_snapshot(json: &str) -> anyhow::Result<Snapshot> {
         let Some(provider) = ProviderId::from_omp(&r.provider) else {
             continue;
         };
-        let limits = r
+        let limits: Vec<_> = r
             .limits
             .iter()
-            .map(|l| {
+            .filter_map(|l| {
                 let used_pct = l
                     .amount
                     .used_fraction
+                    .filter(|f| f.is_finite() && *f >= 0.0)
                     .map(|f| f * 100.0)
-                    .unwrap_or(l.amount.used)
+                    .or_else(|| l.amount.used.filter(|v| v.is_finite() && *v >= 0.0))?
                     .clamp(0.0, 100.0);
-                Limit {
+                Some(Limit {
                     label: l.label.clone(),
                     used_pct,
                     resets_in_ms: l.window.resets_at.map(|t| t - r.fetched_at),
                     status: status_for(used_pct),
-                }
+                })
             })
             .collect();
+        if limits.is_empty() {
+            continue;
+        }
         by_provider.insert(
             provider,
             Report {
@@ -322,12 +335,34 @@ pub fn format_countdown(ms: i64) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn missing_or_invalid_omp_usage_never_becomes_live_zero() {
+        for limits in [
+            serde_json::json!([]),
+            serde_json::json!([{ "label": "5h" }]),
+            serde_json::json!([{ "amount": { "used": -1 } }]),
+        ] {
+            let doc = serde_json::json!({ "reports": [
+                { "provider": "openai-codex", "fetchedAt": 1, "limits": limits },
+                { "provider": "opencode-go", "fetchedAt": 1, "limits": [{ "amount": { "used": 0 } }] },
+            ] });
+            let snapshot = parse_snapshot(&doc.to_string()).unwrap();
+            assert!(matches!(snapshot.cards[0], Card::Live(_)));
+            assert!(matches!(snapshot.cards[1], Card::Missing { .. }));
+        }
+        let doc = r#"{"reports":[{"provider":"openai-codex","fetchedAt":1,"limits":[{"amount":{"usedFraction":0}}]}]}"#;
+        let snapshot = parse_snapshot(doc).unwrap();
+        assert!(
+            matches!(&snapshot.cards[1], Card::Live(report) if report.limits[0].used_pct == 0.0)
+        );
+    }
+
     const FIXTURE: &str = include_str!("../tests/fixtures/usage.json");
 
     #[test]
     fn fixture_parses_to_expected_percentages() {
         let snap = parse_snapshot(FIXTURE).unwrap();
-        assert_eq!(snap.cards.len(), 7);
+        assert_eq!(snap.cards.len(), 8);
         let go = match &snap.cards[0] {
             Card::Live(r) => r,
             Card::Missing { .. } => panic!("go 应为 Live"),

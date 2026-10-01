@@ -36,7 +36,7 @@ struct Credits {
 #[serde(rename_all = "camelCase")]
 struct Window {
     #[serde(default)]
-    used: f64,
+    used: Option<f64>,
     #[serde(default)]
     cap: f64,
     #[serde(default)]
@@ -89,11 +89,8 @@ struct SubscriptionsResp {
 #[derive(Deserialize, Clone, Copy, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSummary {
-    #[serde(default)]
     pub total_count: f64,
-    #[serde(default)]
     pub total_tokens: u64,
-    #[serde(default)]
     pub total_cost: f64,
 }
 
@@ -198,10 +195,11 @@ fn parse_iso_ms(s: &str) -> Option<i64> {
 }
 
 fn window_limit(label: &str, w: Window, now_ms: i64) -> Option<Limit> {
-    if w.cap <= 0.0 {
+    let used = w.used.filter(|value| value.is_finite() && *value >= 0.0)?;
+    if !w.cap.is_finite() || w.cap <= 0.0 {
         return None;
     }
-    let used_pct = (w.used / w.cap * 100.0).clamp(0.0, 100.0);
+    let used_pct = (used / w.cap * 100.0).clamp(0.0, 100.0);
     Some(Limit {
         label: label.to_string(),
         used_pct,
@@ -225,7 +223,7 @@ fn monthly_limit(cap: f64, remaining: f64, period_end: Option<&str>, now_ms: i64
     }
 }
 
-fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
+fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> anyhow::Result<Report> {
     let mut limits = Vec::new();
     if let Some(w) = credits.window_limits.five_hour
         && let Some(l) = window_limit("5 hours", w, now_ms)
@@ -237,7 +235,10 @@ fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
     {
         limits.push(l);
     }
-    if let Some(cap) = plan_monthly_cap(&subs.plan_id) {
+    if let Some(cap) = plan_monthly_cap(&subs.plan_id)
+        && credits.credits.monthly_credits.is_finite()
+        && credits.credits.monthly_credits >= 0.0
+    {
         limits.push(monthly_limit(
             cap,
             credits.credits.monthly_credits,
@@ -245,7 +246,11 @@ fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
             now_ms,
         ));
     }
-    Report {
+    anyhow::ensure!(
+        !limits.is_empty(),
+        "GOAT response contains no valid quota windows"
+    );
+    Ok(Report {
         provider: ProviderId::Goat,
         source: QuotaSource::CommandCodeApi,
         plan_type: if subs.status.is_empty() {
@@ -256,7 +261,7 @@ fn build_report(credits: &CreditsResp, subs: &SubData, now_ms: i64) -> Report {
         limits,
         // 订阅周期结束 = 续费/到期时间(currentPeriodEnd),供到期提醒用.
         subscription_ends_at_ms: subs.current_period_end.as_deref().and_then(parse_iso_ms),
-    }
+    })
 }
 
 /// 拉一次 GOAT 快照.无登录态/断网一律 Err,调用方转 Missing 卡展示.
@@ -271,7 +276,7 @@ pub fn fetch_report() -> anyhow::Result<Report> {
     let subs: SubData = get_json::<SubscriptionsResp>("/alpha/billing/subscriptions", &key)
         .map(|r| r.data.unwrap_or_default())
         .unwrap_or_default();
-    Ok(build_report(&credits, &subs, now_ms))
+    build_report(&credits, &subs, now_ms)
 }
 
 /// 官方当前账期用量汇总;无登录态/断网/端点变更一律 Err,调用方回退本机账本.
@@ -306,6 +311,7 @@ mod tests {
             &doc.subscription,
             NOW_MS,
         )
+        .unwrap()
     }
 
     #[test]
@@ -343,7 +349,8 @@ mod tests {
             },
             &doc.subscription,
             NOW_MS,
-        );
+        )
+        .unwrap();
         assert_eq!(r.plan_type, "GOAT · active");
         assert_eq!(r.limits.len(), 3);
         assert!((r.limits[0].used_pct - (0.736504846 / 14.0 * 100.0)).abs() < 1e-9);
@@ -364,7 +371,8 @@ mod tests {
             },
             &doc.subscription,
             NOW_MS,
-        );
+        )
+        .unwrap();
         assert_eq!(r.plan_type, "Provider · active");
         assert_eq!(r.limits.len(), 1);
     }
@@ -379,14 +387,24 @@ mod tests {
             },
             &SubData::default(),
             NOW_MS,
-        );
+        )
+        .unwrap();
         assert_eq!(report.plan_type, "订阅类型未知");
         assert_eq!(report.limits.len(), 2);
+        let empty: CreditsResp =
+            serde_json::from_str(r#"{"credits":{"monthlyCredits":1}}"#).unwrap();
+        assert!(build_report(&empty, &SubData::default(), NOW_MS).is_err());
     }
 
     #[test]
     fn zero_cap_window_is_dropped() {
         assert!(window_limit("5 hours", Window::default(), NOW_MS).is_none());
+        let missing: Window = serde_json::from_str(r#"{"cap":14}"#).unwrap();
+        assert!(window_limit("5 hours", missing, NOW_MS).is_none());
+        let zero: Window = serde_json::from_str(r#"{"cap":14,"used":0}"#).unwrap();
+        assert_eq!(window_limit("5 hours", zero, NOW_MS).unwrap().used_pct, 0.0);
+        let negative: Window = serde_json::from_str(r#"{"cap":14,"used":-1}"#).unwrap();
+        assert!(window_limit("5 hours", negative, NOW_MS).is_none());
     }
 
     /// 真实 usage summary 响应形状回归(2026-09-28 实测,已脱敏).
@@ -402,11 +420,10 @@ mod tests {
     }
 
     #[test]
-    fn usage_summary_defaults_on_missing_fields() {
-        let doc: UsageSummary = serde_json::from_str(r#"{"totalTokens":42}"#).unwrap();
-        assert_eq!(doc.total_tokens, 42);
-        assert_eq!(doc.total_count, 0.0);
-        assert_eq!(doc.total_cost, 0.0);
+    fn usage_summary_rejects_missing_fields() {
+        for doc in ["{}", r#"{"totalTokens":42}"#] {
+            assert!(serde_json::from_str::<UsageSummary>(doc).is_err());
+        }
     }
 
     #[test]

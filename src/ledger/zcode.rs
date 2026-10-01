@@ -3,10 +3,11 @@
 //! 口径抄 tokscale sessions/zcode.rs:
 //! - 现代 schema 用 `computed_total_tokens` 列存在性探测;legacy 无该列;
 //! - exclusive 风格归一化:total == input+output 时,cache/reasoning 是 input/output
-//!   的子集 → 从 input/output 里扣出(2026-09-25 实测本机数据正是这种:
+//!   的子集 → 仅从 input 扣 cache;reasoning 留在 output(本项目是四桶).
+//!   2026-09-25 实测本机数据正是这种:
 //!   input 22822 含 cacheRead 19264,total 22948 = 22822+126);
 //! - legacy 无 total,无条件扣;
-//! - 现代且 total 与 input+output 不等(加法式)→ 原样通过.
+//! - 加法式 total 若单列 reasoning,并入 output;否则 output 已含 reasoning.
 
 use std::path::{Path, PathBuf};
 
@@ -101,16 +102,17 @@ pub fn collect_conn(con: &Connection) -> Result<Vec<UsageRecord>, String> {
             Some(t) => t == input + output,
             None => true, // legacy:无条件按 exclusive 扣
         };
-        if exclusive && (cr + cw > 0 || reasoning > 0) {
+        if exclusive {
             input = (input - cr - cw).max(0);
-            output = (output - reasoning).max(0);
+        } else if total == Some(input + output + cr + cw + reasoning) {
+            output += reasoning;
         }
         let tokens = TokenBreakdown {
             input,
             output,
             cache_read: cr,
             cache_write: cw,
-            reasoning,
+            reasoning: reasoning.min(output),
         };
         if tokens.is_zero() {
             continue;
@@ -169,7 +171,7 @@ mod tests {
              input_tokens, output_tokens, reasoning_tokens, cache_read_input_tokens,
              cache_creation_input_tokens, computed_total_tokens)
              VALUES ('u1','GLM-5.3-Flash',1790293392603,1790293400467,7864,
-             22822,126,0,19264,0,22948)",
+             22822,126,30,19264,0,22948)",
             [],
         )
         .unwrap();
@@ -177,6 +179,7 @@ mod tests {
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].tokens.input, 22822 - 19264);
         assert_eq!(recs[0].tokens.output, 126);
+        assert_eq!(recs[0].tokens.reasoning, 30);
         assert_eq!(recs[0].tokens.cache_read, 19264);
         assert_eq!(recs[0].tokens.total(), 22_948);
         assert_eq!(recs[0].ts_ms, 1_790_293_392_603);
@@ -198,6 +201,12 @@ mod tests {
         assert_eq!(recs[0].tokens.input, 100);
         assert_eq!(recs[0].tokens.output, 50);
         assert_eq!(recs[0].tokens.reasoning, 10);
+        assert_eq!(recs[0].tokens.total(), 350);
+        con.execute("UPDATE model_usage SET computed_total_tokens = 360", [])
+            .unwrap();
+        let recs = collect_conn(&con).unwrap();
+        assert_eq!(recs[0].tokens.output, 60);
+        assert_eq!(recs[0].tokens.total(), 360);
     }
 
     #[test]
@@ -213,7 +222,9 @@ mod tests {
         .unwrap();
         let recs = collect_conn(&con).unwrap();
         assert_eq!(recs[0].tokens.input, 100);
-        assert_eq!(recs[0].tokens.output, 10);
+        assert_eq!(recs[0].tokens.output, 40);
+        assert_eq!(recs[0].tokens.reasoning, 30);
+        assert_eq!(recs[0].tokens.total(), 340);
         // started 缺失 → completed - duration
         assert_eq!(recs[0].ts_ms, 500);
     }

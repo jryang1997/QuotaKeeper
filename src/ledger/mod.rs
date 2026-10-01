@@ -159,7 +159,7 @@ pub struct LedgerReport {
 }
 
 pub fn collect(now: DateTime<Local>) -> LedgerReport {
-    let home = home_dir();
+    let home = crate::paths::home_dir();
     let mut records: Vec<UsageRecord> = Vec::new();
     let mut sources = Vec::new();
     let mut active_files = HashSet::new();
@@ -300,15 +300,9 @@ fn file_sig(path: &Path) -> Option<FileSig> {
     Some((mtime, meta.len()))
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
-
 pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerReport {
-    records.retain(|r| r.ts_ms > 0);
+    let now_ms = now.timestamp_millis();
+    records.retain(|r| r.ts_ms > 0 && r.ts_ms <= now_ms);
     let today = now.date_naive();
     let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
     let month_prefix = today.format("%Y-%m").to_string();
@@ -331,7 +325,6 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut weekday = [0i64; 7];
     let mut weekday_hour = [[0i64; 24]; 7];
     let mut recent60 = 0i64; // 近 60 分钟 token 合计(燃烧率)
-    let now_ms = now.timestamp_millis();
     let recent60_since = now_ms - 3_600_000;
     let trend_start = now_ms - 24 * 3_600_000;
     let mut recent_raw: HashMap<&'static str, (Agg, i64)> = HashMap::new();
@@ -361,7 +354,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 entry.1 += 1;
             }
         }
-        if date >= today - Duration::days(1) && date <= today && r.ts_ms <= now_ms {
+        if date >= today - Duration::days(1) && date <= today {
             let entry = intraday_raw
                 .entry((date_str.clone(), ts.with_timezone(&Local).hour() as u8, r.client))
                 .or_default();
@@ -373,11 +366,9 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         if date_str == today_str {
             today_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
         }
-        if r.ts_ms <= now_ms {
-            last_activity_ms = Some(last_activity_ms.map_or(r.ts_ms, |last| last.max(r.ts_ms)));
-        }
+        last_activity_ms = Some(last_activity_ms.map_or(r.ts_ms, |last| last.max(r.ts_ms)));
         // 滚动小时桶与最近一小时只接纳已发生的记录。
-        if r.ts_ms >= trend_start && r.ts_ms <= now_ms {
+        if r.ts_ms >= trend_start {
             let bucket = ((r.ts_ms - trend_start) / 3_600_000).min(23) as usize;
             trend_raw[bucket].entry(r.client).or_default().add(
                 &r.tokens,
@@ -385,7 +376,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 r.cost_is_estimate,
             );
         }
-        if r.ts_ms >= recent60_since && r.ts_ms <= now_ms {
+        if r.ts_ms >= recent60_since {
             recent60 += r.tokens.total();
             let entry = recent_raw.entry(r.client).or_default();
             entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
@@ -1033,6 +1024,31 @@ mod tests {
         let rep = aggregate(records, now());
         let omp = rep.by_agent.iter().find(|a| a.client == "omp").unwrap();
         assert_eq!(omp.models[0].0, "big");
+    }
+
+    #[test]
+    fn every_view_excludes_future_records() {
+        let n = now();
+        let at = n.timestamp_millis();
+        let records = [at, at + 1, at + 86_400_000].map(|ts_ms| {
+            let mut r = rec("codex", "m", ts_ms, TokenBreakdown { input: 10, ..Default::default() });
+            r.session = Some(format!("session-{ts_ms}"));
+            r.project = Some("project".into());
+            r
+        });
+        let rep = aggregate(records.into(), n);
+        for agg in [&rep.today, &rep.week, &rep.month, &rep.by_agent[0].agg, &rep.by_model[0].agg] {
+            assert_eq!(agg.total(), 10);
+            assert_eq!(agg.messages, 1);
+        }
+        assert_eq!(rep.analysis_rows.iter().map(|r| r.agg.total()).sum::<i64>(), 10);
+        assert_eq!(rep.intraday_rows.iter().map(|r| r.agg.total()).sum::<i64>(), 10);
+        assert_eq!(rep.daily_totals.iter().map(|r| r.tokens).sum::<i64>(), 10);
+        assert_eq!(rep.by_day.iter().map(|r| r.agg.total()).sum::<i64>(), 10);
+        assert_eq!(rep.by_session.len(), 1);
+        assert_eq!(rep.by_project[0].sessions, 1);
+        assert_eq!(rep.hourly.iter().sum::<i64>(), 10);
+        assert_eq!(rep.weekday.iter().sum::<i64>(), 10);
     }
 
     #[test]

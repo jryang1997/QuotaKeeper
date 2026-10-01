@@ -66,10 +66,11 @@ pub fn parse_str(text: &str, fallback_ts_ms: i64) -> Vec<UsageRecord> {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        // 会话头:session_id 与 cwd(项目维度)
+        // id 标识当前 thread;session_id 在新格式中可能是 fork 的 root。
         if v.get("type").and_then(|t| t.as_str()) == Some("session_meta") {
             session = v
-                .pointer("/payload/session_id")
+                .pointer("/payload/id")
+                .or_else(|| v.pointer("/payload/session_id"))
                 .and_then(|x| x.as_str())
                 .map(String::from);
             project = v
@@ -254,6 +255,32 @@ mod tests {
         assert_eq!(recs[0].tokens.cache_read, 500); // 钳到 input
         assert_eq!(recs[0].tokens.input, 0);
         assert_eq!(recs[0].tokens.reasoning, 30); // 钳到 output
+    }
+
+    #[test]
+    fn session_meta_keeps_threads_distinct_and_accepts_legacy_id() {
+        for (header, expected) in [
+            (
+                r#"{"type":"session_meta","payload":{"id":"thread","cwd":"project"}}"#,
+                "thread",
+            ),
+            (
+                r#"{"type":"session_meta","payload":{"id":"fork","session_id":"root","cwd":"project"}}"#,
+                "fork",
+            ),
+            (
+                r#"{"type":"session_meta","payload":{"session_id":"legacy","cwd":"project"}}"#,
+                "legacy",
+            ),
+        ] {
+            let text = format!(
+                "{header}\n{}",
+                line("2026-09-23T07:30:20Z", 100, 100, 0, 1, 0)
+            );
+            let recs = parse_str(&text, 0);
+            assert_eq!(recs[0].session.as_deref(), Some(expected));
+            assert_eq!(recs[0].project.as_deref(), Some("project"));
+        }
     }
 
     #[test]

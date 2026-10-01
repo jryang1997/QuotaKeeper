@@ -17,7 +17,7 @@ Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — 
 
 ## What it does
 
-For heavy users of AI coding CLIs (Claude Code, Codex, OpenCode, z.ai GLM, Kimi, DeepSeek…): quotas are pulled directly from each provider's official/login-state endpoints, the token ledger reads local session files, and USD pricing uses LiteLLM's public price list (7-day cache). Everything stays on your machine — no telemetry, no upload.
+For heavy users of AI coding CLIs (Claude Code, Codex, OpenCode, z.ai GLM, Kimi, DeepSeek…): quotas are pulled directly from each provider's official/login-state endpoints, the token ledger reads local session files, and USD pricing uses LiteLLM's public price list (refreshed in the background every 24 hours, with offline cache). Everything stays on your machine — no telemetry, no upload.
 
 A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 
@@ -28,7 +28,7 @@ A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 
 ## Data sources
 
-### Quota (six cards, collected independently)
+### Quota (collected independently)
 
 | Card | Path | Credentials |
 |---|---|---|
@@ -38,6 +38,10 @@ A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 | Antigravity | Google upstream via [CPA](https://github.com/luispater/CLIProxyAPI) | `~/.tui-token-monitor/cpa-key` |
 | Claude Pro/Max | official `oauth/usage` endpoint | Claude Code login (`~/.claude/.credentials.json`) |
 | Cursor | usage-summary (undocumented endpoint) | Cursor login (state.vscdb / `cursor-agent login`) |
+| GLM Coding | z.ai / bigmodel monitor endpoint | `GLM_API_KEY`; global region also needs `GLM_API_BASE=https://api.z.ai` |
+| Kimi Coding (in development) | coding usage endpoint | `KIMI_CODE_API_KEY` (Kimi For Coding, not a Moonshot platform key) |
+
+GLM/Kimi key inputs are not yet wired into Settings; set the environment variable and restart. DeepSeek API balance is displayed separately from subscription quota.
 
 Cards with a billing cycle (GOAT / Codex / Cursor) show their **subscription end date** and fire tiered system reminders 7/3/1 days before expiry (deduplicated; silent after renewal). See the [subscription-period research notes](docs/research/subscription-period-sources.md).
 
@@ -47,7 +51,7 @@ Codex sessions, OMP stats.db, OpenCode db, ZCode db, DeepSeek Harness zstd sessi
 
 > **Unofficial endpoints**: Codex wham, GOAT `/alpha/billing`, and Google `retrieveUserQuotaSummary` are undocumented internal APIs with no stability guarantee. Failures degrade to a Missing card only. Primary-source research notes live in [docs/research/](docs/research/).
 
-Outbound requests honor `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`.
+External requests honor `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`. Loopback requests, including local CPA, bypass environment proxies and do not follow redirects.
 
 ## Install
 
@@ -92,6 +96,8 @@ cargo run --example ledger_smoke
 ```
 
 ## Acknowledgements and sources
+
+The [2026-10-01 code audit](docs/research/codebase-audit-2026-10-01.md) and [competitor comparison](docs/research/codebase-audit-landscape-2026-10-01.md) record fixes and priorities. Pricing refreshes in the background every 24 hours; offline reads use the existing cache. Consumed cache buckets without prices remain unpriced. All ledger views stop at collection time. CSV prefixes formula-like text with an apostrophe for spreadsheet viewing; JSON preserves the original text. Spreadsheet re-saving may change CSV escaping.
 
 Research for quota collection and presentation drew on the public implementations and documentation of [CodexBar](https://github.com/steipete/CodexBar), [CodeBurn](https://github.com/getagentseal/codeburn), [tokscale](https://github.com/junhoyeo/tokscale), and [ccusage](https://github.com/ccusage/ccusage). See the [research notes](docs/research/) for data sources and tradeoffs, and the [logo provenance](gui/frontend/public/logos/README.md) for brand assets.
 
