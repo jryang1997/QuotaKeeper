@@ -10,6 +10,7 @@ fn main() {
         period: tui_token_monitor::ui::overview::Period::Today,
         sel_agent: None, sel_day: None, sel_trend: None, sel_heat: None,
         chart_mode: true,
+        quota_remaining: false,
         trend_range: tui_token_monitor::ui::TrendRange::H24,
         trend_metric: tui_token_monitor::ui::TrendMetric::Tokens,
         dim: 0, model_offset: 0, tick: 0, show_help: false,

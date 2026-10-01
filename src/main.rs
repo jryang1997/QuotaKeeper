@@ -121,6 +121,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
     let mut sel_trend: Option<usize> = None;
     let mut sel_heat: Option<String> = None;
     let mut chart_mode = true;
+    // 配额页口径:false 已用 / true 剩余(u 或点击 tabs 切换,会话内有效)
+    let mut quota_remaining = false;
     let mut trend_range = TrendRange::H24;
     let mut trend_metric = TrendMetric::Tokens;
     let mut dim: usize = 0; // 用量页维度:0 Agent / 1 会话 / 2 项目 / 3 模型
@@ -183,6 +185,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
             sel_trend,
             sel_heat: sel_heat.as_deref(),
             chart_mode,
+            quota_remaining,
             trend_range,
             trend_metric,
             dim,
@@ -222,6 +225,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         chart_mode = !chart_mode;
                         sel_day = None;
                         sel_trend = None;
+                    }
+                    KeyCode::Char('u') if page == Page::Quota => {
+                        quota_remaining = !quota_remaining;
                     }
                     KeyCode::Char('t') if page == Page::Usage => {
                         trend_range = match trend_range {
@@ -334,6 +340,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                         }
                         Some(ui::Hit::PeriodTab(p)) => {
                             period = p;
+                        }
+                        Some(ui::Hit::QuotaMode(remaining)) => {
+                            quota_remaining = remaining;
                         }
                         Some(ui::Hit::ToggleChart) => {
                             chart_mode = !chart_mode;

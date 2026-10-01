@@ -11,9 +11,10 @@ use ratatui::{
 };
 
 use crate::model::{Card, Limit, Status, format_countdown};
-use crate::ui::ViewState;
+use crate::ui::{HitRegions, ViewState};
 use crate::ui::i18n;
 use crate::ui::theme as t;
+use crate::ui::disp_w;
 
 fn status_color(s: Status) -> Color {
     let th = t::get();
@@ -36,11 +37,13 @@ fn reset_text(l: &Limit) -> String {
         .unwrap_or_else(|| "reset —".to_string())
 }
 
-fn limit_text_line(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Line<'_> {
+fn limit_text_line(l: &Limit, now: chrono::DateTime<chrono::Local>, remaining: bool) -> Line<'_> {
+    // remaining 模式显示剩余口径;状态色仍按已用阈值,是窗口健康度信号
+    let pct = if remaining { 100.0 - l.used_pct } else { l.used_pct };
     let mut spans = vec![
         Span::raw(l.label.clone()),
         Span::styled(
-            format!("  {:.0}%", l.used_pct),
+            format!("  {:.0}%", pct),
             Style::default()
                 .fg(status_color(l.status))
                 .add_modifier(Modifier::BOLD),
@@ -60,10 +63,11 @@ fn limit_text_line(l: &Limit, now: chrono::DateTime<chrono::Local>) -> Line<'_> 
     Line::from(spans)
 }
 
-/// 粗块条:█ 实 / ░ 虚,占满 inner 宽度。
-fn limit_bar_line(l: &Limit, width: u16) -> Line<'static> {
+/// 粗块条:█ 实 / ░ 虚,占满 inner 宽度。remaining 模式条长 = 剩余量(燃料表)。
+fn limit_bar_line(l: &Limit, width: u16, remaining: bool) -> Line<'static> {
     let width = width.max(4) as usize;
-    let filled = ((l.used_pct / 100.0).clamp(0.0, 1.0) * width as f64).round() as usize;
+    let pct = if remaining { 100.0 - l.used_pct } else { l.used_pct };
+    let filled = ((pct / 100.0).clamp(0.0, 1.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     Line::from(vec![
         Span::styled(
@@ -172,8 +176,42 @@ fn compact_height(card: &Card) -> u16 {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, st: &ViewState) {
-    render_cards(frame, area, st);
+pub fn render(frame: &mut Frame, area: Rect, st: &ViewState, hits: &mut HitRegions) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+    render_mode_tabs(frame, rows[0], st.quota_remaining, hits);
+    render_cards(frame, rows[1], st);
+}
+
+/// 口径 tabs:[已用] 剩余 — 激活项方括号 accent 加粗,非激活 dim,样式同总览页周期 tabs。
+fn render_mode_tabs(frame: &mut Frame, area: Rect, remaining: bool, hits: &mut HitRegions) {
+    let tabs = [(false, i18n::K::QuotaUsed), (true, i18n::K::QuotaRemaining)];
+    let mut spans = Vec::with_capacity(tabs.len() * 2);
+    let mut x = area.x;
+    for &(is_remaining, key) in &tabs {
+        let label = i18n::t(key);
+        let w = disp_w(label) + 2; // 方括号
+        let active = is_remaining == remaining;
+        let text = if active {
+            format!("[{label}]")
+        } else {
+            format!(" {label} ")
+        };
+        hits.quota_mode_tabs.push((Rect { x, y: area.y, width: w, height: 1 }, is_remaining));
+        spans.push(Span::styled(
+            text,
+            if active {
+                Style::default().fg(t::get().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t::get().dim)
+            },
+        ));
+        spans.push(Span::raw("  "));
+        x += w + 2;
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// 配额卡月度行:provider → 本机账本 client(仅三卡有;GOAT 官方口径/Cursor 无账本数据).
@@ -224,6 +262,7 @@ fn card_title(r: &crate::model::Report) -> String {
 
 fn render_cards(frame: &mut Frame, area: Rect, st: &ViewState) {
     let th = t::get();
+    let remaining = st.quota_remaining;
     let Some(snap) = st.snapshot else {
         frame.render_widget(Paragraph::new(i18n::t(i18n::K::Loading)), area);
         return;
@@ -238,10 +277,10 @@ fn render_cards(frame: &mut Frame, area: Rect, st: &ViewState) {
             .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
             .split(area);
         let middle = snap.cards.len().div_ceil(2);
-        render_card_list(frame, columns[0], &snap.cards[..middle], th, true, st.ledger);
-        render_card_list(frame, columns[1], &snap.cards[middle..], th, true, st.ledger);
+        render_card_list(frame, columns[0], &snap.cards[..middle], th, true, st.ledger, remaining);
+        render_card_list(frame, columns[1], &snap.cards[middle..], th, true, st.ledger, remaining);
     } else {
-        render_card_list(frame, area, &snap.cards, th, compact, st.ledger);
+        render_card_list(frame, area, &snap.cards, th, compact, st.ledger, remaining);
     }
 }
 
@@ -252,6 +291,7 @@ fn render_card_list(
     th: &t::Theme,
     compact: bool,
     ledger: Option<&crate::ledger::LedgerReport>,
+    remaining: bool,
 ) {
     let constraints: Vec<Constraint> = cards
         .iter()
@@ -269,16 +309,16 @@ fn render_card_list(
         .split(area);
     for (card, a) in cards.iter().zip(areas.iter()) {
         if compact {
-            render_compact_card(frame, *a, card, th);
+            render_compact_card(frame, *a, card, th, remaining);
         } else {
-            render_card(frame, *a, card, th, ledger);
+            render_card(frame, *a, card, th, ledger, remaining);
         }
     }
 }
 
-fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme) {
+fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme, remaining: bool) {
     let Card::Live(report) = card else {
-        render_card(frame, area, card, th, None);
+        render_card(frame, area, card, th, None, remaining);
         return;
     };
     let block = Block::default()
@@ -293,12 +333,13 @@ fn render_compact_card(frame: &mut Frame, area: Rect, card: &Card, th: &t::Theme
     frame.render_widget(block, area);
     for (index, limit) in report.limits.iter().enumerate() {
         let bar_width = inner.width.saturating_sub(25).clamp(4, 14) as usize;
-        let filled = ((limit.used_pct / 100.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
+        let pct = if remaining { 100.0 - limit.used_pct } else { limit.used_pct };
+        let filled = ((pct / 100.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
         let label: String = limit.label.chars().take(12).collect();
         let line = Line::from(vec![
             Span::raw(format!("{label} ")),
             Span::styled(
-                format!("{:.0}% ", limit.used_pct),
+                format!("{:.0}% ", pct),
                 Style::default()
                     .fg(status_color(limit.status))
                     .add_modifier(Modifier::BOLD),
@@ -334,6 +375,7 @@ fn render_card(
     card: &Card,
     th: &t::Theme,
     ledger: Option<&crate::ledger::LedgerReport>,
+    remaining: bool,
 ) {
     match card {
         Card::Live(r) => {
@@ -375,8 +417,8 @@ fn render_card(
                 .split(inner)
                 .to_vec();
             for (l, pair) in r.limits.iter().zip(rows.chunks(2)) {
-                frame.render_widget(Paragraph::new(limit_text_line(l, now)), pair[0]);
-                frame.render_widget(Paragraph::new(limit_bar_line(l, inner.width)), pair[1]);
+                frame.render_widget(Paragraph::new(limit_text_line(l, now, remaining)), pair[0]);
+                frame.render_widget(Paragraph::new(limit_bar_line(l, inner.width, remaining)), pair[1]);
             }
             if let Some(row) = rows.last()
                 && let Some(Some((_, agg))) = monthly_row(card, ledger).as_ref().map(|m| m.as_ref().map(|(c, a)| (*c, a.clone())))
@@ -420,6 +462,10 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     fn view<'a>(snap: &'a crate::model::Snapshot) -> ViewState<'a> {
+        view_mode(snap, false)
+    }
+
+    fn view_mode<'a>(snap: &'a crate::model::Snapshot, quota_remaining: bool) -> ViewState<'a> {
         ViewState {
             page: Page::Quota,
             snapshot: Some(snap),
@@ -433,6 +479,7 @@ mod tests {
             sel_trend: None,
             sel_heat: None,
             chart_mode: false,
+            quota_remaining,
             trend_range: crate::ui::TrendRange::H24,
             trend_metric: crate::ui::TrendMetric::Tokens,
             dim: 0,
@@ -508,5 +555,55 @@ mod tests {
         assert!(text.contains("OpenCodeGo"), "缺 Go 卡");
         assert!(text.contains("GOAT"), "缺 GOAT 卡");
         assert!(text.contains('█') && text.contains('░'), "缺块条");
+    }
+
+    /// 剩余/已用切换:数字翻转(fixture codex 5h 窗口 7% → 剩余 93%),tabs 命中区就位。
+    #[test]
+    fn remaining_mode_flips_percent_and_registers_tabs() {
+        let s = snap();
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        let mut hits = HitRegions::default();
+        term.draw(|f| crate::ui::render(f, &view_mode(&s, true), &mut hits))
+            .unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect::<String>()
+            .split_whitespace()
+            .collect();
+        // tabs 行:剩余为激活项
+        assert!(text.contains("[剩余]"), "缺激活的剩余 tab");
+        assert!(text.contains("已用"), "缺已用 tab");
+        // codex "5 hours" 7% used → 93% remaining
+        assert!(text.contains("93%"), "剩余模式应显示 93%");
+        // 已用模式反之
+        let mut hits2 = HitRegions::default();
+        let backend2 = TestBackend::new(100, 24);
+        let mut term2 = Terminal::new(backend2).unwrap();
+        term2.draw(|f| crate::ui::render(f, &view_mode(&s, false), &mut hits2))
+            .unwrap();
+        let text2: String = term2
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect::<String>()
+            .split_whitespace()
+            .collect();
+        assert!(text2.contains("[已用]"), "缺激活的已用 tab");
+        assert!(text2.contains("7%"), "已用模式应显示 7%");
+        // 两个 tab 命中区都注册,命中返回 QuotaMode
+        assert_eq!(hits2.quota_mode_tabs.len(), 2, "缺模式 tabs 命中区");
+        let (rect, remaining) = hits2.quota_mode_tabs[1];
+        assert!(remaining, "第二个 tab 应为剩余视图");
+        assert!(matches!(
+            hits2.hit(rect.x, rect.y),
+            Some(crate::ui::Hit::QuotaMode(true))
+        ));
     }
 }

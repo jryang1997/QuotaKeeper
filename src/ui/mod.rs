@@ -76,6 +76,8 @@ pub struct HitRegions {
     pub dim_tabs: Vec<(Rect, usize)>,
     /// 总览页周期 tabs → 周期
     pub period_tabs: Vec<(Rect, crate::ui::overview::Period)>,
+    /// 配额页模式 tabs → 是否剩余视图
+    pub quota_mode_tabs: Vec<(Rect, bool)>,
 }
 
 impl HitRegions {
@@ -90,6 +92,7 @@ impl HitRegions {
         self.trend_buckets.clear();
         self.dim_tabs.clear();
         self.period_tabs.clear();
+        self.quota_mode_tabs.clear();
     }
 
     pub fn hit(&self, column: u16, row: u16) -> Option<Hit> {
@@ -144,6 +147,11 @@ impl HitRegions {
                 return Some(Hit::PeriodTab(*period));
             }
         }
+        for (rect, remaining) in &self.quota_mode_tabs {
+            if rect.contains(pos) {
+                return Some(Hit::QuotaMode(*remaining));
+            }
+        }
         None
     }
 }
@@ -157,6 +165,8 @@ pub enum Hit {
     TrendBucket(usize),
     DimTab(usize),
     PeriodTab(crate::ui::overview::Period),
+    /// 配额页模式 tab:true = 剩余视图
+    QuotaMode(bool),
     AgentRow(usize),
     DayRow(usize),
     HeatCell(String),
@@ -178,6 +188,8 @@ pub struct ViewState<'a> {
     pub sel_heat: Option<&'a str>,
     /// 用量页每日:表格(false) / 柱状图(true)
     pub chart_mode: bool,
+    /// 配额页口径:false 已用 / true 剩余
+    pub quota_remaining: bool,
     pub trend_range: TrendRange,
     pub trend_metric: TrendMetric,
     /// 用量页维度:0 Agent / 1 会话 / 2 项目 / 3 模型
@@ -216,7 +228,7 @@ pub fn render(frame: &mut Frame, st: &ViewState, hits: &mut HitRegions) {
 
     match st.page {
         Page::Overview => overview::render(frame, content, st, hits),
-        Page::Quota => quota::render(frame, content, st),
+        Page::Quota => quota::render(frame, content, st, hits),
         Page::Usage => usage::render(frame, content, st, hits),
         Page::Heatmap => heatmap::render(frame, content, st, hits),
     }
@@ -329,11 +341,13 @@ fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
         (i18n::Lang::Zh, Page::Usage, true) => "↑↓ 模型 · Tab 页 · g 图 · t 时间 · c 金额 · ? 帮助",
         (i18n::Lang::Zh, Page::Usage, false) => "↑↓ 页 · g 图 · t 时间 · c 金额 · ? 帮助",
         (i18n::Lang::Zh, Page::Overview, _) => "←→ 周期 · r 刷新 · ? 帮助 · q 退出",
+        (i18n::Lang::Zh, Page::Quota, _) => "u 剩余/已用 · r 刷新 · ? 帮助 · q 退出",
         (i18n::Lang::Zh, _, _) => "↑↓ 页 · r 刷新 · ? 帮助 · q 退出",
         (i18n::Lang::En, Page::Usage, true) => {
             "↑↓ models · Tab page · g chart · t range · c cost · ? help"
         }
         (i18n::Lang::En, Page::Usage, false) => "↑↓ page · g chart · t range · c cost · ? help",
+        (i18n::Lang::En, Page::Quota, _) => "u remaining/used · r refresh · ? help · q quit",
         (i18n::Lang::En, _, _) => "↑↓ page · r refresh · ? help · q quit",
     };
     frame.render_widget(
@@ -351,7 +365,11 @@ fn footer(frame: &mut Frame, area: Rect, st: &ViewState) {
 fn help_overlay(frame: &mut Frame, page: Page, model_list_active: bool) {
     let area = frame.area();
     let width = area.width.saturating_sub(4).min(58);
-    let height = if page == Page::Usage { 9 } else { 7 };
+    let height = match page {
+        Page::Usage => 9,
+        Page::Quota => 8,
+        _ => 7,
+    };
     let rect = Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -387,6 +405,13 @@ fn help_overlay(frame: &mut Frame, page: Page, model_list_active: bool) {
             "g  图表    t  时间    c  金额    s  分类"
         } else {
             "g  chart    t  range    c  cost    s  group"
+        });
+    }
+    if page == Page::Quota {
+        lines.push(if zh {
+            "u  切换 剩余/已用 · 点击上方 tabs 同效"
+        } else {
+            "u  toggle remaining/used · tabs above"
         });
     }
     frame.render_widget(Clear, rect);
@@ -425,6 +450,7 @@ mod tests {
             sel_trend: None,
             sel_heat: None,
             chart_mode: false,
+            quota_remaining: false,
             trend_range: TrendRange::H24,
             trend_metric: TrendMetric::Tokens,
             dim: 0,

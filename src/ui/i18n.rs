@@ -72,6 +72,8 @@ pub enum K {
     SMonth,
     Last60,
     QuotaShort,
+    QuotaUsed,
+    QuotaRemaining,
     Idle,
     LastRecord,
     NoCost,
@@ -253,6 +255,20 @@ pub fn t(k: K) -> &'static str {
                 "额度"
             } else {
                 "Quota"
+            }
+        }
+        K::QuotaUsed => {
+            if zh {
+                "已用"
+            } else {
+                "Used"
+            }
+        }
+        K::QuotaRemaining => {
+            if zh {
+                "剩余"
+            } else {
+                "Remaining"
             }
         }
         K::Idle => {

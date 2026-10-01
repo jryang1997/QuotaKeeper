@@ -779,6 +779,7 @@ mod render_tests {
             sel_trend: None,
             sel_heat: None,
             chart_mode: true,
+            quota_remaining: false,
             trend_range: crate::ui::TrendRange::H24,
             trend_metric: crate::ui::TrendMetric::Tokens,
             dim: 0,

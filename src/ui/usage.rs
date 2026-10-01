@@ -1031,6 +1031,7 @@ mod tests {
             sel_trend: None,
             sel_heat: None,
             chart_mode: false,
+            quota_remaining: false,
             trend_range: super::TrendRange::H24,
             trend_metric: super::TrendMetric::Tokens,
             dim: 0,
