@@ -57,6 +57,7 @@ pub enum ProviderId {
     Antigravity,
     Claude,
     Cursor,
+    Glm,
 }
 
 impl ProviderId {
@@ -69,7 +70,7 @@ impl ProviderId {
     }
 
     /// 固定展示顺序.
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::OpenCodeGo,
             Self::Codex,
@@ -77,6 +78,7 @@ impl ProviderId {
             Self::Antigravity,
             Self::Claude,
             Self::Cursor,
+            Self::Glm,
         ]
     }
 
@@ -88,6 +90,7 @@ impl ProviderId {
             Self::Antigravity => "Antigravity · CPA",
             Self::Claude => "Claude Pro/Max",
             Self::Cursor => "Cursor",
+            Self::Glm => "GLM Coding",
         }
     }
 
@@ -118,6 +121,10 @@ impl ProviderId {
                 "未找到 Cursor 登录态；启动 Cursor 编辑器或 `cursor-agent login` 后刷新",
                 "No Cursor login found; start the Cursor editor or run `cursor-agent login`, then refresh",
             ],
+            Self::Glm => [
+                "配置 GLM Coding API key（应用设置或 GLM_API_KEY）；国内 bigmodel.cn / 国际 api.z.ai 控制台可创建，国际站设 GLM_API_BASE=https://api.z.ai",
+                "Set a GLM Coding API key (app settings or GLM_API_KEY); create one in the bigmodel.cn or api.z.ai console, and set GLM_API_BASE=https://api.z.ai for the global region",
+            ],
         }
     }
 }
@@ -133,6 +140,7 @@ pub enum QuotaSource {
     OmpFallback,
     ClaudeOauth,
     CursorUsageSummary,
+    ZaiMonitorApi,
 }
 
 impl QuotaSource {
@@ -147,6 +155,7 @@ impl QuotaSource {
             Self::OmpFallback => "OMP usage --json · 兼容兜底",
             Self::ClaudeOauth => "Claude 官方 oauth/usage · 本应用直连",
             Self::CursorUsageSummary => "Cursor usage-summary · 本应用直连（未文档化接口）",
+            Self::ZaiMonitorApi => "z.ai / bigmodel 官方 monitor 接口 · 本应用直连（未文档化接口）",
         }
     }
 }
@@ -318,7 +327,7 @@ mod tests {
     #[test]
     fn fixture_parses_to_expected_percentages() {
         let snap = parse_snapshot(FIXTURE).unwrap();
-        assert_eq!(snap.cards.len(), 6);
+        assert_eq!(snap.cards.len(), 7);
         let go = match &snap.cards[0] {
             Card::Live(r) => r,
             Card::Missing { .. } => panic!("go 应为 Live"),

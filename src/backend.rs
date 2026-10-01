@@ -19,13 +19,14 @@ fn omp_candidates() -> Vec<String> {
 
 /// Fetch all providers independently. One failed source cannot erase other live cards.
 pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
-    let (codex, go, goat, cpa, claude, cursor) = std::thread::scope(|scope| {
+    let (codex, go, goat, cpa, claude, cursor, glm) = std::thread::scope(|scope| {
         let codex = scope.spawn(codex_card);
         let go = scope.spawn(crate::opencode_go::fetch_report);
         let goat = scope.spawn(crate::goat::fetch_report);
         let cpa = scope.spawn(cpa_antigravity_card);
         let claude = scope.spawn(crate::claude_quota::fetch_report);
         let cursor = scope.spawn(crate::cursor_quota::fetch_report);
+        let glm = scope.spawn(crate::glm_quota::fetch_report);
         (
             codex.join(),
             go.join(),
@@ -33,30 +34,25 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
             cpa.join(),
             claude.join(),
             cursor.join(),
+            glm.join(),
         )
     });
 
-    let mut cards = model::ProviderId::all().map(|provider| Card::Missing { provider });
-    if let Ok(Ok(report)) = codex {
-        cards[1] = Card::Live(report);
-    }
-    if let Ok(Ok(report)) = go {
-        cards[0] = Card::Live(report);
-    }
-    if let Ok(Ok(report)) = goat {
-        cards[2] = Card::Live(report);
-    }
+    let mut cards: Vec<Card> = ProviderId::all().map(|provider| Card::Missing { provider }).into();
+    fill_report(&mut cards, codex);
+    fill_report(&mut cards, go);
+    fill_report(&mut cards, goat);
     if let Ok(Some(card)) = cpa {
-        cards[3] = card;
+        place_card(&mut cards, card);
     }
-    if let Ok(Ok(report)) = claude {
-        cards[4] = Card::Live(report);
-    }
-    if let Ok(Ok(report)) = cursor {
-        cards[5] = Card::Live(report);
-    }
+    fill_report(&mut cards, claude);
+    fill_report(&mut cards, cursor);
+    fill_report(&mut cards, glm);
 
-    if (matches!(cards[0], Card::Missing { .. }) || matches!(cards[1], Card::Missing { .. }))
+    let needs_omp = [ProviderId::OpenCodeGo, ProviderId::Codex]
+        .iter()
+        .any(|p| is_missing(&cards, *p));
+    if needs_omp
         && let Ok(fallback) = omp_snapshot()
     {
         merge_missing(&mut cards, fallback.cards);
@@ -70,11 +66,37 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     }
     Ok(Snapshot {
         generated_at_ms: now_ms(),
-        cards: cards.into_iter().collect(),
+        cards,
     })
 }
 
-fn merge_missing(cards: &mut [Card; 6], fallback: Vec<Card>) {
+fn is_missing(cards: &[Card], provider: ProviderId) -> bool {
+    cards
+        .iter()
+        .any(|c| matches!(c, Card::Missing { provider: p } if *p == provider))
+}
+
+/// 把一张卡放进它 provider 对应的 Missing 槽位;没有槽位(不该发生)就丢弃.
+fn place_card(cards: &mut [Card], card: Card) {
+    let provider = match &card {
+        Card::Live(report) => report.provider,
+        Card::Missing { provider } => *provider,
+    };
+    if let Some(slot) = cards
+        .iter_mut()
+        .find(|c| matches!(c, Card::Missing { provider: p } if *p == provider))
+    {
+        *slot = card;
+    }
+}
+
+fn fill_report(cards: &mut [Card], result: std::thread::Result<anyhow::Result<Report>>) {
+    if let Ok(Ok(report)) = result {
+        place_card(cards, Card::Live(report));
+    }
+}
+
+fn merge_missing(cards: &mut [Card], fallback: Vec<Card>) {
     for card in fallback {
         let Card::Live(report) = card else { continue };
         if let Some(index) = ProviderId::all()

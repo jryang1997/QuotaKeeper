@@ -5,6 +5,7 @@ export const PROVIDER_ACCENT = {
   antigravity: 'var(--color-text-orange)',
   claude: 'var(--color-text-orange)',
   cursor: 'var(--color-text-primary)',
+  glm: 'var(--color-text-blue)',
   deepseek: '#2764d6',
 };
 
@@ -15,9 +16,9 @@ export const STATUS_COLOR = {
 };
 
 export const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', deepseek: '#2764d6',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', glm: '#2f6bff', deepseek: '#2764d6',
 };
-export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'deepseek'];
+export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'glm', 'deepseek'];
 export const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
@@ -49,12 +50,14 @@ export const QUOTA_REPAIR = {
   codex: ['登录 Codex 官方程序后刷新；应用通过 app-server 读取限额。', 'Sign in to the official Codex app and refresh; quotas come from app-server.'],
   goat: ['在设置页保存 Command Code API key，或配置 COMMAND_CODE_API_KEY；也可使用 cmdc 登录态。', 'Save a Command Code API key in Settings, set COMMAND_CODE_API_KEY, or use a cmdc login.'],
   antigravity: ['启动本机 CPA，并将管理密钥放在 ~/.tui-token-monitor/cpa-key；应用会通过 CPA 代查 Google 上游配额。', 'Start local CPA and place the management key in ~/.tui-token-monitor/cpa-key. The app reads upstream Google quotas through CPA.'],
+  glm: ['在设置页保存 GLM Coding API key（bigmodel.cn 或 api.z.ai 控制台创建）；国际站需设置环境变量 GLM_API_BASE=https://api.z.ai。', 'Save a GLM Coding API key in Settings (create one in the bigmodel.cn or api.z.ai console); for the global region set GLM_API_BASE=https://api.z.ai.'],
 };
 export const QUOTA_HINT = {
   'opencode-go': ['未连接 · 保存 Go API key 或登录 OpenCode', 'Not connected · save a Go API key or sign in to OpenCode'],
   codex: ['未连接 · 登录 Codex 后刷新', 'Not connected · sign in to Codex and refresh'],
   goat: ['未连接 · 保存 Command Code key 或登录 cmdc', 'Not connected · save a Command Code key or use cmdc login'],
   antigravity: ['未连接 · 启动 CPA 并放置管理密钥', 'Not connected · start CPA with its management key'],
+  glm: ['未连接 · 保存 GLM Coding API key', 'Not connected · save a GLM Coding API key'],
 };
 
 export const CLIENT_COLORS = {

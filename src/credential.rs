@@ -4,6 +4,7 @@
 const GO_TARGET: &str = "TuiTokenMonitor/OpenCodeGo";
 const GOAT_TARGET: &str = "TuiTokenMonitor/CommandCodeGoat";
 const DEEPSEEK_TARGET: &str = "TuiTokenMonitor/DeepSeek";
+const GLM_TARGET: &str = "TuiTokenMonitor/Glm";
 
 pub fn valid_api_key(key: &str) -> bool {
     let trimmed = key.trim();
@@ -196,6 +197,44 @@ pub fn delete_deepseek_key() -> anyhow::Result<()> {
 
 pub fn has_deepseek_key() -> bool {
     deepseek_key().ok().flatten().is_some()
+}
+
+pub fn glm_key() -> anyhow::Result<Option<String>> {
+    #[cfg(windows)]
+    {
+        win::read(GLM_TARGET)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
+}
+
+pub fn set_glm_key(key: &str) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        win::write(GLM_TARGET, key)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = key;
+        anyhow::bail!("Windows Credential Manager unavailable")
+    }
+}
+
+pub fn delete_glm_key() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        win::delete(GLM_TARGET)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
+pub fn has_glm_key() -> bool {
+    glm_key().ok().flatten().is_some()
 }
 
 #[cfg(test)]
