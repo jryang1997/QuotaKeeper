@@ -14,7 +14,7 @@ import { fetchExchangeRate, readExchangeRates } from './currency.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import PanelsPage from './PanelsPage.jsx';
 import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
-import { MotionProvider, useMotionPreference } from './ui-motion.jsx';
+import { MotionProvider, useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 import { CONTROL_SPRING, FADE } from './motion-tuning.js';
 import { Card } from '@astryxdesign/core/Card';
 import { Text } from '@astryxdesign/core/Text';
@@ -306,7 +306,7 @@ function App() {
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onSetQuotaMode={(value) => updatePreference('quotaRemainingView', value)} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
       {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} reduceMotion={preferences.motion === 'reduced'} onOpenSettings={() => setPage('settings')} />}
       {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} />}
     </>
@@ -345,6 +345,18 @@ function App() {
         <div className="main-toolbar">
           <Text weight="medium" className="page-title">{t(page === 'quota' ? 'nav_quota' : page === 'usage' ? 'nav_usage' : page === 'heat' ? 'nav_heat' : 'nav_settings')}</Text>
           <div className="main-toolbar-spacer" />
+          {page === 'quota' && <div className="quota-mode-seg">
+            <SelectionGroup>
+              <div className="usage-segment" role="group" aria-label={lang === 0 ? '额度口径' : 'Quota metric'}>
+                <button type="button" className={!preferences.quotaRemainingView ? 'is-selected' : ''} aria-pressed={!preferences.quotaRemainingView} onClick={() => updatePreference('quotaRemainingView', false)}>
+                  {!preferences.quotaRemainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_used')}</span>
+                </button>
+                <button type="button" className={preferences.quotaRemainingView ? 'is-selected' : ''} aria-pressed={!!preferences.quotaRemainingView} onClick={() => updatePreference('quotaRemainingView', true)}>
+                  {preferences.quotaRemainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_remaining')}</span>
+                </button>
+              </div>
+            </SelectionGroup>
+          </div>}
           <button className="toolbar-theme" type="button" onClick={cycleTheme} title={`${t('theme_quick')} (P)`} aria-label={`${t('theme_quick')}: ${t(`theme_${preferences.theme}`)}`}>
             <span className={`toolbar-theme-swatch toolbar-theme-${preferences.theme}`} aria-hidden="true" />
             <span>{t(`theme_${preferences.theme}`)}</span>

@@ -7,7 +7,7 @@ import { PROVIDER_ACCENT, STATUS_COLOR, PROVIDER_LOGOS, SOURCE_PATHS, QUOTA_HINT
 import BlockBar from './BlockBar.jsx';
 import { AnimatePresence, motion } from 'motion/react';
 import AnimatedNumber from './AnimatedNumber.jsx';
-import { useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
+import { useMotionPreference } from './ui-motion.jsx';
 import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
 
 function quotaPace(limit) {
@@ -231,7 +231,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
   );
 }
 
-export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onSetQuotaMode, onTogglePin, onToggleHidden, onOpenSettings }) {
+export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
   const t = (key) => STR[key][lang];
   const [selectedSource, setSelectedSource] = useState(null);
   const sourceDetail = sources?.find((source) => source.client === selectedSource);
@@ -256,18 +256,6 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
         <span className="eyebrow">// {t('quota_overview')}</span>
         <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
         <p>{tightest ? `${attention ? `${attention} ${t('quota_attention')}` : t('quota_all_clear')} · ${nextReset ? `${t('quota_next_reset')} ${fmtCountdown(nextReset.resets_in_ms)}` : '—'}` : t('empty_quota')}</p>
-        <div className="quota-mode-seg">
-          <SelectionGroup>
-            <div className="usage-segment" role="group" aria-label={remainingView ? t('quota_used') : t('quota_remaining')}>
-              <button type="button" className={!remainingView ? 'is-selected' : ''} aria-pressed={!remainingView} onClick={() => onSetQuotaMode?.(false)}>
-                {!remainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_used')}</span>
-              </button>
-              <button type="button" className={remainingView ? 'is-selected' : ''} aria-pressed={remainingView} onClick={() => onSetQuotaMode?.(true)}>
-                {remainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_remaining')}</span>
-              </button>
-            </div>
-          </SelectionGroup>
-        </div>
       </div>
       <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(heroPct)}% ${meterLabel}` : undefined}>
         <QuotaRing pct={heroPct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
