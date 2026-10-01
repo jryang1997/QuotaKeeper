@@ -297,8 +297,8 @@ html[data-theme='dark'] { color-scheme: dark; }
 
 /* Command Code 式分块条:填充=状态色,空块=同色淡影,代替平滑药丸条 */
 .block-bar { display: flex; gap: 2px; height: 13px; }
-.block-bar-cell { flex: 1 1 0; border-radius: 2px; background: color-mix(in srgb, var(--bar-tone) 15%, transparent); transition: background 240ms var(--spring); }
-.block-bar-cell.is-filled { background: var(--bar-tone); }
+/* 填充态由 motion 驱动 opacity(弹簧,可中断);实体格常驻纯色,空格即 15% 透明 */
+.block-bar-cell { flex: 1 1 0; border-radius: 2px; background: var(--bar-tone); }
 
 .quota-missing { padding: 6px 0 2px; }
 .quota-missing-hint { line-height: 1.6; }

@@ -1,5 +1,5 @@
 import ModuleBoard from './ModuleBoard.jsx';
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card } from '@astryxdesign/core/Card';
 import { Text } from '@astryxdesign/core/Text';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
@@ -107,16 +107,21 @@ const RING_SEGMENTS = 24;
 
 // hero 分块环:24 段,pathLength=360 使 dasharray 直接用角度(每段 15°)。
 // 填充 = round(pct/100×24) 段状态色;空段 = 同色 15% 透明(与套餐卡分块条同语言)。
+// 大幅翻转(已用↔剩余)按顺时针波浪 stagger,日常刷新 ±1 段即时弹簧。
 function QuotaRing({ pct, tone }) {
+  const reduced = useMotionPreference();
   // 每段 15° 槽位:10° 实块 + 5° 间隙;平头(butt)让分块缝隙清晰可见
   const seg = 10;
   const gap = 15 - seg;
   const filled = Math.max(0, Math.min(RING_SEGMENTS, Math.round(pct / 100 * RING_SEGMENTS)));
+  const prev = useRef(filled);
+  const wave = Math.abs(filled - prev.current) > 3;
+  prev.current = filled;
   const track = Array(RING_SEGMENTS).fill(`${seg} ${gap}`).join(' ');
   return (
     <svg className="quota-ring" viewBox="0 0 116 116" aria-hidden="true">
       <circle className="quota-ring-track" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={track} style={{ color: tone }} />
-      {Array.from({ length: RING_SEGMENTS }, (_, index) => <motion.circle key={index} className="quota-ring-fill" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={`${seg} ${360 - seg}`} strokeDashoffset={-index * 15} style={{ color: tone }} initial={false} animate={{ opacity: index < filled ? 1 : 0 }} transition={FADE} />)}
+      {Array.from({ length: RING_SEGMENTS }, (_, index) => <motion.circle key={index} className="quota-ring-fill" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={`${seg} ${360 - seg}`} strokeDashoffset={-index * 15} style={{ color: tone }} initial={false} animate={{ opacity: index < filled ? 1 : 0 }} transition={reduced ? FADE : { ...LAYOUT_SPRING, delay: wave ? index * 0.012 : 0 }} />)}
     </svg>
   );
 }
@@ -201,7 +206,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
                       <span className="quota-limit-pct" style={{ color: isActivity ? accent : STATUS_COLOR[l.status] }}>
                         {isActivity
                           ? (l.used_pct >= 100 ? t('activity_at_least_average') : `${pct}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}`)
-                          : l.used_pct >= 100 && !remainingView ? '100%' : `${pct}%`}
+                          : <AnimatedNumber value={barPct} format={(value) => `${Math.round(value)}%`} />}
                       </span>
                     </div>
                     <BlockBar pct={barPct} color={isActivity ? accent : STATUS_COLOR[l.status]} />
@@ -259,7 +264,7 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
       </div>
       <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(heroPct)}% ${meterLabel}` : undefined}>
         <QuotaRing pct={heroPct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
-        <strong>{tightest ? `${Math.round(heroPct)}%` : '—'}</strong>
+        <strong>{tightest ? <AnimatedNumber value={heroPct} format={(value) => `${Math.round(value)}%`} /> : '—'}</strong>
         <span>{meterLabel}</span>
       </div>
     </section>) },
