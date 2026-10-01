@@ -7,7 +7,7 @@ import { PROVIDER_ACCENT, STATUS_COLOR, PROVIDER_LOGOS, SOURCE_PATHS, QUOTA_HINT
 import BlockBar from './BlockBar.jsx';
 import { AnimatePresence, motion } from 'motion/react';
 import AnimatedNumber from './AnimatedNumber.jsx';
-import { useMotionPreference } from './ui-motion.jsx';
+import { useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
 
 function quotaPace(limit) {
@@ -157,7 +157,7 @@ function DeepSeekBalanceCard({ balance, lang, pinned, accent, onTogglePin, onTog
   </Card>;
 }
 
-function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings }) {
+function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, remainingView = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings }) {
   const t = (k) => STR[k][lang];
   const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   return (
@@ -191,7 +191,9 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
                 {c.limits.length === 0 && <Text type="supporting" className="quota-missing-hint">{lang === 0 ? '暂无额度窗口' : 'No quota windows'}</Text>}
                 {c.limits.map((l) => {
                   const pace = allowPace && !isActivity ? quotaPace(l) : null;
-                  const pct = Math.round(l.used_pct);
+                  // 剩余视图只翻转真实配额窗口;activity 卡口径不同,保持已用
+                  const barPct = remainingView && !isActivity ? Math.max(0, Math.min(100, 100 - l.used_pct)) : l.used_pct;
+                  const pct = Math.round(barPct);
                   return (
                   <div key={l.label} className="quota-limit">
                     <div className="quota-limit-row">
@@ -199,10 +201,10 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
                       <span className="quota-limit-pct" style={{ color: isActivity ? accent : STATUS_COLOR[l.status] }}>
                         {isActivity
                           ? (l.used_pct >= 100 ? t('activity_at_least_average') : `${pct}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}`)
-                          : l.used_pct >= 100 ? '100%' : `${pct}%`}
+                          : l.used_pct >= 100 && !remainingView ? '100%' : `${pct}%`}
                       </span>
                     </div>
-                    <BlockBar pct={l.used_pct} color={isActivity ? accent : STATUS_COLOR[l.status]} />
+                    <BlockBar pct={barPct} color={isActivity ? accent : STATUS_COLOR[l.status]} />
                     <div className="quota-limit-sub">
                       <span>{isActivity ? t('activity_today') : l.resets_in_ms != null ? `${t('resets_in')} ${fmtCountdown(l.resets_in_ms)}` : ' '}</span>
                       {pace != null && <span className={`quota-pace${pace.eta !== 'sustainable' ? ' quota-pace-warning' : ''}`}>{paceChipText(pace, lang)}</span>}
@@ -229,7 +231,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
   );
 }
 
-export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
+export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onSetQuotaMode, onTogglePin, onToggleHidden, onOpenSettings }) {
   const t = (key) => STR[key][lang];
   const [selectedSource, setSelectedSource] = useState(null);
   const sourceDetail = sources?.find((source) => source.client === selectedSource);
@@ -244,23 +246,39 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
   const nextReset = limits.filter((limit) => limit.resets_in_ms > 0).sort((a, b) => a.resets_in_ms - b.resets_in_ms)[0];
   const attention = limits.filter((limit) => limit.status !== 'ok').length;
   const pct = tightest ? Math.max(0, Math.min(100, tightest.used_pct)) : 0;
+  // 已用/剩余口径:仅展示层翻转,状态色与重置/燃尽信息不动
+  const remainingView = preferences.quotaRemainingView === true;
+  const heroPct = remainingView ? 100 - pct : pct;
+  const meterLabel = remainingView ? t('quota_remaining') : t('quota_used');
   const modules = [
     { id: 'overview', title: t('quota_overview'), w: 12, h: 2, minW: 6, minH: 2, content: (<section className="quota-overview" aria-label={t('quota_overview')}>
       <div className="quota-overview-copy">
         <span className="eyebrow">// {t('quota_overview')}</span>
         <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
         <p>{tightest ? `${attention ? `${attention} ${t('quota_attention')}` : t('quota_all_clear')} · ${nextReset ? `${t('quota_next_reset')} ${fmtCountdown(nextReset.resets_in_ms)}` : '—'}` : t('empty_quota')}</p>
+        <div className="quota-mode-seg">
+          <SelectionGroup>
+            <div className="usage-segment" role="group" aria-label={remainingView ? t('quota_used') : t('quota_remaining')}>
+              <button type="button" className={!remainingView ? 'is-selected' : ''} aria-pressed={!remainingView} onClick={() => onSetQuotaMode?.(false)}>
+                {!remainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_used')}</span>
+              </button>
+              <button type="button" className={remainingView ? 'is-selected' : ''} aria-pressed={remainingView} onClick={() => onSetQuotaMode?.(true)}>
+                {remainingView && <SelectionHighlight />}<span className="segment-label">{t('quota_remaining')}</span>
+              </button>
+            </div>
+          </SelectionGroup>
+        </div>
       </div>
-      <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(pct)}% ${t('quota_used')}` : undefined}>
-        <QuotaRing pct={pct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
-        <strong>{tightest ? `${Math.round(pct)}%` : '—'}</strong>
-        <span>{t('quota_used')}</span>
+      <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(heroPct)}% ${meterLabel}` : undefined}>
+        <QuotaRing pct={heroPct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
+        <strong>{tightest ? `${Math.round(heroPct)}%` : '—'}</strong>
+        <span>{meterLabel}</span>
       </div>
     </section>) },
     { id: 'tokens', title: t('usage_sum_tokens'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="tokens" ledger={ledger} goat={goatUsage} lang={lang} />) },
     { id: 'requests', title: t('usage_sum_runs'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="requests" ledger={ledger} goat={goatUsage} lang={lang} />) },
-    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) })),
-    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) },
+    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) })),
+    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) },
     { id: 'sources', title: t('source_health'), w: 12, h: 3, minW: 6, minH: 2, content: (<section className="source-section" aria-label={t('source_health')}>
       <div className="source-heading"><h2>{t('source_health')}</h2></div>
       <div className="source-grid">{sources.map((source) => {

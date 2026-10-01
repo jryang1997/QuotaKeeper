@@ -14,8 +14,17 @@ test('preferences recover from invalid values and keep valid provider choices', 
   assert.equal(result.lang, 1);
   assert.equal(result.theme, 'system');
   assert.equal(result.currency, 'USD');
+  assert.equal(result.quotaRemainingView, false);
   assert.deepEqual(result.pinnedCards, ['codex']);
   assert.deepEqual(result.providerColors, { codex: '#123abc' });
+});
+
+test('quota remaining view persists only when explicitly true', () => {
+  const truthy = { getItem: () => JSON.stringify({ quotaRemainingView: true }) };
+  const falsy = { getItem: () => JSON.stringify({ quotaRemainingView: 'yes' }) };
+  assert.equal(readGuiPreferences(truthy).quotaRemainingView, true);
+  assert.equal(readGuiPreferences(falsy).quotaRemainingView, false);
+  assert.equal(readGuiPreferences({ getItem: () => null }).quotaRemainingView, false);
 });
 
 test('preference writes can fail without losing in-memory choice', () => {

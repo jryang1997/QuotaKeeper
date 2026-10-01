@@ -10,3 +10,6 @@ gui/frontend/node_modules/
 Thumbs.db
 .DS_Store
 *.swp
+
+# GUI 后台截图产物
+gui/qa/shots/

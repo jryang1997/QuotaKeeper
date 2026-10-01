@@ -934,6 +934,10 @@ html[data-theme='dark'] { color-scheme: dark; }
 .eyebrow { color: var(--color-text-secondary); font-family: var(--font-family-code); font-size: 0.6875rem; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; }
 .quota-overview h1 { margin: 12px 0 8px; font-family: var(--font-family-heading); font-size: clamp(21px, 2.2vw, 29px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.2; overflow-wrap: anywhere; }
 .quota-overview p { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); line-height: 1.55; }
+/* 口径分段控件(已用/剩余):usage-segment 的变量挂在 .usage-dashboard 作用域,这里显式补齐 */
+.quota-mode-seg { margin-top: 14px; }
+.quota-mode-seg .usage-segment { background: var(--dashboard-card-hover); }
+.quota-mode-seg .usage-segment button { color: var(--color-text-primary); }
 /* hero 分块环:SVG 24 段(QuotaRing),空段 = 状态色 16% 透明(与套餐卡分块条同语言)。 */
 .quota-overview-meter { position: relative; display: flex; flex: 0 0 116px; flex-direction: column; align-items: center; justify-content: center; width: 116px; height: 116px; }
 .quota-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
