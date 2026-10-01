@@ -16,13 +16,13 @@ if not exist "%WT%" set "WT=wt.exe"
 rem Register the dedicated profile (Sarasa Term SC) via a WT fragment,
 rem best effort. WT reads fragments at startup, so the very first run
 rem may need one WT restart before the profile is registered.
-set "FRAGDIR=%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments	ui-token-monitor"
-if exist "terminal	ui-token-monitor.json" (
+set "FRAGDIR=%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\tui-token-monitor"
+if exist "terminal\tui-token-monitor.json" (
   mkdir "%FRAGDIR%" >nul 2>&1
-  copy /Y "terminal	ui-token-monitor.json" "%FRAGDIR%\" >nul 2>&1
+  copy /Y "terminal\tui-token-monitor.json" "%FRAGDIR%\" >nul 2>&1
 )
 set "PARG="
-if exist "%FRAGDIR%	ui-token-monitor.json" set "PARG=-p tui-token-monitor"
+if exist "%FRAGDIR%\tui-token-monitor.json" set "PARG=-p tui-token-monitor"
 start "" "%WT%" -d "%CD%" %PARG% cmd /c ""%~f0" nowt"
 timeout /t 5 /nobreak >nul
 tasklist | findstr /i "tui-token-monitor.exe" >nul
@@ -38,11 +38,14 @@ goto run
 
 :run
 rem Normal exit (q) closes the window; non-zero exit pauses to show the error.
-rem Prefer the pinned GNU build, then the plain (MSVC) default path.
+rem Debug builds win so the dev loop (cargo build) is always what launches;
+rem release is the fallback for README users who ran cargo build --release.
 set "EXE=target\x86_64-pc-windows-gnu\debug\tui-token-monitor.exe"
 if not exist "%EXE%" set "EXE=target\debug\tui-token-monitor.exe"
+if not exist "%EXE%" set "EXE=target\x86_64-pc-windows-gnu\release\tui-token-monitor.exe"
+if not exist "%EXE%" set "EXE=target\release\tui-token-monitor.exe"
 if not exist "%EXE%" (
-  echo [!] %EXE% not found. Run: cargo build
+  echo [!] %EXE% not found. Run: cargo build  (or: cargo build --release)
   pause
   exit /b 1
 )
