@@ -117,7 +117,7 @@ cargo run --example quota_smoke               # 对本机真实凭据跑一遍�
 - Token 页 token 计数(本地)与配额页百分比(服务商)不同源,对不上是正常的。
 - 周一为每周起点;日界按本地时区;input/output/cache_read/cache_write 四个计数桶互不重叠,reasoning 已包含在 output 中,仅单独展示。
 - 美元估价为 LiteLLM 第三方公开价目,未逐项由厂商核验,不反映时段/上下文档位/订阅折扣;OMP 来源报告价与估价分开记录。
-- 消耗的缓存桶缺少单价时标记未估价,不按免费处理;现有后缀众数/家族兜底仍是近似值。初次无缓存时先显示本地 token 与补充价,后台下载后下一次刷新补全估价。
+- 消耗的缓存桶缺少单价时,先用厂商官方条目补缺桶(渠道价完整的桶保留),仍缺才标记未估价、不按免费处理;裸名与后缀歧义的模型回落厂商官方条目(zai/deepseek/gemini/moonshot/minimax 五族),推广短名经反向别名取价(如 deepseek-flash ↔ deepseek-v4.1-flash)。后缀众数/家族兜底仍是近似值,未逐项由厂商核验。初次无缓存时先显示本地 token 与补充价,后台下载后下一次刷新补全估价。
 - 所有账本视图与导出只统计采集时刻之前的记录。CSV 对公式前缀文本加单引号以供电子表格查看,JSON 保留原文;重新保存 CSV 后仍需遵循所用电子表格的导入规则。
 - chrono 钉 0.4.38:0.4.40+ 的 Windows Local 走 raw-dylib,在 WinLibs GCC 的 windows-gnu 目标上首次调用即崩(见根 Cargo.toml 注释)。
 

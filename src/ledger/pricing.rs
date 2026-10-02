@@ -1,7 +1,9 @@
 //! LiteLLM 开放价目数据集估价(与 tokscale 同源),磁盘缓存 + 后台自动刷新.
 //!
 //! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
-//! - 查找:精确名 → 大小写全名 → canonical 别名 → GLM 官方目录 → provider 后缀众数 → 家族兜底;
+//! - 查找:精确名 → 大小写全名 → canonical 别名 → 厂商官方条目(家族前缀,裸名) → 反向别名 → provider 后缀众数 → 家族兜底;
+//! - 官方兜底:裸名回落厂商官方条目;主条目缺消耗桶(cache_read/cache_write 无价)
+//!   时用官方条目补缺桶,渠道价完整的桶一律不动;
 //!   多个 provider 同后缀且无众数时不估价。
 
 use std::collections::{HashMap, HashSet};
@@ -47,6 +49,18 @@ pub struct Pricing {
     ambiguous_suffixes: HashSet<String>,
 }
 
+/// canonical 家族 → LiteLLM 目录里厂商官方条目的 provider 前缀。
+/// 只收录实测在目录中有官方条目的家族(zai/glm-4.5v、deepseek/deepseek-v4-flash、
+/// gemini/gemini-3.8-flash、moonshot/kimi-k2.6、minimax/MiniMax-M2.5-lightning);
+/// 没有官方条目的家族(qwen/stepfun 等)不进表,行为与从前一致。
+const OFFICIAL_PREFIXES: [(&str, &str); 5] = [
+    ("glm-", "zai"),
+    ("deepseek-", "deepseek"),
+    ("gemini-", "gemini"),
+    ("kimi-", "moonshot"),
+    ("minimax-", "minimax"),
+];
+
 #[derive(Debug, Default, Deserialize, serde::Serialize)]
 struct CacheDoc {
     #[serde(default)]
@@ -87,15 +101,55 @@ impl Pricing {
     }
 
     pub fn estimate(&self, model: &str, t: &TokenBreakdown) -> Option<f64> {
-        let p = self.lookup(model)?;
-        let mut cost = t.input as f64 * p.input + t.output as f64 * p.output;
-        if t.cache_read > 0 {
-            cost += t.cache_read as f64 * p.cache_read?;
+        let price_of = |p: &ModelPrice| -> Option<f64> {
+            let mut cost = t.input as f64 * p.input + t.output as f64 * p.output;
+            if t.cache_read > 0 {
+                cost += t.cache_read as f64 * p.cache_read?;
+            }
+            if t.cache_write > 0 {
+                cost += t.cache_write as f64 * p.cache_write?;
+            }
+            cost.is_finite().then_some(cost)
+        };
+        if let Some(p) = self.lookup(model) {
+            // 主价完整直接用;缺消耗桶(cache_read/cache_write 无价)时用官方
+            // 条目补缺桶,渠道价完整的桶一律保留,不整条换价;官方也缺则 None.
+            let needs_fill = (t.cache_read > 0 && p.cache_read.is_none())
+                || (t.cache_write > 0 && p.cache_write.is_none());
+            if !needs_fill {
+                return price_of(p);
+            }
+            if let Some(o) = self.official_entry(model) {
+                let mut eff = *p;
+                if eff.cache_read.is_none() {
+                    eff.cache_read = o.cache_read;
+                }
+                if eff.cache_write.is_none() {
+                    eff.cache_write = o.cache_write;
+                }
+                return price_of(&eff);
+            }
+            return price_of(p);
         }
-        if t.cache_write > 0 {
-            cost += t.cache_write as f64 * p.cache_write?;
+        // 查找整体落空(后缀歧义等):官方条目兜底(同 canonical 即同模型,
+        // 不存在选错价;官方条目也不在则维持 None).
+        let o = self.official_entry(model)?;
+        price_of(o)
+    }
+
+    /// 官方条目:<家族官方前缀>/<canonical>,其次裸 canonical 名;都不在目录则 None.
+    fn official_entry(&self, model: &str) -> Option<&ModelPrice> {
+        let canonical = crate::ledger::model_alias::canonical(model);
+        if canonical == "unknown" {
+            return None;
         }
-        cost.is_finite().then_some(cost)
+        let prefix = OFFICIAL_PREFIXES
+            .iter()
+            .find(|(family, _)| canonical.starts_with(family))
+            .map(|(_, prefix)| *prefix);
+        prefix
+            .and_then(|p| self.case_insensitive.get(&format!("{p}/{canonical}")))
+            .or_else(|| self.case_insensitive.get(&canonical))
     }
 
     fn lookup(&self, model: &str) -> Option<&ModelPrice> {
@@ -121,12 +175,37 @@ impl Pricing {
             return Some(price);
         }
 
-        // 裸 GLM 名用厂商 API 等值价;渠道的缓存缺项/加价不应挡住官方条目。
-        // 带 provider 的记录仍按原渠道匹配,不推断它使用了 Z.AI 端点。
-        if !model.contains('/') && canonical.starts_with("glm-")
-            && let Some(price) = self.case_insensitive.get(&format!("zai/{canonical}"))
-        {
-            return Some(price);
+        // 裸名回落厂商官方条目:目录里的官方价优先于渠道加价/缓存缺项;
+        // 裸名缺条目(effort 变体、快照名)同样由此兜住。
+        // 带 provider 的记录仍按原渠道匹配,不推断它使用了官方端点。
+        if !model.contains('/') && canonical != "unknown" {
+            let prefix = OFFICIAL_PREFIXES
+                .iter()
+                .find(|(family, _)| canonical.starts_with(family))
+                .map(|(_, prefix)| *prefix);
+            let candidates = prefix
+                .map(|p| format!("{p}/{canonical}"))
+                .into_iter()
+                .chain(std::iter::once(canonical.clone()));
+            for cand in candidates {
+                if cand != lower
+                    && let Some(price) = self.case_insensitive.get(&cand)
+                {
+                    return Some(price);
+                }
+            }
+        }
+
+        // 反向别名:目录里常有推广短名条目而无全名条目
+        // (deepseek-flash ↔ deepseek-v4.1-flash),按短名取价。
+        if canonical != "unknown" {
+            for src in crate::ledger::model_alias::source_names(&canonical) {
+                if src != lower
+                    && let Some(price) = self.case_insensitive.get(src)
+                {
+                    return Some(price);
+                }
+            }
         }
 
         let suffix = lower.rsplit('/').next().unwrap_or(&lower);
@@ -428,14 +507,78 @@ mod tests {
             ("aihubmix/glm-5.3-flash".into(), ModelPrice { input: 1.1268e-7, ..reseller }),
         ]));
         let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, cache_write: 1_000_000, ..Default::default() };
+        // 裸名直接落官方条目
         for name in ["glm-5.3-flash", "GLM-5.3-Flash"] {
             assert!((p.estimate(name, &t).expect("official GLM price") - 0.68).abs() < 1e-9);
         }
-        // Qualified reseller prices and unknown cache charges must stay intact.
-        assert_eq!(p.estimate("openrouter/z-ai/glm-5.3-flash", &t), None);
-        assert_eq!(p.estimate("nebius/zai-org/GLM-5.3-Flash", &t), None);
+        // 后缀歧义的渠道名:官方条目兜底(渠道互相打架时不放弃估价)
+        assert!((p.estimate("openrouter/z-ai/glm-5.3-flash", &t).expect("official rescue") - 0.68).abs() < 1e-9);
+        assert!((p.estimate("nebius/zai-org/GLM-5.3-Flash", &t).expect("official rescue") - 0.68).abs() < 1e-9);
+        // 裸名已有条目但缺缓存价:主价保留,官方只补缺桶 → 仍 0.68
         let p = build(HashMap::from([("glm-5.3-flash".into(), reseller), ("zai/glm-5.3-flash".into(), official)]));
-        assert_eq!(p.estimate("glm-5.3-flash", &t), None);
+        assert!((p.estimate("glm-5.3-flash", &t).expect("official fill") - 0.68).abs() < 1e-9);
+    }
+
+    #[test]
+    fn official_fill_only_touches_missing_buckets() {
+        // 多数渠道价完整时取众数价,官方不覆盖任何桶
+        let complete = ModelPrice { input: 2e-7, output: 6e-7, cache_read: Some(1e-8), cache_write: Some(2e-8) };
+        let official = ModelPrice { input: 1.5e-7, output: 5e-7, cache_read: Some(3e-8), cache_write: Some(0.0) };
+        let p = build(HashMap::from([
+            ("v1/glm-5.3-flash".into(), complete),
+            ("v2/glm-5.3-flash".into(), complete),
+            ("v3/glm-5.3-flash".into(), complete),
+            ("zai/glm-5.3-flash".into(), official),
+        ]));
+        let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, cache_write: 1_000_000, ..Default::default() };
+        assert!((p.estimate("v1/glm-5.3-flash", &t).expect("majority kept") - 0.83).abs() < 1e-9);
+        // 众数渠道缺缓存价:基础桶用渠道价,缺的桶由官方补
+        let no_cache = ModelPrice { cache_read: None, cache_write: None, ..complete };
+        let p = build(HashMap::from([
+            ("v1/glm-5.3-flash".into(), no_cache),
+            ("v2/glm-5.3-flash".into(), no_cache),
+            ("v3/glm-5.3-flash".into(), no_cache),
+            ("zai/glm-5.3-flash".into(), official),
+        ]));
+        // 0.2(in) + 0.6(out) + 0.03(官方 cr);cw 未消耗不参与
+        let t2 = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
+        assert!((p.estimate("v1/glm-5.3-flash", &t2).expect("official fills cache_read") - 0.83).abs() < 1e-9);
+    }
+
+    #[test]
+    fn deepseek_full_name_prices_via_reverse_alias() {
+        // 目录只有推广短名 deepseek-flash(官方价、缓存价完整),全名经反向别名取价
+        let p = build(HashMap::from([(
+            "deepseek-flash".into(),
+            ModelPrice { input: 3e-7, output: 1.2e-6, cache_read: Some(6e-9), cache_write: Some(0.0) },
+        )]));
+        let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
+        let expected = 0.3 + 1.2 + 0.006;
+        for name in ["deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"] {
+            assert!((p.estimate(name, &t).expect("reverse alias") - expected).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn effort_variant_prices_as_base_model() {
+        // -high 是推理力度尾缀:canonical 剥掉后按基名取价
+        let p = build(HashMap::from([(
+            "gemini-3.8-flash".into(),
+            ModelPrice { input: 7.5e-7, output: 3.75e-6, cache_read: Some(7.5e-8), cache_write: None },
+        )]));
+        let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
+        let expected = 0.75 + 3.75 + 0.075;
+        assert!((p.estimate("gemini-3.8-flash-high", &t).expect("effort variant") - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ambiguous_suffix_without_official_entry_stays_none() {
+        // 无官方条目的歧义后缀维持拒绝,官方兜底不凭空造价
+        let p = build(HashMap::from([
+            ("vendor-a/shared-model".into(), ModelPrice { input: 1.0, output: 2.0, ..Default::default() }),
+            ("vendor-b/shared-model".into(), ModelPrice { input: 3.0, output: 4.0, ..Default::default() }),
+        ]));
+        assert_eq!(p.estimate("shared-model", &TokenBreakdown { input: 10, ..Default::default() }), None);
     }
 
     #[test]

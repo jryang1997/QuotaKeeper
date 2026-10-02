@@ -43,8 +43,8 @@ fn main() {
         }
     }
 
-    // canonical 模型 → (缺价 messages, 缺价 tokens, 总 messages, 总 tokens, 客户端集合, 原始名样例)
-    let mut models: HashMap<String, (u64, i64, u64, i64, std::collections::BTreeSet<&'static str>, Vec<String>)> = HashMap::new();
+    // canonical 模型 → (缺价 messages, 缺价 tokens, 总 messages, 总 tokens, 客户端集合, 原始名样例, 缺价记录的桶拆分)
+    let mut models: HashMap<String, (u64, i64, u64, i64, std::collections::BTreeSet<&'static str>, Vec<String>, [i64; 4])> = HashMap::new();
     let now_ms = Local::now().timestamp_millis();
     for r in records.iter().filter(|r| r.ts_ms > 0 && r.ts_ms <= now_ms) {
         let key = ledger::model_alias::canonical(&r.model);
@@ -54,6 +54,12 @@ fn main() {
         if r.cost.is_none() {
             e.0 += 1;
             e.1 += r.tokens.total();
+            e.6 = [
+                e.6[0] + r.tokens.input,
+                e.6[1] + r.tokens.output,
+                e.6[2] + r.tokens.cache_read,
+                e.6[3] + r.tokens.cache_write,
+            ];
         }
         e.4.insert(r.client);
         if e.5.len() < 3 && !e.5.iter().any(|n| n == &r.model) {
@@ -76,9 +82,13 @@ fn main() {
         total_tok,
         100.0 * unpriced_tok as f64 / total_tok.max(1) as f64
     );
-    for (model, (umsg, utok, msg, _tok, clients, raws)) in rows {
+    for (model, (umsg, utok, msg, _tok, clients, raws, buckets)) in rows {
         println!(
             "  {model:<38} 缺价 {utok:>10} tok({umsg}/{msg} 条) · {clients:?} · 记录名 {raws:?}"
+        );
+        println!(
+            "      缺价桶 in={} out={} cache_read={} cache_write={}",
+            buckets[0], buckets[1], buckets[2], buckets[3]
         );
     }
 }

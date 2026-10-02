@@ -49,6 +49,13 @@ pub fn canonical(model: &str) -> String {
                 changed = true;
             }
         }
+        // 推理力度尾缀(opencode/zcode 记录 effort 的方式):同一模型同价,并入基名
+        if let Some((base, tail)) = name.rsplit_once('-') {
+            if matches!(tail, "high" | "xhigh" | "medium" | "low" | "minimal") {
+                name = base.into();
+                changed = true;
+            }
+        }
         // 日期快照尾缀:全数字段且形如日期(YYYY / YYYY-MM / YYYY-MM-DD /
         // MMDD / YYMMDD / YYYYMMDD)。纯版本号数字(如 glm-5 的 5)不剥。
         if let Some((base, snap)) = name.rsplit_once('-') {
@@ -82,6 +89,15 @@ pub fn canonical(model: &str) -> String {
     name = restore_dots(&name);
     // 5. 显式别名
     ALIAS.iter().find(|(from, _)| *from == name).map_or(name, |(_, to)| (*to).into())
+}
+
+/// 反向查别名表:canonical 名对应的原始短名(定价兜底用——目录里常有
+/// 短名条目而没有全名条目,如 deepseek-flash ↔ deepseek-v4.1-flash).
+pub fn source_names(canonical: &str) -> impl Iterator<Item = &'static str> {
+    ALIAS
+        .iter()
+        .filter(move |(_, to)| *to == canonical)
+        .map(|(from, _)| *from)
 }
 
 /// 全数字段是否形如日期快照:YYYY、MMDD、YYMMDD、YYYYMMDD。
@@ -158,6 +174,17 @@ mod tests {
         assert_eq!(canonical("glm-4-7-251222"), "glm-4-7");
         // 非日期数字段不剥(尺寸/参数名)
         assert_eq!(canonical("qwen3-235b-a22b-2507"), "qwen3-235b-a22b");
+    }
+
+    #[test]
+    fn effort_suffix_stripped() {
+        // opencode/zcode 把推理力度记进模型名:同一模型并入基名
+        assert_eq!(canonical("gemini-3.8-flash-high"), "gemini-3.8-flash");
+        assert_eq!(canonical("glm-5.3-flash-xhigh"), "glm-5.3-flash");
+        assert_eq!(canonical("deepseek-v4.1-flash-low"), "deepseek-v4.1-flash");
+        // 非力度词不剥
+        assert_eq!(canonical("deepseek-v4.1-flash"), "deepseek-v4.1-flash");
+        assert_eq!(canonical("muse-spark-1.3-contributor"), "muse-spark-1.3-contributor");
     }
 
     #[test]
