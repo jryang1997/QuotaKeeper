@@ -44,7 +44,16 @@ fn main() {
     }
 
     // canonical 模型 → (缺价 messages, 缺价 tokens, 总 messages, 总 tokens, 客户端集合, 原始名样例, 缺价记录的桶拆分)
-    let mut models: HashMap<String, (u64, i64, u64, i64, std::collections::BTreeSet<&'static str>, Vec<String>, [i64; 4])> = HashMap::new();
+    type ModelStat = (
+        u64,
+        i64,
+        u64,
+        i64,
+        std::collections::BTreeSet<&'static str>,
+        Vec<String>,
+        [i64; 4],
+    );
+    let mut models: HashMap<String, ModelStat> = HashMap::new();
     let now_ms = Local::now().timestamp_millis();
     for r in records.iter().filter(|r| r.ts_ms > 0 && r.ts_ms <= now_ms) {
         let key = ledger::model_alias::canonical(&r.model);
@@ -68,7 +77,7 @@ fn main() {
     }
 
     let mut rows: Vec<_> = models.into_iter().filter(|(_, e)| e.0 > 0).collect();
-    rows.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+    rows.sort_by_key(|(_, e)| std::cmp::Reverse(e.1));
     let total_tok: i64 = rows.iter().map(|(_, e)| e.3).sum();
     let unpriced_tok: i64 = rows.iter().map(|(_, e)| e.1).sum();
     if rows.is_empty() {

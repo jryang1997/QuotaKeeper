@@ -43,18 +43,18 @@ pub fn canonical(model: &str) -> String {
             name = stripped.into();
             changed = true;
         }
-        if let Some((base, _variant)) = name.rsplit_once(':') {
-            if !base.is_empty() {
-                name = base.into();
-                changed = true;
-            }
+        if let Some((base, _variant)) = name.rsplit_once(':')
+            && !base.is_empty()
+        {
+            name = base.into();
+            changed = true;
         }
         // 推理力度尾缀(opencode/zcode 记录 effort 的方式):同一模型同价,并入基名
-        if let Some((base, tail)) = name.rsplit_once('-') {
-            if matches!(tail, "high" | "xhigh" | "medium" | "low" | "minimal") {
-                name = base.into();
-                changed = true;
-            }
+        if let Some((base, tail)) = name.rsplit_once('-')
+            && matches!(tail, "high" | "xhigh" | "medium" | "low" | "minimal")
+        {
+            name = base.into();
+            changed = true;
         }
         // 日期快照尾缀:全数字段且形如日期(YYYY / YYYY-MM / YYYY-MM-DD /
         // MMDD / YYMMDD / YYYYMMDD)。纯版本号数字(如 glm-5 的 5)不剥。
