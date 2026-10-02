@@ -147,3 +147,16 @@
 @media (prefers-contrast: more) { .usage-dashboard .usage-surface, .usage-dashboard .usage-summary-card { border: 1px solid var(--usage-line); } }
 .usage-model-stack > i { flex-basis: 0; min-width: 0; }
 .usage-export .usage-export-trigger:active { transform: scale(0.97); transition-duration: 60ms; }
+
+/* 缓存命中率砖:大数字 + 块条,与 hero 系同构 */
+.usage-cache .block-bar { margin-top: 2px; }
+
+/* 实测速度榜:行 = 名称 / 速度条 / t/s,小字行 = 首字 + 计时次数 */
+.usage-speed { padding: 21px 23px; }
+.usage-speed-empty { color: var(--usage-muted); font-size: 12px; }
+.usage-speed-row { display: grid; grid-template-columns: minmax(85px, 1fr) minmax(55px, 1fr) auto; align-items: center; gap: 4px 10px; padding: 6px 0; font-size: 12px; }
+.usage-speed-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-speed-row strong { font-weight: 600; white-space: nowrap; }
+.usage-speed-row strong em { font-style: normal; font-weight: 450; color: var(--usage-muted); font-size: 10px; }
+.usage-speed-row small { grid-column: 1 / -1; color: var(--usage-muted); font-size: 11px; }
+.usage-list-rest { color: var(--usage-muted); font-size: 11px; }

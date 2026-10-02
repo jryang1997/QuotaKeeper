@@ -275,8 +275,14 @@ export function fmtInt(n) {
   return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
 }
 
-export function fmtTokens(n) {
+export function fmtTokens(n, zh = false) {
   if (n == null) return '—';
+  // 中文环境用 亿/万 计数(1.33 亿 / 68.1 万),万以下原样,与英文 B/M/K 对应
+  if (zh) {
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿';
+    if (n >= 1e4) return (n / 1e4).toFixed(1) + '万';
+    return String(n);
+  }
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';

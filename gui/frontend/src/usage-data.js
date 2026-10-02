@@ -80,3 +80,35 @@ export function aggregateIntraday(rows, date, agent = '') {
 export function usageMetric(agg, metric) {
   return metric === 'cost' ? agg.cost : metric === 'messages' ? agg.messages : agg.total;
 }
+
+// 缓存命中率:input 口径不含缓存(采集侧已扣),命中占全部提示词的比例.
+// 无输入(如纯输出)或无数据返回 null,由调用方显示占位.
+export function cacheHitRate(agg) {
+  const prompt = Number(agg?.input || 0) + Number(agg?.cache_read || 0);
+  if (prompt <= 0) return null;
+  return Number(agg.cache_read || 0) / prompt;
+}
+
+// 时长展示:亚秒给毫秒,10 秒内一位小数,再往上取整秒.
+export function fmtDurationMs(ms) {
+  if (ms == null || ms <= 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+// 速度榜行:tok/s = 计时段合计输出 / 计时总长;ttft 只对有 ttft 样本的调用取均值.
+// 仅收有计时样本的模型,按 tok/s 降序(最快在前才有榜单的趣味).
+export function speedBoard(models, limit = 6) {
+  const timed = (models || [])
+    .filter((m) => m.speed && m.speed.duration_ms_total > 0 && m.speed.timed_calls > 0)
+    .map((m) => ({
+      model: m.model,
+      timedCalls: m.speed.timed_calls,
+      ttftMs: m.speed.ttft_samples > 0 ? m.speed.ttft_ms_total / m.speed.ttft_samples : null,
+      tokPerSec: m.speed.output_total / (m.speed.duration_ms_total / 1000),
+    }))
+    .sort((a, b) => b.tokPerSec - a.tokPerSec);
+  const rest = (models || []).length - timed.length;
+  return { rows: timed.slice(0, limit), unTimed: Math.max(0, rest) };
+}

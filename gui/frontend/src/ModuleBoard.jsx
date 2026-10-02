@@ -63,8 +63,14 @@ export default function ModuleBoard({ catalog, defaults, storageKey, renderModul
   const reduced = useMotionPreference();
   const gridRef = useRef(null);
   const [initial] = useState(() => readPanelState(globalThis.localStorage, storageKey, catalog));
-  const [panels, setPanels] = useState(() => initial?.panels || defaults.map((panel) => ({ ...panel })));
-  const [enabled, setEnabled] = useState(() => initial?.enabled || defaults.map(({ id }) => id));
+  // 新增模块自动入局:旧存档里没有的 catalog 默认面板补到末尾,既有排布不动.
+  const addedDefaults = initial ? defaults.filter(({ id }) => !initial.panels.some((p) => p.id === id)) : [];
+  const [panels, setPanels] = useState(() => initial
+    ? [...initial.panels, ...addedDefaults.map((panel) => ({ ...panel }))]
+    : defaults.map((panel) => ({ ...panel })));
+  const [enabled, setEnabled] = useState(() => initial
+    ? [...initial.enabled, ...addedDefaults.map(({ id }) => id).filter((id) => !initial.enabled.includes(id))]
+    : defaults.map(({ id }) => id));
   const panelsRef = useRef(panels);
   panelsRef.current = panels;
   const gesture = useRef(null);

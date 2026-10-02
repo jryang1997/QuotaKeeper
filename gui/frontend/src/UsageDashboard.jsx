@@ -3,9 +3,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { fmtInt, fmtTokens, fmtRel } from './ui-data.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
-import { aggregateIntraday, aggregateUsage, localDate, usageBounds, usageMetric } from './usage-data.js';
+import { aggregateIntraday, aggregateUsage, cacheHitRate, fmtDurationMs, localDate, speedBoard, usageBounds, usageMetric } from './usage-data.js';
 import { formatCurrency } from './currency.js';
 import AnimatedNumber from './AnimatedNumber.jsx';
+import BlockBar from './BlockBar.jsx';
 import { MotionDisclosure, PopoverSurface, SelectionGroup, SelectionHighlight, useMotionPreference } from './ui-motion.jsx';
 import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
 
@@ -66,7 +67,7 @@ function TrendChart({ days, metric, agent, mode, names, zh, currency }) {
   const active = hover ?? pin;
   const selected = active == null ? null : days[active];
   const max = Math.max(1, ...days.map((day) => usageMetric(day.agg, metric)));
-  const axisText = (n) => metric === 'tokens' ? fmtTokens(n) : valueText(n, metric, currency);
+  const axisText = (n) => metric === 'tokens' ? fmtTokens(n, zh) : valueText(n, metric, currency);
   const showTypes = !!agent && metric === 'tokens' && mode === 'type';
   const legend = showTypes
     ? TOKEN_PARTS.map(([, cn, en, color]) => [tr(zh, cn, en), color])
@@ -117,13 +118,32 @@ function ModelExplorer({ ledger, zh, part, selectedName, onSelect }) {
   if (!selected) return null;
   return part === 'list' ? (<div className="usage-surface usage-model-list"><h3>{tr(zh, '模型用量', 'Model usage')}</h3>
       {models.map((item) => <button type="button" key={item.model} className={selected.model === item.model ? 'is-selected' : ''} onClick={() => onSelect(item.model)}>
-        <span title={item.model}>{item.model}</span><i className="usage-model-track"><motion.i initial={false} animate={{ scaleX: item.agg.total / max }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} style={{ width: '100%', transformOrigin: 'left' }} /></i><strong>{fmtTokens(item.agg.total)}</strong>
+        <span title={item.model}>{item.model}</span><i className="usage-model-track"><motion.i initial={false} animate={{ scaleX: item.agg.total / max }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} style={{ width: '100%', transformOrigin: 'left' }} /></i><strong>{fmtTokens(item.agg.total, zh)}</strong>
       </button>)}
+      {ledger.by_model?.length > models.length && <small className="usage-list-rest">{tr(zh, `共 ${ledger.by_model.length} 个模型 · 显示前 ${models.length}`, `${ledger.by_model.length} models · showing ${models.length}`)}</small>}
     </div>) : (<div className="usage-surface usage-model-detail"><div className="usage-model-detail-head"><h3 title={selected.model}>{selected.model}</h3><strong>{fmtInt(selected.agg.total)} Tokens</strong></div>
       <p>{tr(zh, 'Token 构成', 'Token mix')}</p><div className="usage-model-stack">{TOKEN_PARTS.map(([key, , , color]) => <motion.i key={key} initial={false} animate={{ flexGrow: selected.agg[key] }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} style={{ background: color }} />)}</div>
       <div className="usage-model-parts">{TOKEN_PARTS.map(([key, cn, en, color]) => <div key={key}><i style={{ background: color }} /><span>{tr(zh, cn, en)}</span><strong>{fmtInt(selected.agg[key])}</strong></div>)}</div>
       <small>{tr(zh, '推理 Token 已计入输出；不同工具的缓存记录能力可能不同。', 'Reasoning is included in output; cache reporting varies by tool.')}</small>
     </div>);
+}
+
+// 实测速度榜:tok/s 降序,行内附首字延迟与计时次数;数据来自会话文件时间戳,纯只读.
+function SpeedBoard({ ledger, zh }) {
+  const reduced = useMotionPreference();
+  const board = useMemo(() => speedBoard(ledger?.by_model), [ledger]);
+  const max = Math.max(1, ...board.rows.map((row) => row.tokPerSec));
+  return <div className="usage-surface usage-model-list usage-speed">
+    <h3>{tr(zh, '实测速度 · 近 30 天', 'Measured speed · 30 days')}</h3>
+    {board.rows.length === 0 && <p className="usage-speed-empty">{tr(zh, '暂无计时数据', 'No timed calls yet')}</p>}
+    {board.rows.map((row) => <div className="usage-speed-row" key={row.model}>
+      <span title={row.model}>{row.model}</span>
+      <i className="usage-model-track"><motion.i initial={false} animate={{ scaleX: row.tokPerSec / max }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} style={{ width: '100%', transformOrigin: 'left', background: 'var(--usage-part-output)' }} /></i>
+      <strong>{fmtTokens(Math.round(row.tokPerSec), zh)}<em> t/s</em></strong>
+      <small>{row.ttftMs != null && <>{tr(zh, '首字', 'first token')} {fmtDurationMs(row.ttftMs)} · </>}{tr(zh, `${row.timedCalls} 次计时`, `${row.timedCalls} timed calls`)}</small>
+    </div>)}
+    {board.unTimed > 0 && <small className="usage-list-rest">{tr(zh, `其余 ${board.unTimed} 个模型无计时数据`, `${board.unTimed} models without timing`)}</small>}
+  </div>;
 }
 
 export default function UsageDashboard({ ledger, cards = [], monthlyValue, lang, currency, reduceMotion, onOpenSettings }) {
@@ -162,15 +182,27 @@ export default function UsageDashboard({ ledger, cards = [], monthlyValue, lang,
     { id: 'tokens', title: tr(zh, 'Tokens', 'Tokens'), w: 4, h: 2, minW: 3, minH: 2, content: (<SummaryCard title="Tokens" value={summary.total.total} format={(n) => fmtInt(Math.round(n))} reduceMotion={reduceMotion} note={`${bounds.start || '—'} — ${bounds.end || '—'}`} />) },
     { id: 'requests', title: tr(zh, '请求／消息数', 'Requests / messages'), w: 4, h: 2, minW: 3, minH: 2, content: (<SummaryCard title={tr(zh, '请求／消息数', 'Requests / messages')} value={summary.total.messages} format={(n) => fmtInt(Math.round(n))} reduceMotion={reduceMotion} note={tr(zh, '本机记录的调用', 'Calls recorded locally')} />) },
     { id: 'cost', title: tr(zh, '已知成本', 'Known cost'), w: 4, h: 2, minW: 3, minH: 2, content: (<SummaryCard title={tr(zh, '已知成本 ≈', 'Known cost ≈')} value={summary.total.cost} format={(n) => formatCurrency(n, currency)} reduceMotion={reduceMotion} note={summary.unpriced > 0 ? tr(zh, `${summary.unpriced} 条记录缺价 · 部分汇总`, `${summary.unpriced} unpriced · partial total`) : tr(zh, '来源报告价与估算价', 'Reported and estimated cost')} />) },
+    { id: 'cache', title: tr(zh, '缓存命中率', 'Cache hit rate'), w: 4, h: 2, minW: 3, minH: 2, content: (() => {
+      const rate = cacheHitRate(summary.total);
+      return <div className="usage-surface usage-hero usage-cache">
+        <span>{tr(zh, '缓存命中率', 'Cache hit rate')}</span>
+        <strong className="usage-hero-number">{rate != null ? <><AnimatedNumber value={rate * 100} format={(n) => `${n.toFixed(1)}%`} reduceMotion={reduceMotion} /></> : '—'}</strong>
+        <BlockBar pct={(rate ?? 0) * 100} color="var(--usage-part-cache-read)" />
+        <small>{rate != null
+          ? tr(zh, `缓存读取 ${fmtTokens(summary.total.cache_read, zh)} · 未命中输入 ${fmtTokens(summary.total.input, zh)}`, `cache read ${fmtTokens(summary.total.cache_read, zh)} · uncached input ${fmtTokens(summary.total.input, zh)}`)
+          : tr(zh, '所选范围暂无输入记录', 'No input tokens in this range')}</small>
+      </div>;
+    })() },
+    { id: 'speed', title: tr(zh, '实测速度 · 近 30 天', 'Measured speed · 30 days'), w: 6, h: 4, minW: 4, minH: 3, content: <SpeedBoard ledger={ledger} zh={zh} /> },
     { id: 'trend', title: tr(zh, '用量趋势', 'Usage trend'), w: 12, h: 4, minW: 6, minH: 3, content: (<section className="usage-surface usage-chart-card"><div className="usage-chart-heading"><div><h2>{tr(zh, '用量趋势', 'Usage trend')}</h2><p>{tr(zh, '悬浮或点击柱子查看构成', 'Hover or select a bar for details')}</p></div><div className="usage-toggles"><MetricSelector label={tr(zh, '图表指标', 'Chart metric')} options={[[ 'tokens', 'Tokens' ], [ 'messages', tr(zh, '请求', 'Calls') ], [ 'cost', tr(zh, '成本', 'Cost') ]]} value={metric} onChange={setMetric} />{agent && metric === 'tokens' && <MetricSelector label={tr(zh, '图表拆分', 'Chart breakdown')} options={[[ 'agent', 'Agent' ], [ 'type', tr(zh, '类型', 'Type') ]]} value={mode} onChange={setMode} />}</div></div>
       <TrendChart days={trendDays} metric={metric} agent={agent} mode={mode} names={names} zh={zh} currency={currency} /></section>) },
     { id: 'models', title: tr(zh, '模型用量 · 近 30 天', 'Model usage · 30 days'), w: 6, h: 4, minW: 4, minH: 3, content: (<ModelExplorer part="list" selectedName={selectedModel} onSelect={setSelectedModel} ledger={ledger} zh={zh} />) },
     { id: 'model-detail', title: tr(zh, '模型 Token 构成', 'Model token mix'), w: 6, h: 4, minW: 4, minH: 3, content: (<ModelExplorer part="detail" selectedName={selectedModel} onSelect={setSelectedModel} ledger={ledger} zh={zh} />) },
-    { id: 'details', title: tr(zh, '项目与会话', 'Projects and sessions'), w: 12, h: 3, minW: 6, minH: 2, content: (<MotionDisclosure className="usage-more" label={tr(zh, '更多明细 · 项目与会话（近 30 天）', 'More details · projects and sessions (30 days)')}><div className="usage-more-grid"><section><h3>{tr(zh, '项目', 'Projects')}</h3>{(ledger.by_project || []).slice(0, 12).map((row) => <p key={row.project}><span title={row.project}>{row.project}</span><strong>{fmtTokens(row.agg.total)}</strong></p>)}</section><section><h3>{tr(zh, '会话', 'Sessions')}</h3>{(ledger.by_session || []).slice(0, 12).map((row) => <p key={`${row.client}:${row.session}`}><span title={row.session}>{row.label} · {row.session}</span><strong>{fmtTokens(row.agg.total)}</strong></p>)}</section></div></MotionDisclosure>) }
+    { id: 'details', title: tr(zh, '项目与会话', 'Projects and sessions'), w: 12, h: 3, minW: 6, minH: 2, content: (<MotionDisclosure className="usage-more" label={tr(zh, '更多明细 · 项目与会话（近 30 天）', 'More details · projects and sessions (30 days)')}><div className="usage-more-grid"><section><h3>{tr(zh, '项目', 'Projects')}</h3>{(ledger.by_project || []).slice(0, 12).map((row) => <p key={row.project}><span title={row.project}>{row.project}</span><strong>{fmtTokens(row.agg.total, zh)}</strong></p>)}</section><section><h3>{tr(zh, '会话', 'Sessions')}</h3>{(ledger.by_session || []).slice(0, 12).map((row) => <p key={`${row.client}:${row.session}`}><span title={row.session}>{row.label} · {row.session}</span><strong>{fmtTokens(row.agg.total, zh)}</strong></p>)}</section></div></MotionDisclosure>) }
   ];
   return <div className="usage-page usage-dashboard">
     <p className="usage-subtitle">{tr(zh, '本机账本 · 与服务商配额口径不同', 'Local ledger · separate from provider quotas')}</p>
-    <div className="usage-activity"><i /><span className="usage-activity-main">{tr(zh, '最近 60 分钟', 'Last 60 minutes')} · {recent ? `${recent.label} ${fmtTokens(recent.agg.total)} Tokens` : tr(zh, '暂无活动', 'No activity')}{ledger.burn_rate != null && <span>· {Math.round(ledger.burn_rate)} {tr(zh, 'Tokens/分钟', 'Tokens/min')}</span>}</span>{ledger.last_activity_ms && <small>{tr(zh, '上次活动', 'Last activity')} {fmtRel(Date.now() - ledger.last_activity_ms)}</small>}</div>
+    <div className="usage-activity"><i /><span className="usage-activity-main">{tr(zh, '最近 60 分钟', 'Last 60 minutes')} · {recent ? `${recent.label} ${fmtTokens(recent.agg.total, zh)} Tokens` : tr(zh, '暂无活动', 'No activity')}{ledger.burn_rate != null && <span>· {Math.round(ledger.burn_rate)} {tr(zh, 'Tokens/分钟', 'Tokens/min')}</span>}</span>{ledger.last_activity_ms && <small>{tr(zh, '上次活动', 'Last activity')} {fmtRel(Date.now() - ledger.last_activity_ms)}</small>}</div>
     <div className="usage-filters"><div className="usage-filter-left"><label className="usage-select"><span>{tr(zh, '时间范围', 'Range')}</span><select value={range} onChange={(event) => setRange(event.target.value)} aria-label={tr(zh, '时间范围', 'Range')}>{RANGES.map(([key, cn, en]) => <option key={key} value={key}>{tr(zh, cn, en)}</option>)}</select></label>
       <label className="usage-select"><span>Agent</span><select value={agent} onChange={(event) => setAgent(event.target.value)} aria-label="Agent"><option value="">{tr(zh, '全部', 'All')}</option>{agents.map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
       {(range !== '7d' || agent) && <button type="button" className="usage-clear" onClick={clear}>{tr(zh, '清除筛选', 'Clear filters')}</button>}</div>
@@ -183,4 +215,4 @@ export default function UsageDashboard({ ledger, cards = [], monthlyValue, lang,
   </div>;
 }
 
-const USAGE_LAYOUT = [{'id': 'quota', 'x': 0, 'y': 0, 'w': 6, 'h': 2, 'locked': false}, {'id': 'month', 'x': 6, 'y': 0, 'w': 6, 'h': 2, 'locked': false}, {'id': 'tokens', 'x': 0, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'requests', 'x': 4, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'cost', 'x': 8, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'trend', 'x': 0, 'y': 4, 'w': 12, 'h': 4, 'locked': false}, {'id': 'models', 'x': 0, 'y': 8, 'w': 6, 'h': 4, 'locked': false}, {'id': 'model-detail', 'x': 6, 'y': 8, 'w': 6, 'h': 4, 'locked': false}, {'id': 'details', 'x': 0, 'y': 12, 'w': 12, 'h': 3, 'locked': false}];
+const USAGE_LAYOUT = [{'id': 'quota', 'x': 0, 'y': 0, 'w': 6, 'h': 2, 'locked': false}, {'id': 'month', 'x': 6, 'y': 0, 'w': 6, 'h': 2, 'locked': false}, {'id': 'tokens', 'x': 0, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'requests', 'x': 4, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'cost', 'x': 8, 'y': 2, 'w': 4, 'h': 2, 'locked': false}, {'id': 'cache', 'x': 0, 'y': 4, 'w': 4, 'h': 2, 'locked': false}, {'id': 'speed', 'x': 4, 'y': 4, 'w': 8, 'h': 2, 'locked': false}, {'id': 'trend', 'x': 0, 'y': 6, 'w': 12, 'h': 4, 'locked': false}, {'id': 'models', 'x': 0, 'y': 10, 'w': 6, 'h': 4, 'locked': false}, {'id': 'model-detail', 'x': 6, 'y': 10, 'w': 6, 'h': 4, 'locked': false}, {'id': 'details', 'x': 0, 'y': 14, 'w': 12, 'h': 3, 'locked': false}];

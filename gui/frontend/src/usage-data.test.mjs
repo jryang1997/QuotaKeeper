@@ -52,3 +52,38 @@ test('single-day trends use twelve two-hour buckets with the same totals', () =>
   assert.equal(codex[0].agg.total, 10);
   assert.equal(codex[6].agg.total, 30);
 });
+
+import { cacheHitRate, fmtDurationMs, speedBoard } from './usage-data.js';
+
+test('cacheHitRate is cache share of all prompted tokens', () => {
+  assert.equal(cacheHitRate({ input: 30, cache_read: 70 }), 0.7);
+  assert.equal(cacheHitRate({ input: 10, cache_read: 0 }), 0);
+  assert.equal(cacheHitRate({ input: 0, cache_read: 0 }), null);
+  assert.equal(cacheHitRate(null), null);
+});
+
+test('fmtDurationMs picks the readable unit', () => {
+  assert.equal(fmtDurationMs(800), '800ms');
+  assert.equal(fmtDurationMs(3800), '3.8s');
+  assert.equal(fmtDurationMs(12_400), '12s');
+  assert.equal(fmtDurationMs(0), '—');
+  assert.equal(fmtDurationMs(null), '—');
+});
+
+test('speedBoard ranks by tok/s and counts untimed models', () => {
+  const models = [
+    { model: 'slow', speed: { timed_calls: 2, ttft_samples: 2, ttft_ms_total: 4000, duration_ms_total: 20_000, output_total: 1000 } },
+    { model: 'fast', speed: { timed_calls: 3, ttft_samples: 1, ttft_ms_total: 300, duration_ms_total: 3000, output_total: 900 } },
+    { model: 'untimed', agg: {} },
+  ];
+  const board = speedBoard(models);
+  assert.deepEqual(board.rows.map((r) => r.model), ['fast', 'slow']);
+  assert.equal(board.rows[0].tokPerSec, 300);
+  // ttft 只对有 ttft 样本的调用取均值:fast 仅 1 个样本,不被另外两次稀释
+  assert.equal(board.rows[0].ttftMs, 300);
+  assert.equal(board.rows[1].ttftMs, 2000);
+  assert.equal(board.unTimed, 1);
+  // limit 截断
+  assert.equal(speedBoard(models, 1).rows.length, 1);
+  assert.equal(speedBoard([]).rows.length, 0);
+});
