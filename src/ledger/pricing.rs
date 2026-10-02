@@ -1,7 +1,7 @@
 //! LiteLLM 开放价目数据集估价(与 tokscale 同源),磁盘缓存 + 后台自动刷新.
 //!
 //! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
-//! - 查找:精确名 → 大小写全名 → canonical 别名 → provider 后缀众数 → 家族兜底;
+//! - 查找:精确名 → 大小写全名 → canonical 别名 → GLM 官方目录 → provider 后缀众数 → 家族兜底;
 //!   多个 provider 同后缀且无众数时不估价。
 
 use std::collections::{HashMap, HashSet};
@@ -117,6 +117,14 @@ impl Pricing {
         let canonical = crate::ledger::model_alias::canonical(model);
         if canonical != model && canonical != "unknown"
             && let Some(price) = self.entries.get(&canonical)
+        {
+            return Some(price);
+        }
+
+        // 裸 GLM 名用厂商 API 等值价;渠道的缓存缺项/加价不应挡住官方条目。
+        // 带 provider 的记录仍按原渠道匹配,不推断它使用了 Z.AI 端点。
+        if !model.contains('/') && canonical.starts_with("glm-")
+            && let Some(price) = self.case_insensitive.get(&format!("zai/{canonical}"))
         {
             return Some(price);
         }
@@ -407,6 +415,27 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    fn bare_glm_uses_official_price_when_resellers_disagree() {
+        let official = ModelPrice { input: 1.5e-7, output: 5e-7, cache_read: Some(3e-8), cache_write: Some(0.0) };
+        let reseller = ModelPrice { cache_write: None, ..official };
+        let p = build(HashMap::from([
+            ("zai/glm-5.3-flash".into(), official),
+            ("openrouter/z-ai/glm-5.3-flash".into(), reseller),
+            ("nebius/zai-org/GLM-5.3-Flash".into(), ModelPrice { cache_read: None, ..reseller }),
+            ("aihubmix/glm-5.3-flash".into(), ModelPrice { input: 1.1268e-7, ..reseller }),
+        ]));
+        let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, cache_write: 1_000_000, ..Default::default() };
+        for name in ["glm-5.3-flash", "GLM-5.3-Flash"] {
+            assert!((p.estimate(name, &t).expect("official GLM price") - 0.68).abs() < 1e-9);
+        }
+        // Qualified reseller prices and unknown cache charges must stay intact.
+        assert_eq!(p.estimate("openrouter/z-ai/glm-5.3-flash", &t), None);
+        assert_eq!(p.estimate("nebius/zai-org/GLM-5.3-Flash", &t), None);
+        let p = build(HashMap::from([("glm-5.3-flash".into(), reseller), ("zai/glm-5.3-flash".into(), official)]));
+        assert_eq!(p.estimate("glm-5.3-flash", &t), None);
     }
 
     #[test]
