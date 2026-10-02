@@ -73,7 +73,7 @@ cargo build --release --manifest-path gui/Cargo.toml
 run_gui.bat
 ```
 
-Needs the WebView2 Runtime (preinstalled on Win10/11). Frontend assets are embedded into the binary via `include_dir!`.
+Needs the WebView2 Runtime (preinstalled on Win10/11). Frontend assets are embedded into the binary via `include_dir!`. The GUI exe carries the app icon; `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-gui-shortcut.ps1` creates a desktop shortcut that launches the exe directly (no console flash).
 
 ## Platform support
 

@@ -80,7 +80,8 @@ cargo build --release --manifest-path gui/Cargo.toml
 run_gui.bat                   # GNU 构建自动把 WebView2Loader.dll 复制到程序旁
 ```
 
-需要 WebView2 Runtime(Win10/11 自带)。前端产物经 `include_dir!` 内嵌进二进制,分发只需 exe(+DLL)。双击 `run_tui.bat` / `run_gui.bat` 都可用;GUI 关窗最小化到托盘,可退出。
+需要 WebView2 Runtime(Win10/11 自带)。前端产物经 `include_dir!` 内嵌进二进制,分发只需 exe(+DLL)。双击 `run_tui.bat` / `run_gui.bat` 都可用;GUI 关窗最小化到托盘,可退出。GUI exe 内嵌应用图标,也可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts
+ew-gui-shortcut.ps1` 生成桌面直启快捷方式(直指 exe,无控制台窗)。
 
 ## 平台支持
 
