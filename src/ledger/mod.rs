@@ -13,6 +13,7 @@ use std::time::UNIX_EPOCH;
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike};
 
+pub mod agentenv;
 pub mod claude;
 pub mod codex;
 pub mod dsh;
@@ -23,7 +24,7 @@ pub mod pricing;
 pub mod types;
 pub mod zcode;
 
-pub use types::{Agg, TokenBreakdown, UsageRecord, client_label};
+pub use types::{Agg, SpeedStats, TokenBreakdown, UsageRecord, client_label};
 
 use types::CLIENTS;
 
@@ -54,6 +55,8 @@ pub struct ModelRow {
     pub aliases: Vec<String>,
     pub clients: Vec<&'static str>,
     pub agg: Agg,
+    /// 有计时样本时的实测速度(TTFT / tok/s);无样本为 None.
+    pub speed: Option<SpeedStats>,
 }
 
 /// 最近一小时按 Agent 汇总，仅代表本机记录到的活动。
@@ -321,6 +324,8 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     // canonical 模型名 → 30 天内的原始记录名(去重)
     let mut model_aliases: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
     let mut by_day_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
+    // canonical 模型名 → 计时样本(仅近 30 天窗口内累计).
+    let mut speed_raw: HashMap<String, SpeedStats> = HashMap::new();
     let mut hourly = [0i64; 24];
     let mut weekday = [0i64; 7];
     let mut weekday_hour = [[0i64; 24]; 7];
@@ -402,9 +407,13 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 .insert(r.model.clone());
             entry
                 .1
-                .entry(canonical_model)
+                .entry(canonical_model.clone())
                 .or_default()
                 .add(&r.tokens, r.cost, r.cost_is_estimate);
+            speed_raw
+                .entry(canonical_model)
+                .or_default()
+                .sample(r);
             // 时段分布(本地小时 / 星期 / 星期×小时 punchcard)
             let local = ts.with_timezone(&Local);
             let hour_idx = local.hour() as usize;
@@ -488,6 +497,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 .remove(&model)
                 .map(|set| set.into_iter().collect())
                 .unwrap_or_default();
+            let speed = speed_raw.remove(&model).filter(|s| s.timed_calls > 0);
             ModelRow {
                 model,
                 aliases,
@@ -496,6 +506,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                     .filter_map(|(client, _)| clients.contains(client).then_some(*client))
                     .collect(),
                 agg,
+                speed,
             }
         })
         .collect();
@@ -729,7 +740,71 @@ mod tests {
             cost_is_estimate: false,
             session: None,
             project: None,
+            duration_ms: 0,
+            ttft_ms: 0,
         }
+    }
+
+    #[test]
+    fn model_speed_aggregates_timed_samples_only() {
+        let n = now();
+        let mut timed = rec(
+            "claude",
+            "claude-opus-4",
+            n.timestamp_millis() - 60_000,
+            TokenBreakdown {
+                output: 900,
+                ..Default::default()
+            },
+        );
+        timed.duration_ms = 9_000;
+        timed.ttft_ms = 3_000;
+        let mut timed2 = timed.clone();
+        timed2.duration_ms = 11_000;
+        timed2.ttft_ms = 5_000;
+        timed2.model = "Claude-Opus-4".into(); // 别名合并到同一 canonical 行
+        // 有时长但首字被上限裁掉的样本:不得稀释 ttft 均值.
+        let mut no_ttft = timed.clone();
+        no_ttft.duration_ms = 10_000;
+        no_ttft.ttft_ms = 0;
+        let untimed = rec(
+            "codex",
+            "claude-opus-4",
+            n.timestamp_millis() - 30_000,
+            TokenBreakdown {
+                output: 5,
+                ..Default::default()
+            },
+        );
+        let rep = aggregate(vec![timed, timed2, no_ttft, untimed], n);
+        let row = rep.by_model.iter().find(|m| m.model == "claude-opus-4").unwrap();
+        let speed = row.speed.clone().expect("有计时样本");
+        assert_eq!(speed.timed_calls, 3);
+        assert_eq!(speed.ttft_samples, 2);
+        assert_eq!(speed.duration_ms_total, 30_000);
+        assert_eq!(speed.ttft_ms_total, 8_000);
+        assert_eq!(speed.output_total, 2_700);
+        // 均值只对 ttft 样本取:8000/2 = 4000,不被第三次稀释
+        assert!((speed.avg_ttft_ms().unwrap() - 4_000.0).abs() < 1e-9);
+        assert!((speed.tok_per_sec().unwrap() - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn model_speed_is_none_without_timed_samples() {
+        let n = now();
+        let rep = aggregate(
+            vec![rec(
+                "codex",
+                "m",
+                n.timestamp_millis(),
+                TokenBreakdown {
+                    output: 5,
+                    ..Default::default()
+                },
+            )],
+            n,
+        );
+        assert!(rep.by_model[0].speed.is_none());
     }
 
     #[test]

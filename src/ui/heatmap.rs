@@ -345,6 +345,8 @@ mod tests {
             cost_is_estimate: false,
             session: None,
             project: None,
+            duration_ms: 0,
+            ttft_ms: 0,
         };
         // 25 天前(恰好在 26 周窗口内)与今天
         let records = vec![mk("omp", 25, 400), mk("omp", 0, 800), mk("zcode", 0, 100)];

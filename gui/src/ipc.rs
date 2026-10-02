@@ -172,6 +172,18 @@ pub struct ModelRowDto {
     pub aliases: Vec<String>,
     pub clients: Vec<&'static str>,
     pub agg: AggDto,
+    /// 有计时样本时的实测速度;无样本为 null.前端自行算均值.
+    pub speed: Option<SpeedStatsDto>,
+}
+
+#[derive(Serialize)]
+pub struct SpeedStatsDto {
+    pub timed_calls: u64,
+    /// 有首字延迟样本的调用数(可与 timed_calls 不同).
+    pub ttft_samples: u64,
+    pub ttft_ms_total: i64,
+    pub duration_ms_total: i64,
+    pub output_total: i64,
 }
 
 #[derive(Serialize)]
@@ -379,6 +391,13 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                     .map(|client| ledger::types::client_label(client))
                     .collect(),
                 agg: agg_dto(&m.agg),
+                speed: m.speed.as_ref().map(|s| SpeedStatsDto {
+                    timed_calls: s.timed_calls,
+                    ttft_samples: s.ttft_samples,
+                    ttft_ms_total: s.ttft_ms_total,
+                    duration_ms_total: s.duration_ms_total,
+                    output_total: s.output_total,
+                }),
             })
             .collect(),
         recent_by_agent: r
@@ -538,6 +557,8 @@ mod tests {
                 cost_is_estimate: false,
                 session: Some("test-session".into()),
                 project: Some("test-project".into()),
+                duration_ms: 0,
+                ttft_ms: 0,
             }],
             now,
         )

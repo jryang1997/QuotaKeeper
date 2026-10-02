@@ -83,6 +83,7 @@ pub enum K {
     HCache,
     HTotal,
     HCost,
+    HSpeed,
     H14,
     HShare,
     HDate,
@@ -347,6 +348,13 @@ pub fn t(k: K) -> &'static str {
                 "成本"
             } else {
                 "Cost"
+            }
+        }
+        K::HSpeed => {
+            if zh {
+                "速度"
+            } else {
+                "Speed"
             }
         }
         K::H14 => {

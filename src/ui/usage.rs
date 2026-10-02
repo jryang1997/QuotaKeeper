@@ -344,6 +344,7 @@ fn render_model_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport, offs
         i18n::t(i18n::K::HClient).to_string(),
         i18n::t(i18n::K::HTotal).to_string(),
         i18n::t(i18n::K::HCost).to_string(),
+        i18n::t(i18n::K::HSpeed).to_string(),
     ])
     .style(Style::default().fg(th.dim).add_modifier(Modifier::BOLD));
     let rows: Vec<Row> = ledger.by_model[start..end]
@@ -355,6 +356,13 @@ fn render_model_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport, offs
                 .map(|client| client_label(client))
                 .collect::<Vec<_>>()
                 .join(", ");
+            // 实测输出速度;无计时样本(来源不提供时长)显示 —.
+            let speed = model
+                .speed
+                .as_ref()
+                .and_then(|s| s.tok_per_sec())
+                .map(|tps| format!("{}/s", format_tokens(tps.round() as i64)))
+                .unwrap_or_else(|| "—".into());
             Row::new([
                 model.model.clone(),
                 clients,
@@ -364,6 +372,7 @@ fn render_model_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport, offs
                 } else {
                     "—".to_string()
                 },
+                speed,
             ])
         })
         .collect();
@@ -374,6 +383,7 @@ fn render_model_table(frame: &mut Frame, area: Rect, ledger: &LedgerReport, offs
             Constraint::Min(12),
             Constraint::Length(12),
             Constraint::Length(9),
+            Constraint::Length(8),
         ],
     )
     .header(header)
@@ -989,6 +999,8 @@ mod tests {
             cost_is_estimate: false,
             session: None,
             project: None,
+            duration_ms: 0,
+            ttft_ms: 0,
         };
         let records = vec![
             mk("codex", "gpt-6-sol", 0, 1_000),
@@ -1311,6 +1323,8 @@ mod tests {
             cost_is_estimate: false,
             session: Some("sess0123456789abcdef".into()),
             project: Some("C:\\Users\\dev\\demo-project".into()),
+            duration_ms: 0,
+            ttft_ms: 0,
         }];
         let ledger = aggregate(records, now);
         let backend = TestBackend::new(100, 30);

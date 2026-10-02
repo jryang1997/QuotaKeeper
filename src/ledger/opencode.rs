@@ -143,6 +143,8 @@ fn parse_data(data: &str) -> Option<UsageRecord> {
         cost_is_estimate: false,
         session: None,
         project: None,
+        duration_ms: 0,
+        ttft_ms: 0,
     })
 }
 

@@ -135,6 +135,8 @@ pub fn collect_conn(con: &Connection) -> Result<Vec<UsageRecord>, String> {
             cost_is_estimate: false,
             session,
             project: directory.filter(|d| !d.is_empty()),
+            duration_ms: duration.unwrap_or(0).max(0),
+            ttft_ms: 0,
         });
     }
     Ok(recs)

@@ -4,7 +4,10 @@
 //! - 只认 `type=="assistant"` 且带 `message.usage` 的行;
 //! - 同一轮的流式重写共享 `message.id`,按 `(message.id, requestId)` 去重、逐字段取 max;
 //! - Anthropic 语义:input_tokens 不含 cache,cache_read/cache_creation 单列 → 原样入桶;
-//! - 时间取首次出现的 timestamp(轮次开始),缺省回退文件 mtime.
+//! - 时间取首次出现的 timestamp(轮次开始),缺省回退文件 mtime;
+//! - ttft/duration:沿用 magpie 的口径——配对同侧(main/sidechain)最近一条 user 行
+//!   (提示或工具结果)为发起行,首快照 − 发起行 = ttft,末快照 − 发起行 = duration;
+//!   异常跨度(负值/超上限)丢弃,不臆造.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -12,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
 
-use super::types::{TokenBreakdown, UsageRecord};
+use super::types::{timed_span, TokenBreakdown, UsageRecord};
 
 pub const CLIENT: &str = "claude";
 
@@ -44,6 +47,8 @@ struct Merged {
     cache_read: i64,
     cache_write: i64,
     ts_ms: i64,
+    max_ts: i64,
+    ask_ts: i64,
     model: String,
     session: Option<String>,
 }
@@ -72,11 +77,29 @@ fn mtime_ms(path: &Path) -> i64 {
 
 pub fn parse_str(text: &str, fallback_ts_ms: i64, project: Option<String>) -> Vec<UsageRecord> {
     let mut merged: HashMap<(String, String), Merged> = HashMap::new();
+    // 每条链(main / sidechain)最近一条 user 行的时间,作为下一次调用的发起行.
+    let mut last_ask = [0i64; 2];
     for line in text.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+        let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let side = v
+            .get("isSidechain")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false) as usize;
+        if kind == "user" {
+            if let Some(ts) = v
+                .get("timestamp")
+                .and_then(|t| t.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.timestamp_millis())
+            {
+                last_ask[side] = ts;
+            }
+            continue;
+        }
+        if kind != "assistant" {
             continue;
         }
         let Some(usage) = v.pointer("/message/usage") else {
@@ -118,6 +141,8 @@ pub fn parse_str(text: &str, fallback_ts_ms: i64, project: Option<String>) -> Ve
             .to_string();
         let e = merged.entry(key).or_insert(Merged {
             ts_ms: ts,
+            max_ts: ts,
+            ask_ts: last_ask[side],
             model,
             session: if session_id.is_empty() {
                 None
@@ -132,24 +157,30 @@ pub fn parse_str(text: &str, fallback_ts_ms: i64, project: Option<String>) -> Ve
         e.cache_read = e.cache_read.max(cache_read);
         e.cache_write = e.cache_write.max(cache_write);
         e.ts_ms = e.ts_ms.min(ts);
+        e.max_ts = e.max_ts.max(ts);
     }
     let mut recs: Vec<UsageRecord> = merged
         .into_values()
-        .map(|m| UsageRecord {
-            client: CLIENT,
-            model: m.model,
-            ts_ms: m.ts_ms,
-            tokens: TokenBreakdown {
-                input: m.input,
-                output: m.output,
-                cache_read: m.cache_read,
-                cache_write: m.cache_write,
-                reasoning: 0,
-            },
-            cost: None,
-            cost_is_estimate: false,
-            session: m.session,
-            project: project.clone(),
+        .map(|m| {
+            let (ttft_ms, duration_ms) = timed_span(m.ask_ts, m.ts_ms, m.max_ts);
+            UsageRecord {
+                client: CLIENT,
+                model: m.model,
+                ts_ms: m.ts_ms,
+                tokens: TokenBreakdown {
+                    input: m.input,
+                    output: m.output,
+                    cache_read: m.cache_read,
+                    cache_write: m.cache_write,
+                    reasoning: 0,
+                },
+                cost: None,
+                cost_is_estimate: false,
+                session: m.session,
+                project: project.clone(),
+                duration_ms,
+                ttft_ms,
+            }
         })
         .collect();
     recs.sort_by_key(|r| r.ts_ms);
@@ -226,5 +257,72 @@ mod tests {
         );
         let recs = parse_str(&text, 0, None);
         assert!(recs[0].ts_ms <= recs[1].ts_ms);
+    }
+
+    fn user_line(ts: &str, side: bool) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"{ts}","isSidechain":{side},"message":{{"role":"user","content":"hi"}}}}"#
+        )
+    }
+
+    fn parse_millis(s: &str) -> i64 {
+        DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis()
+    }
+
+    #[test]
+    fn ttft_and_duration_pair_with_preceding_user_line() {
+        let text = format!(
+            "{}\n{}\n{}\n",
+            user_line("2026-09-20T10:00:00Z", false),
+            line("2026-09-20T10:00:03Z", "msg_1", "req_1", 100, 5, 0, 0),
+            line("2026-09-20T10:00:09Z", "msg_1", "req_1", 100, 20, 0, 0),
+        );
+        let recs = parse_str(&text, 0, None);
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].ttft_ms, 3_000);
+        assert_eq!(recs[0].duration_ms, 9_000);
+    }
+
+    #[test]
+    fn calls_without_asking_line_have_no_span() {
+        let recs = parse_str(&line("2026-09-20T10:00:00Z", "msg_1", "req_1", 1, 1, 0, 0), 0, None);
+        assert_eq!(recs[0].ttft_ms, 0);
+        assert_eq!(recs[0].duration_ms, 0);
+    }
+
+    fn side_line(ts: &str, msg_id: &str, req: &str, input: i64, output: i64) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"{ts}","isSidechain":true,"requestId":"{req}","message":{{"id":"{msg_id}","model":"claude-opus-4","usage":{{"input_tokens":{input},"output_tokens":{output},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn sidechain_pairs_with_its_own_asking_line() {
+        // 主链 user 行在前,子代理的 user 行更晚:子代理的调用必须配子代理发起行.
+        let text = format!(
+            "{}\n{}\n{}\n{}\n",
+            user_line("2026-09-20T10:00:00Z", false),
+            user_line("2026-09-20T10:01:00Z", true),
+            side_line("2026-09-20T10:01:02Z", "msg_s", "req_s", 1, 1),
+            line("2026-09-20T10:02:00Z", "msg_m", "req_m", 1, 1, 0, 0),
+        );
+        let recs = parse_str(&text, 0, None);
+        let side = recs.iter().find(|r| r.ts_ms == parse_millis("2026-09-20T10:01:02Z")).unwrap();
+        assert_eq!(side.ttft_ms, 2_000);
+        let main = recs.iter().find(|r| r.ts_ms == parse_millis("2026-09-20T10:02:00Z")).unwrap();
+        assert_eq!(main.ttft_ms, 120_000);
+    }
+
+    #[test]
+    fn absurd_span_is_dropped() {
+        // 发起行在 1 小时前:超出上限,不臆造.
+        let text = format!(
+            "{}\n{}\n",
+            user_line("2026-09-20T09:00:00Z", false),
+            line("2026-09-20T10:00:00Z", "msg_1", "req_1", 1, 1, 0, 0),
+        );
+        let recs = parse_str(&text, 0, None);
+        assert_eq!(recs[0].ttft_ms, 0);
+        assert_eq!(recs[0].duration_ms, 0);
     }
 }

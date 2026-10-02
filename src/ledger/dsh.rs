@@ -127,6 +127,8 @@ pub fn parse_bytes(bytes: &[u8], fallback_ts_ms: i64) -> std::io::Result<Vec<Usa
             cost_is_estimate: false,
             session: session.clone(),
             project: project.clone(),
+            duration_ms: 0,
+            ttft_ms: 0,
         });
     }
     Ok(recs)

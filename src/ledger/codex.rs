@@ -7,14 +7,16 @@
 //! - total 与上一条相等 → 重复快照,跳过;
 //! - total 小幅回退(≤2%)→ 陈旧快照回写,跳过,不当 reset;
 //! - total 大幅回退 → 新基线,接受本条 last;
-//! - 归一化:Codex 的 input 含 cached,扣出 cache_read;reasoning ⊆ output 只作 info.
+//! - 归一化:Codex 的 input 含 cached,扣出 cache_read;reasoning ⊆ output 只作 info;
+//! - ttft/duration:user 行(response_item message role=user / event_msg user_message)为发起行,
+//!   本轮首条 token_count − 发起行 = ttft,末条 − 发起行 = duration,记到首/末条上.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
 
-use super::types::{TokenBreakdown, UsageRecord};
+use super::types::{timed_span, TokenBreakdown, UsageRecord};
 
 pub const CLIENT: &str = "codex";
 
@@ -61,11 +63,19 @@ pub fn parse_str(text: &str, fallback_ts_ms: i64) -> Vec<UsageRecord> {
     let mut session: Option<String> = None;
     let mut project: Option<String> = None;
     let mut prev_total: Option<i64> = None;
-    let mut recs = Vec::new();
+    let mut recs: Vec<UsageRecord> = Vec::new();
+    // 本轮(自最近 user 行起)已接受记录的下标;新 user 行或文件结束时结算 ttft/duration.
+    let mut run: Vec<usize> = Vec::new();
+    let mut ask_ts = 0i64;
     for line in text.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
+        if let Some(ts) = user_line_ts(&v) {
+            finalize_run(&mut recs, &mut run, ask_ts);
+            ask_ts = ts;
+            continue;
+        }
         // id 标识当前 thread;session_id 在新格式中可能是 fork 的 root。
         if v.get("type").and_then(|t| t.as_str()) == Some("session_meta") {
             session = v
@@ -116,9 +126,42 @@ pub fn parse_str(text: &str, fallback_ts_ms: i64) -> Vec<UsageRecord> {
             cost_is_estimate: false,
             session: session.clone(),
             project: project.clone(),
+            duration_ms: 0,
+            ttft_ms: 0,
         });
+        run.push(recs.len() - 1);
     }
+    finalize_run(&mut recs, &mut run, ask_ts);
     recs
+}
+
+/// user 行的发起时间;非 user 行为 None.兼容新旧 rollout 两种载体.
+fn user_line_ts(v: &serde_json::Value) -> Option<i64> {
+    let typ = v.get("type").and_then(|t| t.as_str())?;
+    let payload_type = v.pointer("/payload/type").and_then(|x| x.as_str());
+    let is_user = match (typ, payload_type) {
+        ("response_item", Some("message")) => {
+            v.pointer("/payload/role").and_then(|x| x.as_str()) == Some("user")
+        }
+        ("event_msg", Some("user_message")) => true,
+        _ => false,
+    };
+    if !is_user {
+        return None;
+    }
+    v.get("timestamp")
+        .and_then(|t| t.as_str())
+        .and_then(parse_rfc3339_ms)
+}
+
+/// 把本轮首/末条记录的时间跨度写回;无发起行则全部保持 0.
+fn finalize_run(recs: &mut [UsageRecord], run: &mut Vec<usize>, ask_ts: i64) {
+    if let (Some(&first), Some(&last)) = (run.first(), run.last()) {
+        let (ttft, duration) = timed_span(ask_ts, recs[first].ts_ms, recs[last].ts_ms);
+        recs[first].ttft_ms = ttft;
+        recs[last].duration_ms = duration;
+    }
+    run.clear();
 }
 
 fn parse_breakdown(v: Option<&serde_json::Value>) -> Option<TokenBreakdown> {
@@ -287,5 +330,65 @@ mod tests {
     fn malformed_lines_are_skipped() {
         let recs = parse_str("not json\n{\"x\":1}\n", 0);
         assert!(recs.is_empty());
+    }
+
+    fn user_message(ts: &str) -> String {
+        serde_json::json!({
+            "timestamp": ts,
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn run_span_lands_on_first_and_last_record() {
+        let text = format!(
+            "{}\n{}\n{}\n",
+            user_message("2026-09-23T07:30:00Z"),
+            line("2026-09-23T07:30:04Z", 100, 100, 0, 1, 0),
+            line("2026-09-23T07:30:10Z", 200, 100, 0, 1, 0),
+        );
+        let recs = parse_str(&text, 0);
+        assert_eq!(recs.len(), 2);
+        assert_eq!(recs[0].ttft_ms, 4_000);
+        assert_eq!(recs[0].duration_ms, 0);
+        assert_eq!(recs[1].ttft_ms, 0);
+        assert_eq!(recs[1].duration_ms, 10_000);
+    }
+
+    #[test]
+    fn single_record_run_carries_both_spans() {
+        let text = format!(
+            "{}\n{}\n",
+            user_message("2026-09-23T07:30:00Z"),
+            line("2026-09-23T07:30:05Z", 100, 100, 0, 1, 0),
+        );
+        let recs = parse_str(&text, 0);
+        assert_eq!(recs[0].ttft_ms, 5_000);
+        assert_eq!(recs[0].duration_ms, 5_000);
+    }
+
+    #[test]
+    fn records_without_asking_user_line_have_no_span() {
+        let recs = parse_str(&line("2026-09-23T07:30:20Z", 100, 100, 0, 1, 0), 0);
+        assert_eq!(recs[0].ttft_ms, 0);
+        assert_eq!(recs[0].duration_ms, 0);
+    }
+
+    #[test]
+    fn new_user_line_starts_a_fresh_run() {
+        let text = format!(
+            "{}\n{}\n{}\n{}\n",
+            user_message("2026-09-23T07:30:00Z"),
+            line("2026-09-23T07:30:04Z", 100, 100, 0, 1, 0),
+            user_message("2026-09-23T07:31:00Z"),
+            line("2026-09-23T07:31:03Z", 200, 100, 0, 1, 0),
+        );
+        let recs = parse_str(&text, 0);
+        assert_eq!(recs[0].ttft_ms, 4_000);
+        assert_eq!(recs[0].duration_ms, 4_000);
+        assert_eq!(recs[1].ttft_ms, 3_000);
+        assert_eq!(recs[1].duration_ms, 3_000);
     }
 }
