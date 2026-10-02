@@ -263,6 +263,7 @@ html[data-theme='dark'] { color-scheme: dark; }
 .empty-card { padding: 24px; display: flex; align-items: center; gap: 8px; }
 
 .banner-error { margin: 0; }
+.banner-cache { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-overlay-pressed) 60%, var(--color-background-surface)); }
 
 /* ---------- 配额卡 ---------- */
 

@@ -215,6 +215,7 @@ export const STR = {
   freshness_waiting: ['等待首次读取', 'Waiting for first read'],
   freshness_stale: ['数据已过期', 'Data is stale'],
   freshness_last_success: ['上次成功', 'Last success'],
+  cache_replay: ['显示上次留存的数据 · 正在同步最新…', 'Showing your last synced data · refreshing…'],
   activity_vs_average: ['7 日均值', '7-day avg'],
   activity_at_least_average: ['≥ 7 日均值', '≥ 7-day avg'],
   activity_today: ['本机今日活动', 'Local activity today'],

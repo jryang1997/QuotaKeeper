@@ -28,15 +28,19 @@ const NAV_ITEMS = ['quota', 'usage', 'heat', 'settings'];
 
 function NavIcon({ page }) {
   if (page === 'quota') {
-    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15a8 8 0 1 1 16 0" /><path d="m12 12 4-4" /><path d="M8 19h8" /></svg>;
+    // gauge:下半弧 + 指针,指针指向右上(趋势向上)
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 14 4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /></svg>;
   }
   if (page === 'usage') {
-    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-7" /></svg>;
+    // 带轴圆帽柱:轴一次画到位,三根柱节奏降序,读作「用量」
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M8 17v-4" /><path d="M13 17V8" /><path d="M18 17v-7" /></svg>;
   }
   if (page === 'settings') {
-    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>;
+    // lucide 现代齿轮:外环由 8 组对称圆弧构成,光学中心与圆孔重合
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>;
   }
-  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="5" height="5" rx="1" /><rect x="10" y="4" width="5" height="5" rx="1" /><rect x="16" y="4" width="5" height="5" rx="1" /><rect x="4" y="10" width="5" height="5" rx="1" /><rect x="10" y="10" width="5" height="5" rx="1" /><rect x="16" y="10" width="5" height="5" rx="1" /><rect x="4" y="16" width="5" height="5" rx="1" /><rect x="10" y="16" width="5" height="5" rx="1" /><rect x="16" y="16" width="5" height="5" rx="1" /></svg>;
+  // 热力:3×3 实心点阵,呼应面板页的点阵大数字
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">{[5.5, 12, 18.5].map((y) => [5.5, 12, 18.5].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" fill="currentColor" stroke="none" />))}</svg>;
 }
 
 function PrimaryNav({ lang, page, onNavigate, variant }) {
@@ -107,6 +111,7 @@ function App() {
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
   const [data, setData] = useState(null);
+  const [staleCache, setStaleCache] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(Date.now);
   const [exchangeRate, setExchangeRate] = useState(() => readExchangeRates()[preferences.currency] || null);
@@ -138,6 +143,7 @@ function App() {
     const unregister = registerNativeCallbacks({
       __onPush: (payload) => {
         setData(payload);
+        setStaleCache(payload.stale === true);
         if (!refreshRequestedAt.current || (payload.fetched_at_ms >= refreshRequestedAt.current && payload.quota_checked_at_ms >= refreshRequestedAt.current)) {
           refreshRequestedAt.current = 0;
           setRefreshing(false);
@@ -372,6 +378,11 @@ function App() {
         {page !== 'settings' && data?.quotaError && (
           <div className="banner-error">
             <Toast kind="error">{t('quota_error')}: {data.quotaError}</Toast>
+          </div>
+        )}
+        {page !== 'settings' && staleCache && (
+          <div className="banner-cache" role="status">
+            <Spinner size="sm" /> <Text type="supporting">{t('cache_replay')}</Text>
           </div>
         )}
         {page !== 'settings' && !data ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (

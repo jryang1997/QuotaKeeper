@@ -7,6 +7,7 @@
 //! (window.external.invoke)。前端资源由 include_dir 编入,自定义协议
 //! `app://` 提供；GNU 构建另需同目录的 WebView2Loader.dll（build.rs 自动复制）。
 
+pub mod cache;
 pub mod desktop;
 pub mod export;
 pub mod ipc;
@@ -195,7 +196,9 @@ fn main() -> anyhow::Result<()> {
 
     let ipc_tx = tx.clone();
     let ipc_proxy = el.create_proxy();
+    // devtools 常开:release 下 wry 默认禁用,关掉后 CDP 视觉验收无从下手
     let webview = WebViewBuilder::new()
+        .with_devtools(true)
         .with_custom_protocol(String::from("app"), move |id: WebViewId, req| {
             let _ = id;
             app_response(req)
@@ -309,6 +312,9 @@ fn main() -> anyhow::Result<()> {
     let mut tray = None;
     let mut tray_level = None::<u8>;
     let mut last_tray_click = None::<std::time::Instant>;
+    let mut cache_replayed = false;
+    let mut cache_last_write = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+    let mut cache_saved_quota_at = 0_u64;
 
     el.run(move |event, _target, control_flow| {
         match event {
@@ -393,6 +399,17 @@ fn main() -> anyhow::Result<()> {
                 let _ = webview.borrow().evaluate_script(&format!("window.__onAutostartResult?.({result})"));
             }
             Event::UserEvent(UserEvent::QueryNativePreferences) => {
+                // webview 就绪信号:先把上次留存的 push 回放给前端(旧数据立即可见),
+                // 真实采集到位后由正常循环覆盖。
+                if !cache_replayed {
+                    cache_replayed = true;
+                    if let Some(payload) = cache::load()
+                        && let Some(stale) = cache::mark_stale(&payload)
+                    {
+                        let js = format!("window.__onPush && window.__onPush({stale});");
+                        let _ = webview.borrow().evaluate_script(&js);
+                    }
+                }
                 let enabled = desktop::autostart_enabled().unwrap_or(false);
                 let go_key_stored = tui_token_monitor::credential::has_open_code_go_key();
                 let goat_key_stored = tui_token_monitor::credential::has_command_code_key();
@@ -564,6 +581,14 @@ fn main() -> anyhow::Result<()> {
                         let js = format!("window.__onPush && window.__onPush({payload});");
                         // WebView 未就绪时 evaluate_script 出错;下轮采集会自然重推
                         let _ = webview.borrow().evaluate_script(&js);
+                        // 留存给下次启动回放:配额一有新结果就写,否则 30s 节流
+                        if latest_quota_fetched_at_ms != cache_saved_quota_at
+                            || cache_last_write.elapsed() >= std::time::Duration::from_secs(30)
+                        {
+                            cache::save(&payload);
+                            cache_last_write = std::time::Instant::now();
+                            cache_saved_quota_at = latest_quota_fetched_at_ms;
+                        }
                     }
                 }
                 *control_flow =
