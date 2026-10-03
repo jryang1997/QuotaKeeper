@@ -53,6 +53,36 @@ function SettingsRow({ title, hint, children, className = '' }) {
   );
 }
 
+function LanSection({ lang, lan, onToggle }) {
+  const t = (key) => STR[key][lang];
+  const [copied, setCopied] = useState(false);
+  const copyUrl = () => {
+    if (!lan.url) return;
+    navigator.clipboard.writeText(lan.url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <SettingsRow title={t('lan_title')} hint={t('lan_hint')}>
+      <div className="lan-control">
+        <SettingsChoice
+          label={t('lan_title')}
+          value={lan.enabled}
+          onChange={(value) => onToggle(value === true)}
+          options={[{ value: false, label: t('lan_off') }, { value: true, label: t('lan_on') }]}
+        />
+        {lan.enabled && <div className="lan-status" role="status">
+          <span className={`lan-dot${lan.url ? ' is-on' : ''}`} />
+          <code>{lan.url || t('lan_stopped')}</code>
+          {lan.url && <button type="button" onClick={copyUrl}>{copied ? t('lan_copied') : t('lan_copy')}</button>}
+        </div>}
+        {lan.enabled && <small className="lan-security">{t('lan_security')}</small>}
+      </div>
+    </SettingsRow>
+  );
+}
+
 const AGENT_STATUS = { ok: 'is-ok', update: 'is-update', warn: 'is-warn', off: 'is-off' };
 
 function defaultInstall(agent) {
@@ -145,7 +175,7 @@ function AgentsSection({ lang, agents, scanning, updating, feedback, onScan, onU
   );
 }
 
-export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey, agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent }) {
+export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey, agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent, lan, onLanToggle }) {
   const t = (key) => STR[key][lang];
   const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
   const [benchmarkOverride, setBenchmarkOverride] = useState(null);
@@ -385,6 +415,7 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
             <SettingsRow title={t('settings_quiet_hours')} hint={t('settings_quiet_hours_hint')}>
               <SettingsChoice label={t('settings_quiet_hours')} value={preferences.quietHours} onChange={(value) => onPreferenceChange('quietHours', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
             </SettingsRow>
+            <LanSection lang={lang} lan={lan} onToggle={onLanToggle} />
             <button type="button" className="settings-quit" onClick={() => sendCommand({ cmd: 'quit' })}>{t('settings_quit')}</button>
           </SettingsSection>
 

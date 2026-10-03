@@ -118,6 +118,7 @@ function App() {
   const [agentFeedback, setAgentFeedback] = useState(null);
   const [planModels, setPlanModels] = useState({});
   const [shareStatus, setShareStatus] = useState(null);
+  const [lan, setLan] = useState({ enabled: false, port: null, url: null });
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
@@ -166,6 +167,7 @@ function App() {
         setGoatKeyStored(!!state.goatKeyStored);
         setDeepSeekKeyStored(!!state.deepseekKeyStored);
         setPlanModels(state.planModels || {});
+        setLan(state.lan || { enabled: false, port: null, url: null });
         setPreferences((current) => {
           const next = { ...current, autostart: !!state.autostart };
           saveGuiPreferences(next);
@@ -182,6 +184,9 @@ function App() {
       __onShareImageSaved: (status) => {
         setShareStatus(status);
         setTimeout(() => setShareStatus((current) => (current === status ? null : current)), 4000);
+      },
+      __onLanStatus: (status) => {
+        setLan(status || { enabled: false, port: null, url: null });
       },
       __onAutostartResult: (success) => {
         if (!success) {
@@ -356,6 +361,8 @@ function App() {
       agentFeedback={agentFeedback}
       onScanAgents={scanAgents}
       onUpdateAgent={updateAgent}
+      lan={lan}
+      onLanToggle={(enabled) => sendCommand({ cmd: 'setLanDashboard', enabled })}
       monthlyValue={data?.monthly_value}
       currency={{ code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError }}
     />

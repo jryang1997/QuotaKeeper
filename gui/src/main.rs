@@ -12,6 +12,7 @@ pub mod cache;
 pub mod desktop;
 pub mod export;
 pub mod ipc;
+pub mod lan;
 pub mod overlay;
 pub mod refresh;
 pub mod single_instance;
@@ -88,6 +89,7 @@ enum UserEvent {
     ProviderKeyReveal(String),
     PlanModelsImport(String, Vec<String>),
     SaveShareImage(String),
+    SetLanDashboard(bool),
 }
 
 fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f64)> {
@@ -146,6 +148,21 @@ fn provider_key(slug: &str) -> Option<String> {
         "kimi" => credential::kimi_key().ok().flatten(),
         _ => None,
     }
+}
+
+/// LAN 看板状态 JSON:实际监听端口 + 局域网完整地址;server 为 None 即未运行。
+fn lan_status_json(server: &Option<lan::LanServer>) -> String {
+    let (port, url) = match server.as_ref() {
+        Some(server) => match lan::lan_ip() {
+            Some(ip) => (
+                server.port.to_string(),
+                format!("\"http://{ip}:{}/\"", server.port),
+            ),
+            None => (server.port.to_string(), "null".to_string()),
+        },
+        None => ("null".to_string(), "null".to_string()),
+    };
+    format!("{{\"enabled\":{},\"port\":{port},\"url\":{url}}}", server.is_some())
 }
 
 pub static FRONTEND: Dir = include_dir!("$CARGO_MANIFEST_DIR/frontend/dist");
@@ -348,6 +365,9 @@ fn main() -> anyhow::Result<()> {
                         let _ = ipc_proxy.send_event(UserEvent::SaveShareImage(image));
                     }
                 }
+                "setLanDashboard" => {
+                    let _ = ipc_proxy.send_event(UserEvent::SetLanDashboard(command.enabled.unwrap_or(false)));
+                }
                 "runAgentUpdate" => {
                     if let Some(agent) = command.agent.as_deref().filter(|id| !id.is_empty()) {
                         agents::update(ipc_proxy.clone(), agent.to_string());
@@ -373,7 +393,7 @@ fn main() -> anyhow::Result<()> {
     let mut notify_lang = 0;
     let mut latest_quota_fetched_at_ms = 0_u64;
     let mut latest_quota_checked_at_ms = 0_u64;
-    let mut latest_ledger: Option<Box<tui_token_monitor::ledger::LedgerReport>> = None;
+    let mut latest_ledger: Option<std::sync::Arc<tui_token_monitor::ledger::LedgerReport>> = None;
     let mut latest_ledger_fetched_at_ms = 0_u64;
     let mut latest_goat_usage = None::<tui_token_monitor::goat::UsageSummary>;
     let mut latest_deepseek_balance = tui_token_monitor::deepseek_balance::BalanceState::MissingKey;
@@ -381,6 +401,11 @@ fn main() -> anyhow::Result<()> {
     let mut overlay: Option<(tao::window::Window, wry::WebView)> = None;
     let mut overlay_index: usize = 0;
     let mut overlay_last_save = std::time::Instant::now();
+    let mut lan_server = if tui_token_monitor::settings::lan_dashboard_enabled() {
+        lan::LanServer::start()
+    } else {
+        None
+    };
     let mut tray = None;
     let mut tray_level = None::<u8>;
     let mut last_tray_click = None::<std::time::Instant>;
@@ -501,7 +526,8 @@ fn main() -> anyhow::Result<()> {
                 let deepseek_key_stored = tui_token_monitor::credential::has_deepseek_key();
                 let plan_models = serde_json::to_string(&tui_token_monitor::settings::plan_models())
                     .unwrap_or_else(|_| "{}".into());
-                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored},planModels:{plan_models}}})"));
+                let lan_status = lan_status_json(&lan_server);
+                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored},planModels:{plan_models},lan:{lan_status}}})"));
             }
             Event::UserEvent(UserEvent::SetGoApiKey(key)) => {
                 let result = match key {
@@ -595,6 +621,17 @@ fn main() -> anyhow::Result<()> {
                 let _ = webview
                     .borrow()
                     .evaluate_script(&format!("window.__onShareImageSaved?.({message})"));
+            }
+            Event::UserEvent(UserEvent::SetLanDashboard(enabled)) => {
+                let _ = tui_token_monitor::settings::save_lan_dashboard_enabled(enabled);
+                lan_server = None; // Drop 即停
+                if enabled {
+                    lan_server = lan::LanServer::start();
+                }
+                let payload = lan_status_json(&lan_server);
+                let _ = webview
+                    .borrow()
+                    .evaluate_script(&format!("window.__onLanStatus?.({payload})"));
             }
             Event::UserEvent(UserEvent::Export(format, selection)) => {
                 let status = if let Some(report) = latest_ledger.as_ref() {
@@ -729,10 +766,11 @@ fn main() -> anyhow::Result<()> {
                         latest_deepseek_balance = balance;
                     }
                     if let Some(ledger) = r.ledger {
-                        latest_ledger = Some(ledger);
+                        latest_ledger = Some(std::sync::Arc::from(*ledger));
                         latest_ledger_fetched_at_ms = r.fetched_at_ms;
                     }
                     if let Some(ledger) = latest_ledger.as_ref() {
+                        let monthly_value = ipc::monthly_value_dto(ledger);
                         let payload = ipc::push(
                             latest_ledger_fetched_at_ms,
                             latest_quota_fetched_at_ms,
@@ -742,6 +780,13 @@ fn main() -> anyhow::Result<()> {
                             ledger,
                             latest_goat_usage,
                             latest_deepseek_balance.clone(),
+                        );
+                        lan::publish(
+                            &latest_snapshot,
+                            Some(ledger),
+                            latest_goat_usage.as_ref(),
+                            Some(monthly_value.month_api_equivalent_usd),
+                            Some(monthly_value.list_price_multiple),
                         );
                         let js = format!("window.__onPush && window.__onPush({payload});");
                         // WebView 未就绪时 evaluate_script 出错;下轮采集会自然重推

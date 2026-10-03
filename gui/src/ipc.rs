@@ -320,7 +320,7 @@ pub struct MonthlyValueDto {
     pub estimated_usd: f64,
 }
 
-fn monthly_value_dto(r: &ledger::LedgerReport) -> MonthlyValueDto {
+pub(crate) fn monthly_value_dto(r: &ledger::LedgerReport) -> MonthlyValueDto {
     let month_api_equivalent_usd = r.month.cost();
     let benchmark = settings::monthly_plan_benchmark();
     MonthlyValueDto {

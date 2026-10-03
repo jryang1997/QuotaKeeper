@@ -20,6 +20,8 @@ struct SettingsFile {
     monthly_plan_usd: Option<f64>,
     /// 套餐卡「导入」的官方模型清单(provider slug → 模型名),供展示与复制。
     plan_models: std::collections::BTreeMap<String, Vec<String>>,
+    /// 局域网 Standby 看板开关(服务在 GUI 进程内,必须后端持久化)。
+    lan_dashboard_enabled: bool,
 }
 
 pub fn home_dir() -> Option<PathBuf> {
@@ -112,6 +114,26 @@ pub fn plan_models() -> std::collections::BTreeMap<String, Vec<String>> {
         .and_then(|text| serde_json::from_str::<SettingsFile>(&text).ok())
         .map(|settings| settings.plan_models)
         .unwrap_or_default()
+}
+
+pub fn lan_dashboard_enabled() -> bool {
+    home_dir()
+        .and_then(|home| std::fs::read_to_string(settings_path(&home)).ok())
+        .and_then(|text| serde_json::from_str::<SettingsFile>(&text).ok())
+        .is_some_and(|settings| settings.lan_dashboard_enabled)
+}
+
+pub fn save_lan_dashboard_enabled(enabled: bool) -> std::io::Result<()> {
+    let home = home_dir().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
+    })?;
+    let path = settings_path(&home);
+    let mut settings = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<SettingsFile>(&text).ok())
+        .unwrap_or_default();
+    settings.lan_dashboard_enabled = enabled;
+    write_settings(&path, &settings)
 }
 
 pub fn save_plan_models(provider: &str, models: &[String]) -> std::io::Result<()> {

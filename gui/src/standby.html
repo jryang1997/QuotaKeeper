@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#000000" />
+<title>Token Monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro Display", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+    background: #000; color: #f5f5f7; overflow: hidden;
+    font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  }
+  .deck { height: 100dvh; display: flex; flex-direction: column; }
+  /* 顶栏:时间 + 数据新鲜度,半透明材质 */
+  .topbar {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: calc(10px + env(safe-area-inset-top)) 22px 10px;
+    font-size: 13px; letter-spacing: 0.06em; color: #98989f;
+  }
+  .topbar .clock { font-weight: 600; color: #f5f5f7; font-variant-numeric: tabular-nums; }
+  .topbar .fresh { display: inline-flex; align-items: center; gap: 6px; }
+  .topbar .fresh i { width: 7px; height: 7px; border-radius: 50%; background: #30d158; }
+  .topbar .fresh.stale i { background: #ffd60a; }
+  /* 视图轨道:scroll-snap 原生惯性轻扫(Standby 同款交互) */
+  .track {
+    flex: 1; display: flex; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+  }
+  .track::-webkit-scrollbar { display: none; }
+  .view { flex: 0 0 100%; scroll-snap-align: center; overflow-y: auto; padding: 6px 16px 20px; -webkit-overflow-scrolling: touch; }
+  /* 圆点指示 */
+  .dots { flex: none; display: flex; justify-content: center; gap: 8px; padding: 10px 0 calc(12px + env(safe-area-inset-bottom)); }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: #ffffff2e; transition: background 0.25s, transform 0.25s; }
+  .dots i.on { background: #f5f5f7; transform: scale(1.15); }
+  /* 卡片:半透明材质,内容滚动其下 */
+  .card {
+    background: rgba(120, 120, 128, 0.14);
+    -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
+    border-radius: 22px; padding: 18px 18px 16px; margin-bottom: 12px;
+  }
+  .card h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.1em; color: #98989f; text-transform: uppercase; margin-bottom: 10px; }
+  /* 大数字:负字距、紧行高(光学尺寸原则) */
+  .big { font-size: clamp(44px, 13vw, 76px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.02; }
+  .big small { font-size: 0.42em; font-weight: 600; color: #98989f; letter-spacing: 0; margin-left: 6px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > .card { flex: 1 1 240px; }
+  .sub { display: flex; gap: 18px; margin-top: 8px; font-size: 14px; color: #c7c7cc; }
+  .sub b { color: #f5f5f7; font-weight: 600; }
+  /* 环卡网格:横屏两列,竖屏一列 */
+  .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .ring-card { display: flex; align-items: center; gap: 14px; }
+  .ring-card svg { width: 84px; height: 84px; flex: none; }
+  .ring-copy { min-width: 0; }
+  .ring-copy .name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ring-copy .plan { font-size: 12px; color: #98989f; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ring-copy .reset { font-size: 12px; color: #98989f; margin-top: 4px; }
+  .ring-num { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  /* 时段柱 */
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+  .bars i { flex: 1; min-height: 3px; border-radius: 3px 3px 0 0; background: #5e5ce6; opacity: 0.9; }
+  .bars i.peak { background: #30d158; }
+  .scale { display: flex; justify-content: space-between; font-size: 10px; color: #636366; margin-top: 6px; }
+  /* 时间段分段控件 */
+  .seg { display: inline-flex; background: rgba(120, 120, 128, 0.2); border-radius: 10px; padding: 2px; margin-bottom: 12px; }
+  .seg button {
+    border: 0; background: transparent; color: #c7c7cc; font: inherit; font-size: 13px; font-weight: 600;
+    padding: 6px 16px; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s;
+  }
+  .seg button.on { background: #f5f5f7; color: #000; }
+  .empty { color: #636366; font-size: 14px; padding: 30px 0; text-align: center; }
+  .brand { font-size: 11px; letter-spacing: 0.28em; color: #48484a; text-align: center; padding-bottom: 4px; }
+  @media (prefers-reduced-motion: reduce) {
+    .dots i { transition: none; }
+    .seg button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+  <div class="topbar">
+    <span class="clock" id="clock">—</span>
+    <span class="fresh" id="fresh"><i></i><span id="freshText">连接中</span></span>
+  </div>
+  <div class="track" id="track">
+    <section class="view" id="viewQuota">
+      <h3 class="card" style="padding:14px 18px">订阅配额</h3>
+      <div class="rings" id="rings"></div>
+      <div class="empty" id="ringsEmpty" hidden>等待配额数据…</div>
+    </section>
+    <section class="view" id="viewUsage">
+      <div class="seg" id="seg" role="tablist">
+        <button type="button" class="on" data-period="today">今日</button>
+        <button type="button" data-period="week">本周</button>
+        <button type="button" data-period="month">本月</button>
+      </div>
+      <div class="card">
+        <h3>Tokens</h3>
+        <div class="big" id="pTokens">—</div>
+        <div class="sub" id="pTokensSub"></div>
+      </div>
+      <div class="row">
+        <div class="card"><h3>请求</h3><div class="big" id="pRequests" style="font-size:clamp(36px,10vw,58px)">—</div></div>
+        <div class="card"><h3>花费</h3><div class="big" id="pCost" style="font-size:clamp(36px,10vw,58px)">—</div></div>
+      </div>
+      <div class="card" id="burnCard" hidden>
+        <h3>当前燃烧率</h3>
+        <div class="big" id="burn" style="font-size:clamp(30px,8vw,46px)">—</div>
+      </div>
+    </section>
+    <section class="view" id="viewHours">
+      <div class="card">
+        <h3>30 天活跃时段 · 24H</h3>
+        <div class="bars" id="bars"></div>
+        <div class="scale"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+        <div class="sub" id="peakLine"></div>
+      </div>
+      <div class="card" id="valueCard" hidden>
+        <h3>本月 API 等价价值</h3>
+        <div class="big" id="value">$—</div>
+        <div class="sub" id="valueSub"></div>
+      </div>
+    </section>
+  </div>
+  <div class="dots" id="dots"><i class="on"></i><i></i><i></i></div>
+  <div class="brand">TOKEN MONITOR</div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fmtTokens = (n) => {
+    if (!Number.isFinite(n)) return '—';
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(Math.round(n));
+  };
+  const fmtMoney = (n) => n == null || !Number.isFinite(n) ? '—' : '$' + n.toFixed(2);
+  const fmtReset = (ms) => {
+    if (ms == null || ms <= 0) return '';
+    const m = Math.round(ms / 60000);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h' + (m % 60 ? (m % 60) + 'm' : '');
+    return Math.floor(h / 24) + 'd' + (h % 24 ? (h % 24) + 'h' : '');
+  };
+  const LEVEL = ['#30d158', '#ffd60a', '#ff453a'];
+
+  // 时钟
+  const tickClock = () => {
+    const now = new Date();
+    $('clock').textContent = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  };
+  tickClock();
+  setInterval(tickClock, 15000);
+
+  // 轻扫页与圆点同步(scroll-snap 原生惯性,只做指示器联动)
+  const track = $('track');
+  const dots = [...$('dots').children];
+  track.addEventListener('scroll', () => {
+    const index = Math.round(track.scrollLeft / track.clientWidth);
+    dots.forEach((dot, i) => dot.classList.toggle('on', i === index));
+  }, { passive: true });
+
+  // 时间段分段(点按即时反馈,CSS :active 补充按下态)
+  let period = 'today';
+  $('seg').addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-period]');
+    if (!button) return;
+    period = button.dataset.period;
+    [...$('seg').children].forEach((b) => b.classList.toggle('on', b === button));
+    render(last, period);
+  });
+
+  // 环卡(24 段分块环,与应用内同语言)
+  const SEGMENTS = 24;
+  const segPath = (cx, cy, r, index) => {
+    const gap = 2;
+    const start = (index * 360) / SEGMENTS - 90 + gap / 2;
+    const end = ((index + 1) * 360) / SEGMENTS - 90 - gap / 2;
+    const rad = (deg) => (deg * Math.PI) / 180;
+    const x1 = cx + r * Math.cos(rad(start)), y1 = cy + r * Math.sin(rad(start));
+    const x2 = cx + r * Math.cos(rad(end)), y2 = cy + r * Math.sin(rad(end));
+    return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+  };
+  const ringSvg = (pct, level) => {
+    const lit = Math.round(Math.min(pct, 100) / 100 * SEGMENTS);
+    const color = LEVEL[Math.min(level, 2)];
+    let paths = '';
+    for (let i = 0; i < SEGMENTS; i++) {
+      paths += `<path d="${segPath(42, 42, 36, i)}" stroke="${i < lit ? color : 'rgba(255,255,255,0.09)'}" stroke-width="6.5" fill="none" stroke-linecap="round"/>`;
+    }
+    return `<svg viewBox="0 0 84 84" aria-hidden="true">${paths}</svg>`;
+  };
+
+  let last = null;
+  function render(data) {
+    last = data;
+    // 配额环:同套餐多窗口聚合展示
+    const rings = $('rings');
+    const grouped = new Map();
+    (data.rings || []).forEach((ring) => {
+      const key = ring.title + '|' + ring.planType;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(ring);
+    });
+    rings.innerHTML = [...grouped.entries()].map(([key, list]) => {
+      const head = list[0];
+      const tightest = list.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+      const chips = list.map((ring) => `
+        <div class="ring-copy" style="margin-top:8px">
+          <span class="ring-num" style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(ring.usedPct)}%</span>
+          <span class="plan" style="margin-left:6px">${ring.label}${ring.resetsInMs ? ' · ' + fmtReset(ring.resetsInMs) + ' 后重置' : ''}</span>
+        </div>`).join('');
+      return `<div class="card ring-card">
+        ${ringSvg(tightest.usedPct, tightest.level)}
+        <div class="ring-copy">
+          <div class="name">${head.title}</div>
+          <div class="plan">${head.planType || ''}</div>
+          ${chips}
+        </div>
+      </div>`;
+    }).join('');
+    $('ringsEmpty').hidden = grouped.size > 0;
+
+    // 用量(按所选时间段)
+    const periodData = data[period] || {};
+    $('pTokens').innerHTML = fmtTokens(periodData.tokens || 0);
+    $('pRequests').textContent = (periodData.messages || 0).toLocaleString();
+    $('pCost').textContent = fmtMoney(periodData.cost);
+    const burn = data.burnRate;
+    $('burnCard').hidden = !(burn > 0);
+    if (burn > 0) $('burn').innerHTML = fmtTokens(burn) + '<small>/min</small>';
+
+    // 时段
+    const hourly = data.hourly || [];
+    if (hourly.length) {
+      const max = Math.max(1, ...hourly);
+      let peak = 0;
+      hourly.forEach((v, i) => { if (v > hourly[peak]) peak = i; });
+      $('bars').innerHTML = hourly.map((v, i) => `<i class="${i === peak && v > 0 ? 'peak' : ''}" style="height:${Math.max(3, v / max * 100)}%"></i>`).join('');
+      $('peakLine').innerHTML = `最活跃 <b>${String(peak).padStart(2, '0')}:00</b> 前后 · 30 天合计 <b>${fmtTokens(hourly.reduce((a, b) => a + b, 0))}</b>`;
+    }
+    const value = data.monthlyApiValueUsd;
+    $('valueCard').hidden = !(value > 0);
+    if (value > 0) {
+      $('value').textContent = fmtMoney(value);
+      $('valueSub').innerHTML = data.monthlyMultiple > 0 ? `约等于包月额度的 <b>${data.monthlyMultiple.toFixed(1)}×</b>` : '';
+    }
+
+    // 新鲜度
+    const age = Date.now() - (data.generatedAtMs || 0);
+    const stale = age > 120000;
+    $('fresh').classList.toggle('stale', stale);
+    $('freshText').textContent = stale ? '数据滞后' : '实时';
+  }
+
+  async function poll() {
+    try {
+      const response = await fetch('/api/summary', { cache: 'no-store' });
+      if (!response.ok) throw new Error(response.status);
+      render(await response.json());
+    } catch {
+      $('fresh').classList.add('stale');
+      $('freshText').textContent = '等待数据';
+    }
+  }
+  poll();
+  setInterval(poll, 30000);
+</script>
+</body>
+</html>

@@ -183,12 +183,11 @@ fn decode_base64(text: &str) -> Result<Vec<u8>> {
         .filter(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
         .collect();
     let mut out = Vec::with_capacity(clean.len() * 3 / 4);
-    for chunk in clean.chunks_exact(4) {
-        let a = value_of(chunk[0])? as u32;
-        let b = value_of(chunk[1])? as u32;
-        let c = value_of(chunk[2])? as u32;
-        let d = value_of(chunk[3])? as u32;
-        let word = (a << 18) | (b << 12) | (c << 6) | d;
+    for [a, b, c, d] in clean.as_chunks::<4>().0 {
+        let word = (value_of(*a)? as u32) << 18
+            | (value_of(*b)? as u32) << 12
+            | (value_of(*c)? as u32) << 6
+            | value_of(*d)? as u32;
         out.push((word >> 16) as u8);
         out.push((word >> 8) as u8);
         out.push(word as u8);
@@ -207,7 +206,7 @@ fn decode_base64(text: &str) -> Result<Vec<u8>> {
             out.push((word >> 16) as u8);
             out.push((word >> 8) as u8);
         }
-        0 | _ => {}
+        _ => {}
     }
     Ok(out)
 }
