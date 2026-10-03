@@ -294,8 +294,7 @@ fn probe_version(path: &Path) -> Option<String> {
     command.arg("--version");
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     finish_with_timeout(&mut command, VERSION_TIMEOUT)
-        .map(|output| parse_version(&output))
-        .flatten()
+        .and_then(|output| parse_version(&output))
 }
 
 fn parse_version(output: &str) -> Option<String> {
@@ -392,17 +391,18 @@ pub fn run_update(command: &str) -> Result<String, String> {
     script.push(format!("token-monitor-update-{}.bat", std::process::id()));
     std::fs::write(&script, format!("@echo off\r\ncall {command}\r\nif errorlevel 1 exit /b 1\r\n"))
         .map_err(|error| format!("写入临时脚本失败: {error}"))?;
-    let result = (|| {
+    let run = || {
         let mut cmd = Command::new("cmd");
         cmd.arg("/C").arg(&script).stdout(Stdio::piped()).stderr(Stdio::piped());
         finish_with_timeout(&mut cmd, UPDATE_TIMEOUT).ok_or_else(|| "更新超时,已终止".to_string())
-    })();
+    };
+    let result = run();
     let _ = std::fs::remove_file(&script);
     let text = result?;
     let status_line = text
         .lines()
-        .filter(|line| !line.trim().is_empty())
-        .last()
+        .rev()
+        .find(|line| !line.trim().is_empty())
         .unwrap_or("")
         .trim();
     Ok(status_line.chars().take(200).collect())

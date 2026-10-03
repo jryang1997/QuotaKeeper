@@ -13,6 +13,7 @@ import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPrefer
 import { fetchExchangeRate, readExchangeRates } from './currency.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import PanelsPage from './PanelsPage.jsx';
+import SharePage from './SharePage.jsx';
 import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
 import { MotionProvider, useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 import { CONTROL_SPRING, FADE } from './motion-tuning.js';
@@ -24,7 +25,7 @@ import { Toast } from '@astryxdesign/core/Toast';
 
 const PageTransition = lazy(() => import('./PageTransition.jsx'));
 
-const NAV_ITEMS = ['quota', 'usage', 'heat', 'settings'];
+const NAV_ITEMS = ['quota', 'usage', 'heat', 'share', 'settings'];
 
 function NavIcon({ page }) {
   if (page === 'quota') {
@@ -34,6 +35,10 @@ function NavIcon({ page }) {
   if (page === 'usage') {
     // 带轴圆帽柱:轴一次画到位,三根柱节奏降序,读作「用量」
     return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M8 17v-4" /><path d="M13 17V8" /><path d="M18 17v-7" /></svg>;
+  }
+  if (page === 'share') {
+    // 分享:三节点连线,读作「卡片 → 分享出去」
+    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></svg>;
   }
   if (page === 'settings') {
     // lucide 现代齿轮:外环由 8 组对称圆弧构成,光学中心与圆孔重合
@@ -111,6 +116,8 @@ function App() {
   const [agentsScanning, setAgentsScanning] = useState(false);
   const [agentUpdating, setAgentUpdating] = useState(null);
   const [agentFeedback, setAgentFeedback] = useState(null);
+  const [planModels, setPlanModels] = useState({});
+  const [shareStatus, setShareStatus] = useState(null);
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
@@ -158,11 +165,23 @@ function App() {
         setGoKeyStored(!!state.goKeyStored);
         setGoatKeyStored(!!state.goatKeyStored);
         setDeepSeekKeyStored(!!state.deepseekKeyStored);
+        setPlanModels(state.planModels || {});
         setPreferences((current) => {
           const next = { ...current, autostart: !!state.autostart };
           saveGuiPreferences(next);
           return next;
         });
+      },
+      __onProviderKey: (payload) => {
+        // key 只经事件进入会话内存,由 CardDetails 缓存;不落 React 持久态
+        window.dispatchEvent(new CustomEvent('provider-key', { detail: payload }));
+      },
+      __onPlanModelsSaved: ({ ok }) => {
+        if (ok) sendCommand({ cmd: 'queryNativePreferences' });
+      },
+      __onShareImageSaved: (status) => {
+        setShareStatus(status);
+        setTimeout(() => setShareStatus((current) => (current === status ? null : current)), 4000);
       },
       __onAutostartResult: (success) => {
         if (!success) {
@@ -292,7 +311,8 @@ function App() {
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
       else if (event.key === '3') setPage('heat');
-      else if (event.key === '4') setPage('settings');
+      else if (event.key === '4') setPage('share');
+      else if (event.key === '5') setPage('settings');
       else if (event.key.toLowerCase() === 'r' && !refreshing) refresh();
       else if (event.key.toLowerCase() === 'p') cycleTheme();
       else return;
@@ -341,9 +361,10 @@ function App() {
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} planModels={planModels} onPreferenceChange={updatePreference} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
       {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} reduceMotion={preferences.motion === 'reduced'} onOpenSettings={() => setPage('settings')} />}
       {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} />}
+      {page === 'share' && <SharePage ledger={data.ledger} monthlyValue={data.monthly_value} lang={lang} shareStatus={shareStatus} />}
     </>
   ) : null;
 
@@ -378,7 +399,7 @@ function App() {
 
       <main ref={mainRef} className="main" onScroll={(event) => { scrollByPage.current[page] = event.currentTarget.scrollTop; }}>
         <div className="main-toolbar">
-          <Text weight="medium" className="page-title">{t(page === 'quota' ? 'nav_quota' : page === 'usage' ? 'nav_usage' : page === 'heat' ? 'nav_heat' : 'nav_settings')}</Text>
+          <Text weight="medium" className="page-title">{t(`nav_${page}`)}</Text>
           <div className="main-toolbar-spacer" />
           {page === 'quota' && <div className="quota-mode-seg">
             <SelectionGroup>

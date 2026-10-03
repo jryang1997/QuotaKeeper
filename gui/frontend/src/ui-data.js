@@ -78,6 +78,7 @@ export const STR = {
   nav_usage: ['Token 用量', 'Token Usage'],
   nav_heat: ['面板', 'Panels'],
   nav_settings: ['设置', 'Settings'],
+  nav_share: ['分享卡', 'Share card'],
   refresh: ['刷新', 'Refresh'],
   refreshing: ['采集中…', 'Fetching…'],
   updated: ['更新于', 'Updated'],
@@ -259,6 +260,35 @@ export const STR = {
   agents_update_ok: ['升级完成', 'Upgrade finished'],
   agents_update_fail: ['升级失败', 'Upgrade failed'],
   agents_empty: ['本机未检出任何 CLI Agent', 'No CLI agents detected on this machine'],
+  card_details: ['套餐详情', 'Plan details'],
+  models_title: ['可用模型', 'Available models'],
+  models_import: ['导入', 'Import'],
+  models_imported: ['已导入', 'Imported'],
+  models_copy: ['复制列表', 'Copy list'],
+  models_copied: ['已复制到剪贴板', 'Copied to clipboard'],
+  models_source: ['官方名称 · 核对于', 'Official names · verified'],
+  key_stored: ['API key（凭据管理器）', 'API key (Credential Manager)'],
+  key_mask_hint: ['悬停显示 · 点击复制', 'Hover to reveal · click to copy'],
+  key_clip_clear: ['复制后 30s 清空剪贴板', 'Clear clipboard 30s after copy'],
+  key_copy_done: ['已复制 · 30s 后自动清空剪贴板', 'Copied · clipboard clears in 30s'],
+  key_missing: ['未在应用内存有该套餐的 key', 'No key stored for this plan in the app'],
+  share_export: ['导出 PNG', 'Export PNG'],
+  share_exporting: ['生成中…', 'Rendering…'],
+  share_saved: ['已保存 PNG', 'PNG saved'],
+  share_canceled: ['已取消保存', 'Save canceled'],
+  share_error: ['导出失败，请重试', 'Export failed, please retry'],
+  share_palette: ['配色', 'Palette'],
+  share_palette_deep: ['深海', 'Deep sea'],
+  share_palette_paper: ['暖纸', 'Warm paper'],
+  share_hint: ['拖拽 / 缩放模块 · 导出 1080 宽 PNG', 'Drag / resize modules · 1080px PNG'],
+  share_empty: ['暂无数据', 'No data yet'],
+  share_mod_hero: ['今日 Token', "Today's tokens"],
+  share_mod_clock: ['活跃时段', 'Active hours'],
+  share_mod_models: ['最常用模型', 'Top models'],
+  share_mod_agents: ['Agent 分布', 'By agent'],
+  share_mod_days: ['近 14 天', 'Last 14 days'],
+  share_mod_value: ['本月价值', 'Monthly value'],
+  share_mod_summary: ['今日之最', 'Highlights'],
   settings_goat_key: ['Command Code GOAT 直连', 'Command Code GOAT direct access'],
   settings_goat_key_hint: ['密钥存入 Windows 凭据管理器', 'Stored in Windows Credential Manager'],
   settings_alerts_on: ['开启', 'On'],
@@ -286,6 +316,21 @@ export const STR = {
   welcome_done: ['开始使用', 'Get started'],
   welcome_reopen: ['重新检测来源', 'Review sources'],
   welcome_repair: ['查看修复方法', 'How to fix'],
+};
+
+// 各订阅套餐官方可用模型(内置快照,核对日期见 PLAN_MODELS_VERIFIED,来源:
+// docs.z.ai/devpack/overview、platform.kimi.ai/docs/models、platform.claude.com
+// 模型对照表、learn.chatgpt.com/docs/models、cursor.com/docs/models-and-pricing、
+// antigravity.google/docs/models)。Antigravity 名单官方页未完整公开,仅列交叉印证项。
+// 「导入」写 settings.json(plan_models),「复制列表」直接进剪贴板。
+export const PLAN_MODELS_VERIFIED = '2026-10-03';
+export const PLAN_MODELS = {
+  glm: ['glm-5.3', 'glm-5.3-flash'],
+  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
+  claude: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5', 'claude-fable-5-1'],
+  codex: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'],
+  cursor: ['composer-2.5', 'grok-4.7', 'grok-4.6', 'grok-4.5'],
+  antigravity: ['gemini-3-pro'],
 };
 
 

@@ -18,6 +18,8 @@ pub struct PlanBenchmark {
 #[serde(default)]
 struct SettingsFile {
     monthly_plan_usd: Option<f64>,
+    /// 套餐卡「导入」的官方模型清单(provider slug → 模型名),供展示与复制。
+    plan_models: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 pub fn home_dir() -> Option<PathBuf> {
@@ -101,6 +103,30 @@ pub fn reset_monthly_plan_benchmark_at(home: &Path) -> std::io::Result<()> {
 
 fn valid_monthly_plan(value: f64) -> bool {
     value.is_finite() && value > 0.0 && value <= MAX_MONTHLY_PLAN_USD
+}
+
+/// 已导入的套餐模型清单;文件缺失或损坏时返回空表。
+pub fn plan_models() -> std::collections::BTreeMap<String, Vec<String>> {
+    home_dir()
+        .and_then(|home| std::fs::read_to_string(settings_path(&home)).ok())
+        .and_then(|text| serde_json::from_str::<SettingsFile>(&text).ok())
+        .map(|settings| settings.plan_models)
+        .unwrap_or_default()
+}
+
+pub fn save_plan_models(provider: &str, models: &[String]) -> std::io::Result<()> {
+    let home = home_dir().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
+    })?;
+    let path = settings_path(&home);
+    let mut settings = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<SettingsFile>(&text).ok())
+        .unwrap_or_default();
+    settings
+        .plan_models
+        .insert(provider.to_string(), models.to_vec());
+    write_settings(&path, &settings)
 }
 
 fn write_settings(path: &Path, settings: &SettingsFile) -> std::io::Result<()> {

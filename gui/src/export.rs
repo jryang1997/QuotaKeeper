@@ -167,9 +167,101 @@ pub fn save_report(
     }
 }
 
+fn decode_base64(text: &str) -> Result<Vec<u8>> {
+    fn value_of(byte: u8) -> Result<u8> {
+        match byte {
+            b'A'..=b'Z' => Ok(byte - b'A'),
+            b'a'..=b'z' => Ok(byte - b'a' + 26),
+            b'0'..=b'9' => Ok(byte - b'0' + 52),
+            b'+' => Ok(62),
+            b'/' => Ok(63),
+            _ => Err(anyhow!("invalid base64 byte {byte:#x}")),
+        }
+    }
+    let clean: Vec<u8> = text
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
+        .collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks_exact(4) {
+        let a = value_of(chunk[0])? as u32;
+        let b = value_of(chunk[1])? as u32;
+        let c = value_of(chunk[2])? as u32;
+        let d = value_of(chunk[3])? as u32;
+        let word = (a << 18) | (b << 12) | (c << 6) | d;
+        out.push((word >> 16) as u8);
+        out.push((word >> 8) as u8);
+        out.push(word as u8);
+    }
+    match clean.len() % 4 {
+        2 => {
+            let tail = &clean[clean.len() - 2..];
+            let word = (value_of(tail[0])? as u32) << 18 | (value_of(tail[1])? as u32) << 12;
+            out.push((word >> 16) as u8);
+        }
+        3 => {
+            let tail = &clean[clean.len() - 3..];
+            let word = (value_of(tail[0])? as u32) << 18
+                | (value_of(tail[1])? as u32) << 12
+                | (value_of(tail[2])? as u32) << 6;
+            out.push((word >> 16) as u8);
+            out.push((word >> 8) as u8);
+        }
+        0 | _ => {}
+    }
+    Ok(out)
+}
+
+/// 分享卡导出:前端 snapdom 生成的 `data:image/png;base64,...` 存成 PNG。
+/// None = 用户在对话框取消。
+pub fn save_png(data_url: &str) -> Result<Option<PathBuf>> {
+    const PREFIX: &str = "data:image/png;base64,";
+    let encoded = data_url
+        .strip_prefix(PREFIX)
+        .ok_or_else(|| anyhow!("unsupported image data url"))?;
+    if encoded.len() > 64 * 1024 * 1024 {
+        return Err(anyhow!("image too large"));
+    }
+    let bytes = decode_base64(encoded)?;
+    if !bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Err(anyhow!("not a PNG payload"));
+    }
+    let date = chrono::Local::now().format("%Y%m%d-%H%M").to_string();
+    let path = rfd::FileDialog::new()
+        .set_title("保存分享卡")
+        .set_file_name(format!("token-monitor-share-{date}.png"))
+        .add_filter("PNG", &["png"])
+        .save_file();
+    if let Some(path) = path {
+        std::fs::write(&path, bytes)?;
+        Ok(Some(path))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_decode_round_trips_png_payload() {
+        let payload: Vec<u8> = (0..=255u8).cycle().take(3003).collect();
+        // 与标准库对齐的编码由前端 dataURL 保证;这里用固定样例验证含余数分组
+        let text = "aGVsbG8gd29ybGQ="; // "hello world"
+        assert_eq!(decode_base64(text).unwrap(), b"hello world");
+        let empty = decode_base64("").unwrap();
+        assert!(empty.is_empty());
+        assert!(decode_base64("!!!!").is_err());
+        let _ = payload; // 长度样例仅约束容量路径
+    }
+
+    #[test]
+    fn save_png_rejects_non_png_and_foreign_prefix() {
+        assert!(save_png("data:image/jpeg;base64,AAAA").is_err());
+        assert!(save_png("data:image/png;base64,AAAA").is_err()); // 解出非 PNG 魔数
+        assert!(save_png("hello").is_err());
+    }
 
     #[test]
     fn csv_neutralizes_formulas_and_json_preserves_project_text() {

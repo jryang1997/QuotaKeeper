@@ -51,6 +51,9 @@ struct IpcCommand {
     end: Option<String>,
     agent: Option<String>,
     project: Option<String>,
+    provider: Option<String>,
+    models: Option<Vec<String>>,
+    image: Option<String>,
 }
 
 enum UserEvent {
@@ -82,6 +85,9 @@ enum UserEvent {
     OverlayHide,
     OverlayDrag,
     OverlaySwitch(i32),
+    ProviderKeyReveal(String),
+    PlanModelsImport(String, Vec<String>),
+    SaveShareImage(String),
 }
 
 fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f64)> {
@@ -118,6 +124,28 @@ fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f
 fn in_quiet_hours() -> bool {
     let hour = chrono::Local::now().hour();
     !(8..22).contains(&hour)
+}
+
+/// 模型名只放行常规字符,防把任意内容写进 settings.json。
+fn valid_model_name(model: &str) -> bool {
+    let model = model.trim();
+    !model.is_empty()
+        && model.len() <= 128
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/:@+".contains(c))
+}
+
+/// 首页套餐卡可展示的 API key(仅应用自己存在凭据管理器里的)。
+fn provider_key(slug: &str) -> Option<String> {
+    use tui_token_monitor::credential;
+    match slug {
+        "opencode-go" => credential::open_code_go_key().ok().flatten(),
+        "goat" => credential::command_code_key().ok().flatten(),
+        "glm" => credential::glm_key().ok().flatten(),
+        "kimi" => credential::kimi_key().ok().flatten(),
+        _ => None,
+    }
 }
 
 pub static FRONTEND: Dir = include_dir!("$CARGO_MANIFEST_DIR/frontend/dist");
@@ -301,6 +329,25 @@ fn main() -> anyhow::Result<()> {
                 "toggleOverlay" => {
                     let _ = ipc_proxy.send_event(UserEvent::OverlayToggle);
                 }
+                "revealProviderKey" => {
+                    if let Some(provider) = command.provider.as_deref().filter(|id| !id.is_empty()) {
+                        let _ = ipc_proxy.send_event(UserEvent::ProviderKeyReveal(provider.to_string()));
+                    }
+                }
+                "importPlanModels" => {
+                    if let (Some(provider), Some(models)) = (command.provider.clone(), command.models.clone())
+                        && !provider.is_empty()
+                        && !models.is_empty()
+                        && models.iter().all(|model| valid_model_name(model))
+                    {
+                        let _ = ipc_proxy.send_event(UserEvent::PlanModelsImport(provider, models));
+                    }
+                }
+                "saveShareImage" => {
+                    if let Some(image) = command.image {
+                        let _ = ipc_proxy.send_event(UserEvent::SaveShareImage(image));
+                    }
+                }
                 "runAgentUpdate" => {
                     if let Some(agent) = command.agent.as_deref().filter(|id| !id.is_empty()) {
                         agents::update(ipc_proxy.clone(), agent.to_string());
@@ -452,7 +499,9 @@ fn main() -> anyhow::Result<()> {
                 let go_key_stored = tui_token_monitor::credential::has_open_code_go_key();
                 let goat_key_stored = tui_token_monitor::credential::has_command_code_key();
                 let deepseek_key_stored = tui_token_monitor::credential::has_deepseek_key();
-                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored}}})"));
+                let plan_models = serde_json::to_string(&tui_token_monitor::settings::plan_models())
+                    .unwrap_or_else(|_| "{}".into());
+                let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored},planModels:{plan_models}}})"));
             }
             Event::UserEvent(UserEvent::SetGoApiKey(key)) => {
                 let result = match key {
@@ -518,6 +567,34 @@ fn main() -> anyhow::Result<()> {
                 {
                     overlay::push(view, &latest_snapshot, overlay_index);
                 }
+            }
+            Event::UserEvent(UserEvent::ProviderKeyReveal(provider)) => {
+                // 凭据管理器按需读,内存即用即弃;前端只在悬停时请求
+                let key = provider_key(&provider);
+                let payload = serde_json::json!({ "provider": provider, "key": key });
+                let _ = webview.borrow().evaluate_script(&format!(
+                    "window.__onProviderKey?.({})",
+                    payload
+                ));
+            }
+            Event::UserEvent(UserEvent::PlanModelsImport(provider, models)) => {
+                let ok = tui_token_monitor::settings::save_plan_models(&provider, &models).is_ok();
+                let payload = serde_json::json!({ "provider": provider, "ok": ok });
+                let _ = webview.borrow().evaluate_script(&format!(
+                    "window.__onPlanModelsSaved?.({})",
+                    payload
+                ));
+            }
+            Event::UserEvent(UserEvent::SaveShareImage(image)) => {
+                let status = match export::save_png(&image) {
+                    Ok(Some(_)) => "saved",
+                    Ok(None) => "canceled",
+                    Err(_) => "error",
+                };
+                let message = serde_json::to_string(status).unwrap_or_else(|_| "\"error\"".into());
+                let _ = webview
+                    .borrow()
+                    .evaluate_script(&format!("window.__onShareImageSaved?.({message})"));
             }
             Event::UserEvent(UserEvent::Export(format, selection)) => {
                 let status = if let Some(report) = latest_ledger.as_ref() {

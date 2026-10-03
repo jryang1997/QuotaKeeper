@@ -128,7 +128,7 @@ pub fn save_position(x: i32, y: i32) {
 }
 
 /// 无边框置顶小窗;返回窗口与配套 webview,IPC 经 proxy 回主循环。
-pub fn create(
+pub(crate) fn create(
     target: &EventLoopWindowTarget<UserEvent>,
     proxy: EventLoopProxy<UserEvent>,
 ) -> anyhow::Result<(Window, wry::WebView)> {

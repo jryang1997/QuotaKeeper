@@ -5,6 +5,7 @@ import { Text } from '@astryxdesign/core/Text';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { PROVIDER_ACCENT, STATUS_COLOR, PROVIDER_LOGOS, SOURCE_PATHS, QUOTA_HINT, STR, fmtInt, fmtTokens, fmtCountdown } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
+import CardDetails from './CardDetails.jsx';
 import { AnimatePresence, motion } from 'motion/react';
 import AnimatedNumber from './AnimatedNumber.jsx';
 import { useMotionPreference } from './ui-motion.jsx';
@@ -162,8 +163,14 @@ function DeepSeekBalanceCard({ balance, lang, pinned, accent, onTogglePin, onTog
   </Card>;
 }
 
-function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, remainingView = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings }) {
+function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, remainingView = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings, planModels = {}, clipboardClear = true, onPreferenceChange }) {
   const t = (k) => STR[k][lang];
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpanded = (provider) => setExpanded((current) => {
+    const next = new Set(current);
+    next.has(provider) ? next.delete(provider) : next.add(provider);
+    return next;
+  });
   const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   return (
     <div className="quota-grid">
@@ -188,6 +195,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
               {c.kind === 'Live' && <ExpiryChip endsAtMs={c.subscription_ends_at_ms} lang={lang} />}
               <div className="quota-card-actions">
                 <button type="button" aria-label={`${pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} ${c.title}`} title={pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} onClick={() => onTogglePin?.(c.provider)}>{pinnedCards.includes(c.provider) ? '◆' : '◇'}</button>
+                <button type="button" aria-expanded={expanded.has(c.provider)} aria-label={`${t('card_details')} ${c.title}`} title={t('card_details')} onClick={() => toggleExpanded(c.provider)}>{expanded.has(c.provider) ? '⌃' : '⌄'}</button>
                 <button type="button" aria-label={`${t('card_hide')} ${c.title}`} title={t('card_hide')} onClick={() => onToggleHidden?.(c.provider)}>×</button>
               </div>
             </div>
@@ -228,6 +236,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
                 <span className="quota-monthly-value">{fmtTokens(monthlyTokens)} {t('usage_unit_tokens')}</span>
               </div>
             )}
+            <AnimatePresence>{expanded.has(c.provider) && <CardDetails key="details" provider={c.provider} lang={lang} imported={planModels[c.provider]} clipboardClear={clipboardClear} onPreferenceChange={onPreferenceChange} />}</AnimatePresence>
           </Card>
         );
       })}
@@ -236,7 +245,7 @@ function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPa
   );
 }
 
-export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings }) {
+export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings, planModels = {}, onPreferenceChange }) {
   const t = (key) => STR[key][lang];
   const [selectedSource, setSelectedSource] = useState(null);
   const sourceDetail = sources?.find((source) => source.client === selectedSource);
@@ -270,8 +279,8 @@ export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekB
     </section>) },
     { id: 'tokens', title: t('usage_sum_tokens'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="tokens" ledger={ledger} goat={goatUsage} lang={lang} />) },
     { id: 'requests', title: t('usage_sum_runs'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="requests" ledger={ledger} goat={goatUsage} lang={lang} />) },
-    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) })),
-    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} />) },
+    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} planModels={planModels} clipboardClear={preferences.clipboardClear !== false} onPreferenceChange={onPreferenceChange} />) })),
+    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} planModels={planModels} clipboardClear={preferences.clipboardClear !== false} onPreferenceChange={onPreferenceChange} />) },
     { id: 'sources', title: t('source_health'), w: 12, h: 3, minW: 6, minH: 2, content: (<section className="source-section" aria-label={t('source_health')}>
       <div className="source-heading"><h2>{t('source_health')}</h2></div>
       <div className="source-grid">{sources.map((source) => {

@@ -20,6 +20,7 @@ export const DEFAULT_GUI_PREFERENCES = {
   pinnedCards: [],
   hiddenCards: [],
   providerColors: {},
+  clipboardClear: true,
 };
 
 export function readGuiPreferences(storage = globalThis.localStorage) {
@@ -42,6 +43,7 @@ export function readGuiPreferences(storage = globalThis.localStorage) {
       pinnedCards: Array.isArray(stored.pinnedCards) ? stored.pinnedCards.filter((item) => PROVIDERS.includes(item)) : [],
       hiddenCards: Array.isArray(stored.hiddenCards) ? stored.hiddenCards.filter((item) => PROVIDERS.includes(item)) : [],
       providerColors: Object.fromEntries(Object.entries(stored.providerColors || {}).filter(([key, value]) => PROVIDERS.includes(key) && /^#[0-9a-fA-F]{6}$/.test(value))),
+      clipboardClear: stored.clipboardClear !== false,
     };
   } catch {
     return DEFAULT_GUI_PREFERENCES;
