@@ -21,6 +21,8 @@ For heavy users of AI coding CLIs (Claude Code, Codex, OpenCode, z.ai GLM, Kimi,
 
 A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
 
+Desktop GUI (four pages): **Quota** (a one-screen quota strip plus full provider cards), **Usage** (period summary, a 20-module editable board and an **achievements wall**), **Share** (PNG share card and LAN dashboard) and **Settings** (appearance / sources & keys / desktop & alerts / benchmark & currency / about), alongside an always-on-top three-ring overlay, a tray icon and achievement toasts.
+
 - **Quota page** — one card per subscription: 5h / weekly / monthly windows with █░ progress bars and pace-based exhaustion estimates; system toast notifications on 80% / 100% / reset crossings (deduplicated, optional night silence).
 - **Usage page** — last 60 minutes, today / ISO-week / month totals, agent / session / project / model breakdowns, stacked 24h / 14d trends, monthly API-equivalent cost vs. plan price benchmark, CSV / JSON export.
 - **Heatmap page** — 26-week GitHub-style contribution grid + work-hours profile.

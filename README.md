@@ -22,6 +22,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 - **配额页** — 每家订阅一张卡,5h/周/月窗口 + █░ 进度条 + 按窗口内匀速外推的预计耗尽时间;任一额度跨越 80% / 100% / 重置弹系统 toast(状态机去重,夜间静默可关)。
 - **用量页** — 近 60 分钟活动、今日 / ISO 周 / 本月汇总、Agent / 会话 / 项目 / 模型四维拆分、24h / 14d 堆叠趋势图、月度 API 等值 vs 订阅月费基准、CSV / JSON 导出(桌面版)。
 - **热力图页** — 近 26 周 GitHub 风格贡献格 + 工作时段 Profile(清晨/白天/傍晚/深夜 + 星期分布 + 峰值小时)。
+- **桌面版(GUI)** — 四页:**配额**(全部服务商额度带 + 每张卡的窗口/重置/耗尽预测)、**用量**(时间段摘要 + 趋势/模型/热力图等 20 个可编辑模块 + **成就墙**)、**分享**(分享卡 PNG + 局域网看板)、**设置**(外观 / 数据源与凭据 / 桌面与通知 / 基准与货币 / 关于);外加置顶三环悬浮窗、托盘驻留与成就解锁提示。
 - 中英双语(`l`)、四套主题(`p`)、60s 自动刷新;每家配额独立采集,一家失败不影响别家,账本纯本地、离线可用。
 
 ## 数据源
@@ -80,8 +81,7 @@ cargo build --release --manifest-path gui/Cargo.toml
 run_gui.bat                   # GNU 构建自动把 WebView2Loader.dll 复制到程序旁
 ```
 
-需要 WebView2 Runtime(Win10/11 自带)。前端产物经 `include_dir!` 内嵌进二进制,分发只需 exe(+DLL)。双击 `run_tui.bat` / `run_gui.bat` 都可用;GUI 关窗最小化到托盘,可退出。GUI exe 内嵌应用图标,也可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts
-ew-gui-shortcut.ps1` 生成桌面直启快捷方式(直指 exe,无控制台窗)。
+需要 WebView2 Runtime(Win10/11 自带)。前端产物经 `include_dir!` 内嵌进二进制,分发只需 exe(+DLL)。双击 `run_tui.bat` / `run_gui.bat` 都可用;GUI 关窗最小化到托盘,可退出。GUI exe 内嵌应用图标,也可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-gui-shortcut.ps1` 生成桌面直启快捷方式(直指 exe,无控制台窗)。
 
 ## 平台支持
 
