@@ -1,15 +1,16 @@
+// 配额页:一条"额度带"(全部服务商,最紧张在前) + 每家有配额/余额的完整卡片。
+// 口径:本页只讲服务商额度;本机用量以"本机本月"前缀标注,不混作一谈。
 import ModuleBoard from './ModuleBoard.jsx';
-import React, { useState, useRef } from 'react';
-import { Card } from '@astryxdesign/core/Card';
+import React, { useMemo, useState } from 'react';
 import { Text } from '@astryxdesign/core/Text';
-import { Tooltip } from '@astryxdesign/core/Tooltip';
-import { PROVIDER_ACCENT, STATUS_COLOR, PROVIDER_LOGOS, SOURCE_PATHS, QUOTA_HINT, STR, fmtInt, fmtTokens, fmtCountdown } from './ui-data.js';
+import { PLAN_MODELS, PROVIDER_LOGOS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, STR, fmtInt, fmtTokens, fmtCountdown } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
 import CardDetails from './CardDetails.jsx';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
 import AnimatedNumber from './AnimatedNumber.jsx';
-import { useMotionPreference } from './ui-motion.jsx';
-import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
+import { PopoverSurface } from './ui-motion.jsx';
+
+const PROVIDER_STATUS_COLOR = { ok: 'var(--color-success)', warning: 'var(--color-warning)', exhausted: 'var(--color-error)' };
 
 function quotaPace(limit) {
   const label = limit.label.toLowerCase();
@@ -29,68 +30,6 @@ function quotaPace(limit) {
   return { eta: eta < resetMs ? eta : 'sustainable', delta: limit.used_pct - elapsed / totalMs * 100 };
 }
 
-function TrendBars({ values, color }) {
-  const reduced = useMotionPreference();
-  const max = Math.max(1, ...values);
-  return (
-    <div className="trend-bars" aria-hidden="true">
-      {values.map((v, i) => (
-        <motion.span
-          key={i}
-          initial={false}
-          animate={{ scaleY: Math.max(0.04, v / max) }}
-          transition={reduced ? { duration: 0 } : LAYOUT_SPRING}
-          style={{
-            height: '100%', transformOrigin: 'bottom',
-            background: color,
-            opacity: i === values.length - 1 ? 1 : 0.45,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function UsageSummaryRow({ ledger, goat, lang, part }) {
-  const t = (k) => STR[k][lang];
-  const zh = lang === 0;
-  const now = new Date();
-  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const monthDays = (ledger?.daily_totals || []).filter((d) => d.date.startsWith(monthPrefix));
-  const tokens = goat ? goat.tokens : ledger?.month.total ?? 0;
-  const requests = goat ? goat.requests : ledger?.month.messages ?? 0;
-  const caption = goat ? t('usage_sum_official') : t('usage_sum_local');
-  const content = (
-    <div className="usage-summary-row">
-      <div className="usage-summary-card">
-        <div className="usage-summary-head" style={{ color: 'var(--sum-purple)' }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
-          <span>{t('usage_sum_tokens')}</span>
-        </div>
-        <div className="usage-summary-number"><AnimatedNumber value={tokens} format={fmtTokens} /><span>{t('usage_unit_tokens')}</span></div>
-        <TrendBars values={monthDays.map((d) => d.tokens)} color="var(--sum-purple)" />
-        <div className="usage-summary-caption">{caption}</div>
-      </div>
-      <div className="usage-summary-card">
-        <div className="usage-summary-head" style={{ color: 'var(--sum-orange)' }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
-          <span>{t('usage_sum_runs')}</span>
-        </div>
-        <div className="usage-summary-number"><AnimatedNumber value={requests} format={(value) => fmtInt(Math.round(value))} /><span>{t('usage_unit_runs')}</span></div>
-        <TrendBars values={monthDays.map((d) => d.messages)} color="var(--sum-orange)" />
-        <div className="usage-summary-caption">{caption}</div>
-      </div>
-    </div>
-  );
-  return part ? content.props.children[part === 'tokens' ? 0 : 1] : content;
-}
-
-function ProviderLogo({ provider }) {
-  const src = PROVIDER_LOGOS[provider];
-  if (!src) return <span className="quota-logo quota-logo-fallback" aria-hidden="true" />;
-  return <img className="quota-logo" src={src} alt="" aria-hidden="true" draggable="false" />;
-}
-
 function paceChipText(pace, lang) {
   const zh = lang === 0;
   if (pace.eta === 'sustainable') return zh ? '可撑到重置' : 'lasts to reset';
@@ -102,29 +41,16 @@ function paceChipText(pace, lang) {
     : `${d}pt ${pace.delta >= 0 ? 'ahead' : 'behind'} · ${eta} to empty`;
 }
 
-const QUOTA_CLIENT_OF = { 'opencode-go': 'opencode', codex: 'codex' };
+function statusLabel(status, lang) {
+  if (status === 'exhausted') return STR.status_exhausted[lang];
+  if (status === 'warning') return STR.status_warning[lang];
+  return STR.status_ok[lang];
+}
 
-const RING_SEGMENTS = 24;
-
-// hero 分块环:24 段,pathLength=360 使 dasharray 直接用角度(每段 15°)。
-// 填充 = round(pct/100×24) 段状态色;空段 = 同色 15% 透明(与套餐卡分块条同语言)。
-// 大幅翻转(已用↔剩余)按顺时针波浪 stagger,日常刷新 ±1 段即时弹簧。
-function QuotaRing({ pct, tone }) {
-  const reduced = useMotionPreference();
-  // 每段 15° 槽位:10° 实块 + 5° 间隙;平头(butt)让分块缝隙清晰可见
-  const seg = 10;
-  const gap = 15 - seg;
-  const filled = Math.max(0, Math.min(RING_SEGMENTS, Math.round(pct / 100 * RING_SEGMENTS)));
-  const prev = useRef(filled);
-  const wave = Math.abs(filled - prev.current) > 3;
-  prev.current = filled;
-  const track = Array(RING_SEGMENTS).fill(`${seg} ${gap}`).join(' ');
-  return (
-    <svg className="quota-ring" viewBox="0 0 116 116" aria-hidden="true">
-      <circle className="quota-ring-track" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={track} style={{ color: tone }} />
-      {Array.from({ length: RING_SEGMENTS }, (_, index) => <motion.circle key={index} className="quota-ring-fill" cx="58" cy="58" r="48" pathLength="360" strokeDasharray={`${seg} ${360 - seg}`} strokeDashoffset={-index * 15} style={{ color: tone }} initial={false} animate={{ opacity: index < filled ? 1 : 0 }} transition={reduced ? FADE : { ...LAYOUT_SPRING, delay: wave ? index * 0.012 : 0 }} />)}
-    </svg>
-  );
+function ProviderLogo({ provider }) {
+  const src = PROVIDER_LOGOS[provider];
+  if (!src) return <span className="quota-logo quota-logo-fallback" aria-hidden="true" />;
+  return <img className="quota-logo" src={src} alt="" aria-hidden="true" draggable="false" />;
 }
 
 function ExpiryChip({ endsAtMs, lang }) {
@@ -135,19 +61,176 @@ function ExpiryChip({ endsAtMs, lang }) {
   return <span className={`quota-expiry${days <= 7 ? ' quota-expiry-warning' : ''}`}>{lang === 0 ? `${md} 到期` : `expires ${md}`}</span>;
 }
 
-function DeepSeekBalanceCard({ balance, lang, pinned, accent, onTogglePin, onToggleHidden, onOpenSettings }) {
+// 额度带:一行读一家;最紧张窗口、重置倒计时、提前耗尽预测同屏。
+// 全部服务商都在这一屏,不再是"只看最紧张的那一家"。
+function QuotaStrip({ cards, lang, hiddenCards, pinnedCards, now, onJump, onManage }) {
+  const t = (key) => STR[key][lang];
+  const rows = useMemo(() => cards
+    .filter((card) => card.kind === 'Live' && !hiddenCards.includes(card.provider))
+    .map((card) => {
+      const limits = card.limits || [];
+      const tightest = limits.reduce((best, limit) => (!best || limit.used_pct > best.used_pct ? limit : best), null);
+      const nextReset = limits.filter((limit) => limit.resets_in_ms > 0).sort((a, b) => a.resets_in_ms - b.resets_in_ms)[0];
+      const pace = tightest ? quotaPace(tightest) : null;
+      const elapsed = card.fetchedElapsedMs || 0;
+      return {
+        provider: card.provider,
+        title: card.title,
+        kind: card.method === 'activity_vs_average' ? 'activity' : 'quota',
+        used: tightest ? tightest.used_pct : 0,
+        label: tightest?.label || (lang === 0 ? '暂无窗口' : 'no windows'),
+        status: tightest?.status || 'ok',
+        resetMs: nextReset ? Math.max(0, nextReset.resets_in_ms - elapsed) : null,
+        pace,
+        attention: limits.filter((limit) => limit.status !== 'ok').length,
+      };
+    })
+    .sort((a, b) => b.used - a.used), [cards, hiddenCards, now, lang]);
+  const missing = cards.filter((card) => card.kind !== 'Live' && !hiddenCards.includes(card.provider));
+  const hiddenCount = hiddenCards.length;
+  if (rows.length === 0) {
+    return <section className="quota-strip" aria-label={t('quota_overview')}>
+      <div className="quota-strip-empty"><Text type="supporting">{t('empty_quota')}</Text></div>
+      {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{t('quota_hidden_link').replace('{n}', hiddenCount)}</button>}
+    </section>;
+  }
+  const worst = rows[0];
+  return (
+    <section className="quota-strip" aria-label={t('quota_overview')}>
+      <header className="quota-strip-head">
+        <span className="eyebrow">// {t('quota_overview')}</span>
+        <span className="quota-strip-summary">
+          {rows.some((row) => row.attention > 0)
+            ? `${rows.reduce((sum, row) => sum + row.attention, 0)} ${t('quota_attention')}`
+            : t('quota_all_clear')}
+        </span>
+        {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{t('quota_hidden_link').replace('{n}', hiddenCount)}</button>}
+      </header>
+      <div className="quota-strip-list">
+        {rows.map((row) => (
+          <button type="button" className={`quota-strip-row is-${row.status}${row.provider === worst.provider ? ' is-worst' : ''}`} key={row.provider} onClick={() => onJump(row.provider)}>
+            <span className="quota-strip-provider">
+              <ProviderLogo provider={row.provider} />
+              <span className="quota-strip-name">{row.title.split(' ·')[0]}</span>
+              {pinnedCards.includes(row.provider) && <i className="quota-strip-pin" title={t('card_unpin')}>◆</i>}
+            </span>
+            <span className="quota-strip-window">{row.label}</span>
+            <span className="quota-strip-bar"><BlockBar pct={row.kind === 'activity' ? Math.min(row.used, 100) : row.used} color={row.kind === 'activity' ? PROVIDER_COLOR_DEFAULTS[row.provider] : PROVIDER_STATUS_COLOR[row.status]} /></span>
+            <span className="quota-strip-pct" style={{ color: row.kind === 'activity' ? undefined : PROVIDER_STATUS_COLOR[row.status] }}>
+              {row.kind === 'activity' ? `${Math.round(row.used)}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}` : <AnimatedNumber value={row.used} format={(value) => `${Math.round(value)}%`} />}
+            </span>
+            <span className="quota-strip-reset">{row.resetMs != null ? `${t('resets_in')} ${fmtCountdown(row.resetMs)}` : ''}</span>
+            <span className={`quota-strip-pace${row.pace && row.pace.eta !== 'sustainable' ? ' is-warn' : ''}`}>
+              {row.kind === 'quota' && row.pace ? (row.pace.eta === 'sustainable' ? '✓' : paceChipText(row.pace, lang)) : ''}
+            </span>
+          </button>
+        ))}
+        {missing.map((card) => (
+          <button type="button" className="quota-strip-row is-missing" key={card.provider} onClick={() => onJump(card.provider)}>
+            <span className="quota-strip-provider">
+              <ProviderLogo provider={card.provider} />
+              <span className="quota-strip-name">{card.title.split(' ·')[0]}</span>
+            </span>
+            <span className="quota-strip-window">{card.plan_type || ''}</span>
+            <span className="quota-strip-bar" />
+            <span className="quota-strip-pct">{t('missing')}</span>
+            <span className="quota-strip-reset" />
+            <span className="quota-strip-pace is-hint">{QUOTA_HINT[card.provider]?.[lang] || ''}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CardMenu({ open, onToggle, items, lang }) {
+  return (
+    <div className="quota-menu-wrap">
+      <button type="button" className="quota-menu-btn" aria-expanded={open} aria-haspopup="menu" aria-label={STR.card_menu[lang]} title={STR.card_menu[lang]} onClick={onToggle}>⋯</button>
+      <AnimatePresence>{open && <PopoverSurface className="quota-menu" role="menu">
+        {items.map((item) => <button key={item.key} type="button" role="menuitem" onClick={item.onSelect} className={item.tone ? `is-${item.tone}` : ''}>{item.label}</button>)}
+      </PopoverSurface>}</AnimatePresence>
+    </div>
+  );
+}
+
+function ProviderCard({ card, lang, allowPace, remainingView, pinned, providerColor, monthlyTokens, goatUsage, planModels, clipboardClear, onPreferenceChange, onTogglePin, onToggleHidden }) {
+  const t = (key) => STR[key][lang];
+  const isActivity = card.method === 'activity_vs_average';
+  const accent = providerColor || PROVIDER_COLOR_DEFAULTS[card.provider] || 'var(--color-text-primary)';
+  const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const official = card.provider === 'goat' && goatUsage ? goatUsage : null;
+  const detailsAvailable = (PLAN_MODELS[card.provider]?.length || 0) > 0 || ['opencode-go', 'goat', 'glm', 'kimi'].includes(card.provider);
+  const menuItems = [
+    { key: 'pin', label: pinned ? t('card_unpin') : t('card_pin'), onSelect: () => { onTogglePin(card.provider); setMenuOpen(false); } },
+    ...(detailsAvailable ? [{ key: 'details', label: expanded ? t('card_details_hide') : t('card_details'), onSelect: () => { setExpanded((value) => !value); setMenuOpen(false); } }] : []),
+    { key: 'hide', label: t('card_hide'), tone: 'danger', onSelect: () => { onToggleHidden(card.provider); setMenuOpen(false); } },
+  ];
+  return (
+    <div className={`quota-card${pinned ? ' is-pinned' : ''}${isActivity ? ' quota-card-activity' : ''}`} data-provider={card.provider} style={{ '--card-accent': accent }}>
+      <div className="quota-head">
+        <ProviderLogo provider={card.provider} />
+        <Text weight="medium" className="quota-title" title={card.title}>{card.title}</Text>
+        {card.kind === 'Live' && card.plan_type && card.plan_type.toLowerCase() !== card.title.toLowerCase() && <span className="quota-plan-type" title={card.plan_type}>{card.plan_type}</span>}
+        {card.kind === 'Live' && <ExpiryChip endsAtMs={card.subscription_ends_at_ms} lang={lang} />}
+        <CardMenu lang={lang} open={menuOpen} onToggle={() => setMenuOpen((value) => !value)} items={menuItems} />
+      </div>
+      {card.kind === 'Live' ? (
+        <div className="quota-limits">
+          {card.limits.length === 0 && <Text type="supporting" className="quota-missing-hint">{lang === 0 ? '暂无额度窗口' : 'No quota windows'}</Text>}
+          {card.limits.map((limit) => {
+            const pace = allowPace && !isActivity ? quotaPace(limit) : null;
+            const barPct = remainingView && !isActivity ? Math.max(0, Math.min(100, 100 - limit.used_pct)) : limit.used_pct;
+            return (
+              <div key={limit.label} className="quota-limit">
+                <div className="quota-limit-row">
+                  <span className="quota-limit-label">{limit.label}</span>
+                  <span className="quota-limit-pct" style={{ color: isActivity ? accent : PROVIDER_STATUS_COLOR[limit.status] }}>
+                    {isActivity
+                      ? (limit.used_pct >= 100 ? t('activity_at_least_average') : `${Math.round(barPct)}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}`)
+                      : <AnimatedNumber value={barPct} format={(value) => `${Math.round(value)}%`} />}
+                  </span>
+                </div>
+                <BlockBar pct={barPct} color={isActivity ? accent : PROVIDER_STATUS_COLOR[limit.status]} />
+                <div className="quota-limit-sub">
+                  <span>{isActivity ? t('activity_today') : limit.resets_in_ms != null ? `${t('resets_in')} ${fmtCountdown(limit.resets_in_ms)}` : ' '}</span>
+                  {pace != null && <span className={`quota-pace${pace.eta !== 'sustainable' ? ' quota-pace-warning' : ''}`}>{paceChipText(pace, lang)}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="quota-missing">
+          <Text type="supporting" className="quota-missing-hint">{QUOTA_HINT[card.provider]?.[lang] || card.hints?.[lang]}</Text>
+        </div>
+      )}
+      {(monthlyTokens > 0 || official) && <div className="quota-footnotes">
+        {official && <div className="quota-footnote"><span>{t('quota_official_period')}</span><strong>{fmtTokens(official.tokens, lang === 0)} {t('usage_unit_tokens')} · {fmtInt(official.requests)} {t('quota_requests')}</strong></div>}
+        {monthlyTokens > 0 && <div className="quota-footnote"><span>{t('quota_local_month')}</span><strong>{fmtTokens(monthlyTokens, lang === 0)} {t('usage_unit_tokens')}</strong></div>}
+      </div>}
+      <AnimatePresence>{expanded && <CardDetails key="details" provider={card.provider} lang={lang} imported={planModels[card.provider]} clipboardClear={clipboardClear} onPreferenceChange={onPreferenceChange} />}</AnimatePresence>
+    </div>
+  );
+}
+
+function DeepSeekCard({ balance, lang, pinned, accent, onTogglePin, onToggleHidden, onOpenSettings }) {
+  const t = (key) => STR[key][lang];
   const zh = lang === 0;
+  const [menuOpen, setMenuOpen] = useState(false);
   const money = (amount, currency) => new Intl.NumberFormat(zh ? 'zh-CN' : 'en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
   const status = balance?.status || 'missing_key';
-  return <Card className="quota-card deepseek-balance-card" role="group" aria-label={zh ? 'DeepSeek API 余额' : 'DeepSeek API balance'} style={{ '--deepseek-accent': accent }}>
+  const menuItems = [
+    { key: 'pin', label: pinned ? t('card_unpin') : t('card_pin'), onSelect: () => { onTogglePin('deepseek'); setMenuOpen(false); } },
+    { key: 'hide', label: t('card_hide'), tone: 'danger', onSelect: () => { onToggleHidden('deepseek'); setMenuOpen(false); } },
+  ];
+  return <div className={`quota-card deepseek-balance-card${pinned ? ' is-pinned' : ''}`} style={{ '--card-accent': accent }}>
     <div className="quota-head">
       <ProviderLogo provider="deepseek" />
       <Text weight="medium" className="quota-title">DeepSeek API</Text>
       <span className="quota-plan-type">{zh ? '官方余额' : 'Official balance'}</span>
-      <div className="quota-card-actions">
-        <button type="button" onClick={onTogglePin} aria-label={pinned ? (zh ? '取消置顶 DeepSeek' : 'Unpin DeepSeek') : (zh ? '置顶 DeepSeek' : 'Pin DeepSeek')}>{pinned ? '◆' : '◇'}</button>
-        <button type="button" onClick={onToggleHidden} aria-label={zh ? '隐藏 DeepSeek' : 'Hide DeepSeek'}>×</button>
-      </div>
+      <CardMenu lang={lang} open={menuOpen} onToggle={() => setMenuOpen((value) => !value)} items={menuItems} />
     </div>
     {status === 'ready' ? <>
       <div className="deepseek-balance-status">{balance.is_available ? (zh ? 'API 可用' : 'API available') : (zh ? 'API 当前不可用' : 'API unavailable')}</div>
@@ -160,164 +243,104 @@ function DeepSeekBalanceCard({ balance, lang, pinned, accent, onTogglePin, onTog
       </div>)}
       <p className="deepseek-balance-note">{zh ? '估算可能受充值、赠送额度到期及其他 API 调用影响。' : 'Refills, expiring grants, and other API activity affect estimates.'}</p>
     </> : <div className="quota-missing"><Text type="supporting" className="quota-missing-hint">{status === 'error' ? balance.message : (zh ? '添加 DeepSeek 官方 API key 后显示余额。' : 'Add a DeepSeek API key to show your balance.')}</Text><button className="deepseek-settings-link" type="button" onClick={onOpenSettings}>{zh ? '前往设置' : 'Open settings'}</button></div>}
-  </Card>;
+  </div>;
 }
 
-function QuotaCards({ cards, showDeepseek = true, deepseekBalance, lang, allowPace = false, remainingView = false, pinnedCards = [], hiddenCards = [], providerColors = {}, monthByClient = [], goatUsage = null, onTogglePin, onToggleHidden, onOpenSettings, planModels = {}, clipboardClear = true, onPreferenceChange }) {
-  const t = (k) => STR[k][lang];
-  const [expanded, setExpanded] = useState(() => new Set());
-  const toggleExpanded = (provider) => setExpanded((current) => {
-    const next = new Set(current);
-    next.has(provider) ? next.delete(provider) : next.add(provider);
-    return next;
-  });
-  const ordered = [...cards].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
-  return (
-    <div className="quota-grid">
-      {showDeepseek && pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
-      {ordered.filter((c) => !hiddenCards.includes(c.provider)).map((c) => {
-        const accent = providerColors[c.provider] || PROVIDER_ACCENT[c.provider] || 'var(--color-text-primary)';
-        const isActivity = c.method === 'activity_vs_average';
-        const monthlyTokens = c.kind !== 'Live' ? undefined
-          : c.provider === 'goat'
-            ? goatUsage?.tokens
-            : (() => {
-              const client = QUOTA_CLIENT_OF[c.provider];
-              const row = client && monthByClient.find((r) => r.client === client);
-              return row?.agg.total;
-            })();
-        return (
-          <Card key={c.provider} className={`quota-card${isActivity ? ' quota-card-activity' : ''}`} role="group" aria-label={c.title}>
-            <div className="quota-head">
-              <ProviderLogo provider={c.provider} />
-              <Text weight="medium" className="quota-title" title={c.title}>{c.title}</Text>
-              <span className="quota-plan-type" title={c.kind === 'Live' && c.plan_type ? c.plan_type : undefined}>{c.kind === 'Live' ? c.plan_type || '' : ''}</span>
-              {c.kind === 'Live' && <ExpiryChip endsAtMs={c.subscription_ends_at_ms} lang={lang} />}
-              <div className="quota-card-actions">
-                <button type="button" aria-label={`${pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} ${c.title}`} title={pinnedCards.includes(c.provider) ? t('card_unpin') : t('card_pin')} onClick={() => onTogglePin?.(c.provider)}>{pinnedCards.includes(c.provider) ? '◆' : '◇'}</button>
-                <button type="button" aria-expanded={expanded.has(c.provider)} aria-label={`${t('card_details')} ${c.title}`} title={t('card_details')} onClick={() => toggleExpanded(c.provider)}>{expanded.has(c.provider) ? '⌃' : '⌄'}</button>
-                <button type="button" aria-label={`${t('card_hide')} ${c.title}`} title={t('card_hide')} onClick={() => onToggleHidden?.(c.provider)}>×</button>
-              </div>
-            </div>
-            {c.kind === 'Live' ? (
-              <div className="quota-limits">
-                {c.limits.length === 0 && <Text type="supporting" className="quota-missing-hint">{lang === 0 ? '暂无额度窗口' : 'No quota windows'}</Text>}
-                {c.limits.map((l) => {
-                  const pace = allowPace && !isActivity ? quotaPace(l) : null;
-                  // 剩余视图只翻转真实配额窗口;activity 卡口径不同,保持已用
-                  const barPct = remainingView && !isActivity ? Math.max(0, Math.min(100, 100 - l.used_pct)) : l.used_pct;
-                  const pct = Math.round(barPct);
-                  return (
-                  <div key={l.label} className="quota-limit">
-                    <div className="quota-limit-row">
-                      <span className="quota-limit-label">{l.label}</span>
-                      <span className="quota-limit-pct" style={{ color: isActivity ? accent : STATUS_COLOR[l.status] }}>
-                        {isActivity
-                          ? (l.used_pct >= 100 ? t('activity_at_least_average') : `${pct}% ${lang === 0 ? 'vs' : 'of'} ${t('activity_vs_average')}`)
-                          : <AnimatedNumber value={barPct} format={(value) => `${Math.round(value)}%`} />}
-                      </span>
-                    </div>
-                    <BlockBar pct={barPct} color={isActivity ? accent : STATUS_COLOR[l.status]} />
-                    <div className="quota-limit-sub">
-                      <span>{isActivity ? t('activity_today') : l.resets_in_ms != null ? `${t('resets_in')} ${fmtCountdown(l.resets_in_ms)}` : ' '}</span>
-                      {pace != null && <span className={`quota-pace${pace.eta !== 'sustainable' ? ' quota-pace-warning' : ''}`}>{paceChipText(pace, lang)}</span>}
-                    </div>
-                  </div>
-                );})}
-              </div>
-            ) : (
-              <div className="quota-missing">
-                <Text type="supporting" className="quota-missing-hint">{QUOTA_HINT[c.provider]?.[lang] || c.hints?.[lang]}</Text>
-              </div>
-            )}
-            {monthlyTokens != null && monthlyTokens > 0 && (
-              <div className="quota-monthly">
-                <span className="quota-monthly-label">{t('usage_card_monthly')}</span>
-                <span className="quota-monthly-value">{fmtTokens(monthlyTokens)} {t('usage_unit_tokens')}</span>
-              </div>
-            )}
-            <AnimatePresence>{expanded.has(c.provider) && <CardDetails key="details" provider={c.provider} lang={lang} imported={planModels[c.provider]} clipboardClear={clipboardClear} onPreferenceChange={onPreferenceChange} />}</AnimatePresence>
-          </Card>
-        );
-      })}
-      {showDeepseek && !pinnedCards.includes('deepseek') && !hiddenCards.includes('deepseek') && <DeepSeekBalanceCard balance={deepseekBalance} lang={lang} pinned={false} accent={providerColors.deepseek || PROVIDER_ACCENT.deepseek} onTogglePin={() => onTogglePin?.('deepseek')} onToggleHidden={() => onToggleHidden?.('deepseek')} onOpenSettings={onOpenSettings} />}
-    </div>
-  );
-}
-
-export default function QuotaPage({ cards, sources, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, onTogglePin, onToggleHidden, onOpenSettings, planModels = {}, onPreferenceChange }) {
+export default function QuotaPage({ cards, ledger, goatUsage, deepseekBalance, quotaFetchedAtMs, quotaStale, now, lang, preferences, planModels = {}, onTogglePin, onToggleHidden, onOpenSettings, onPreferenceChange, editing, onToggleEditing, onRestoreCard }) {
   const t = (key) => STR[key][lang];
-  const [selectedSource, setSelectedSource] = useState(null);
-  const sourceDetail = sources?.find((source) => source.client === selectedSource);
   const elapsed = quotaFetchedAtMs ? Math.max(0, now - quotaFetchedAtMs) : 0;
-  const currentCards = cards.map((card) => card.kind === 'Live' ? {
+  const currentCards = useMemo(() => cards.map((card) => card.kind === 'Live' ? {
     ...card,
     limits: card.limits.map((limit) => ({ ...limit, resets_in_ms: limit.resets_in_ms == null ? null : Math.max(0, limit.resets_in_ms - elapsed) })),
-  } : card);
-  const live = currentCards.filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average' && !preferences.hiddenCards.includes(card.provider));
-  const limits = live.flatMap((card) => card.limits.map((limit) => ({ ...limit, provider: card.title.split(' ·')[0] })));
-  const tightest = limits.reduce((best, current) => !best || current.used_pct > best.used_pct ? current : best, null);
-  const nextReset = limits.filter((limit) => limit.resets_in_ms > 0).sort((a, b) => a.resets_in_ms - b.resets_in_ms)[0];
-  const attention = limits.filter((limit) => limit.status !== 'ok').length;
-  const pct = tightest ? Math.max(0, Math.min(100, tightest.used_pct)) : 0;
-  // 已用/剩余口径:仅展示层翻转,状态色与重置/燃尽信息不动
+    fetchedElapsedMs: elapsed,
+  } : card), [cards, elapsed]);
+  const allowPace = !!quotaFetchedAtMs && !quotaStale;
   const remainingView = preferences.quotaRemainingView === true;
-  const heroPct = remainingView ? 100 - pct : pct;
-  const meterLabel = remainingView ? t('quota_remaining') : t('quota_used');
+  const hidden = preferences.hiddenCards;
+  const pinnedCards = preferences.pinnedCards;
+
+  const jumpTo = (provider) => {
+    const node = document.querySelector(`[data-provider="${provider}"]`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.add('is-flash');
+    window.setTimeout(() => node.classList.remove('is-flash'), 1200);
+  };
+
+  const monthlyOf = (provider) => {
+    if (provider === 'goat') return goatUsage?.tokens;
+    const client = { 'opencode-go': 'opencode', codex: 'codex' }[provider];
+    const row = client && (ledger?.month_by_client || []).find((item) => item.client === client);
+    return row?.agg.total;
+  };
+
+  const visible = currentCards.filter((card) => !hidden.includes(card.provider));
+  const ordered = [...visible].sort((a, b) => Number(pinnedCards.includes(b.provider)) - Number(pinnedCards.includes(a.provider)));
   const modules = [
-    { id: 'overview', title: t('quota_overview'), w: 12, h: 2, minW: 6, minH: 2, content: (<section className="quota-overview" aria-label={t('quota_overview')}>
-      <div className="quota-overview-copy">
-        <span className="eyebrow">// {t('quota_overview')}</span>
-        <h1>{tightest ? `${tightest.provider} · ${tightest.label}` : t('quota_unavailable')}</h1>
-        <p>{tightest ? `${attention ? `${attention} ${t('quota_attention')}` : t('quota_all_clear')} · ${nextReset ? `${t('quota_next_reset')} ${fmtCountdown(nextReset.resets_in_ms)}` : '—'}` : t('empty_quota')}</p>
-      </div>
-      <div className="quota-overview-meter" aria-label={tightest ? `${Math.round(heroPct)}% ${meterLabel}` : undefined}>
-        <QuotaRing pct={heroPct} tone={STATUS_COLOR[tightest?.status] || 'var(--color-text-blue)'} />
-        <strong>{tightest ? <AnimatedNumber value={heroPct} format={(value) => `${Math.round(value)}%`} /> : '—'}</strong>
-        <span>{meterLabel}</span>
-      </div>
-    </section>) },
-    { id: 'tokens', title: t('usage_sum_tokens'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="tokens" ledger={ledger} goat={goatUsage} lang={lang} />) },
-    { id: 'requests', title: t('usage_sum_runs'), w: 6, h: 2, minW: 4, minH: 2, content: (<UsageSummaryRow part="requests" ledger={ledger} goat={goatUsage} lang={lang} />) },
-    ...[...currentCards].sort((a, b) => Number(preferences.pinnedCards.includes(b.provider)) - Number(preferences.pinnedCards.includes(a.provider))).map((card) => ({ id: card.provider, title: card.title, w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[card]} showDeepseek={false} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} planModels={planModels} clipboardClear={preferences.clipboardClear !== false} onPreferenceChange={onPreferenceChange} />) })),
-    { id: 'deepseek', title: 'DeepSeek API', w: 6, h: 3, minW: 4, minH: 2, content: (<QuotaCards cards={[]} deepseekBalance={deepseekBalance} lang={lang} allowPace={!!quotaFetchedAtMs && !quotaStale} remainingView={remainingView} pinnedCards={preferences.pinnedCards} hiddenCards={[]} providerColors={preferences.providerColors} monthByClient={ledger?.month_by_client || []} goatUsage={goatUsage} onTogglePin={onTogglePin} onToggleHidden={onToggleHidden} onOpenSettings={onOpenSettings} planModels={planModels} clipboardClear={preferences.clipboardClear !== false} onPreferenceChange={onPreferenceChange} />) },
-    { id: 'sources', title: t('source_health'), w: 12, h: 3, minW: 6, minH: 2, content: (<section className="source-section" aria-label={t('source_health')}>
-      <div className="source-heading"><h2>{t('source_health')}</h2></div>
-      <div className="source-grid">{sources.map((source) => {
-        const state = source.error ? 'error' : source.records > 0 ? 'ready' : 'idle';
-        return <button type="button" className={`source-item${selectedSource === source.client ? ' is-selected' : ''}`} key={source.client} onClick={() => setSelectedSource((current) => current === source.client ? null : source.client)} aria-expanded={selectedSource === source.client}>
-          <span className={`source-indicator source-indicator-${state}`} />
-          <span className="source-name">{source.label}</span>
-          <span className="source-count">{source.error ? t('source_error') : source.records > 0 ? `${fmtInt(source.records)} ${t('source_ready')}` : t('source_idle')}</span>
-        </button>;
-      })}</div>
-      <AnimatePresence>{sourceDetail && <motion.div key={sourceDetail.client} className="source-detail" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE} role="status">
-        <strong>{sourceDetail.label}</strong>
-        <span>{t('source_location')} · <code>{SOURCE_PATHS[sourceDetail.client] || '—'}</code></span>
-        <span>{t('source_diagnostic')} · {sourceDetail.error || (sourceDetail.records ? t('source_ok_detail') : t('source_no_records'))}</span>
-      </motion.div>}</AnimatePresence>
-    </section>) },
+    ...ordered.map((card) => ({
+      id: card.provider,
+      title: card.title,
+      w: 6, h: 3, minW: 4, minH: 2, bare: true,
+      content: <ProviderCard
+        card={card}
+        lang={lang}
+        allowPace={allowPace}
+        remainingView={remainingView}
+        pinned={pinnedCards.includes(card.provider)}
+        providerColor={preferences.providerColors?.[card.provider]}
+        monthlyTokens={card.kind === 'Live' ? monthlyOf(card.provider) : undefined}
+        goatUsage={goatUsage}
+        planModels={planModels}
+        clipboardClear={preferences.clipboardClear !== false}
+        onPreferenceChange={onPreferenceChange}
+        onTogglePin={onTogglePin}
+        onToggleHidden={onToggleHidden}
+      />,
+    })),
+    ...(!hidden.includes('deepseek') ? [{
+      id: 'deepseek',
+      title: 'DeepSeek API',
+      w: 6, h: 3, minW: 4, minH: 2, bare: true,
+      content: <DeepSeekCard
+        balance={deepseekBalance}
+        lang={lang}
+        pinned={pinnedCards.includes('deepseek')}
+        accent={preferences.providerColors?.deepseek || PROVIDER_COLOR_DEFAULTS.deepseek}
+        onTogglePin={onTogglePin}
+        onToggleHidden={onToggleHidden}
+        onOpenSettings={onOpenSettings}
+      />,
+    }] : []),
   ];
-  let row = 0, col = 0;
-  const defaultLayout = modules.filter((item) => !preferences.hiddenCards.includes(item.id)).map((item) => {
-    if (col + item.w > 12) { row += 3; col = 0; }
+  let row = 0;
+  let col = 0;
+  const defaultLayout = modules.map((item) => {
+    if (col + item.w > 12) { row += item.h; col = 0; }
     const panel = { id: item.id, x: col, y: row, w: item.w, h: item.h, locked: false };
     col += item.w;
     if (col === 12) { row += item.h; col = 0; }
     return panel;
   });
+
   return <div className="quota-page">
-    <ModuleBoard storageKey="token-monitor.quota-layout.v1" lang={lang} catalog={modules} hiddenIds={preferences.hiddenCards} defaults={defaultLayout} renderModule={(id) => modules.find((item) => item.id === id)?.content} />
-    {preferences.hiddenCards.length > 0 && <button className="quota-hidden-link" type="button" onClick={onOpenSettings}>{lang === 0 ? `已隐藏 ${preferences.hiddenCards.length} 张卡片 · 在设置中恢复` : `${preferences.hiddenCards.length} hidden cards · restore in Settings`}</button>}
-
+    <QuotaStrip
+      cards={currentCards}
+      lang={lang}
+      hiddenCards={hidden}
+      pinnedCards={pinnedCards}
+      now={now}
+      onJump={jumpTo}
+      onManage={() => onToggleEditing?.(true)}
+    />
+    <ModuleBoard
+      catalog={modules}
+      defaults={defaultLayout}
+      storageKey="token-monitor.quota-layout.v2"
+      lang={lang}
+      editing={editing}
+      hiddenIds={hidden}
+      onRestoreHidden={onRestoreCard}
+      renderModule={(id) => modules.find((item) => item.id === id)?.content}
+    />
   </div>;
-}
-
-/* ---------------- 用量页 ---------------- */
-
-function tightestQuota(cards) {
-  const limits = cards
-    .filter((card) => card.kind === 'Live' && card.method !== 'activity_vs_average')
-    .flatMap((card) => card.limits.map((limit) => ({ provider: card.title.split(' ·')[0], ...limit })));
-  return limits.sort((a, b) => b.used_pct - a.used_pct)[0] || null;
 }

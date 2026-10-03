@@ -3,34 +3,53 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { createServer } from 'vite';
+import { DEFAULT_PANELS } from './panel-layout.js';
 
-test('all default panels render with ledger data', async () => {
+const ledgerFixture = () => {
+  const agg = { input: 100, output: 20, cache_read: 30, cache_write: 10, reasoning: 5, total: 160, cost: 0.12, messages: 2 };
+  return {
+    today: agg,
+    week: agg,
+    month: agg,
+    daily_totals: [{ date: '2026-09-29', tokens: 160, cost: 0.12, messages: 2 }],
+    daily_detail: {},
+    weekday_hour: Array.from({ length: 7 }, () => Array(24).fill(0)),
+    hourly: Array(24).fill(0),
+    weekday: Array(7).fill(0),
+    by_model: [{ model: 'test', agg, speed: { timed_calls: 2, duration_ms_total: 2000, output_total: 120, ttft_ms_total: 300, ttft_samples: 2 } }],
+    month_by_client: [{ client: 'codex', agg }],
+    by_project: [{ project: 'test', agg, sessions: 1 }],
+    by_session: [{ client: 'codex', label: 'Codex', session: 'test', agg }],
+    sources: [{ client: 'codex', label: 'Codex', records: 3 }],
+    analysis_rows: [{ date: '2026-09-29', client: 'codex', agg, unpriced_messages: 0 }],
+    intraday_rows: [],
+    recent_by_agent: [],
+    burn_rate: null,
+    last_activity_ms: null,
+  };
+};
+
+test('usage board renders every default module with ledger data', async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
   try {
-    const { default: PanelsPage } = await server.ssrLoadModule('/src/PanelsPage.jsx');
-    const agg = { input: 100, output: 20, cache_read: 30, cache_write: 10, reasoning: 5, total: 160, cost: 0.12, messages: 2 };
-    const ledger = {
-      daily_totals: [{ date: '2026-09-29', tokens: 160, cost: 0.12, messages: 2 }],
-      daily_detail: {},
-      weekday_hour: Array.from({ length: 7 }, () => Array(24).fill(0)),
-      hourly: Array(24).fill(0),
-      weekday: Array(7).fill(0),
-      by_model: [{ model: 'test', agg }],
-      month_by_client: [{ client: 'codex', agg }],
-      by_project: [{ project: 'test', agg, sessions: 1 }],
-      by_session: [{ session: 'test', agg }],
-      month: agg,
-    };
-    const html = renderToString(React.createElement(PanelsPage, { ledger, lang: 0 }));
-    assert.equal((html.match(/class="panel-card/g) || []).length, 12);
+    const { default: UsageDashboard } = await server.ssrLoadModule('/src/UsageDashboard.jsx');
+    const html = renderToString(React.createElement(UsageDashboard, {
+      ledger: ledgerFixture(),
+      monthlyValue: { month_api_equivalent_usd: 12.5, list_price_multiple: 3.1 },
+      lang: 0,
+      currency: { code: 'USD', rate: 1 },
+      editing: false,
+    }));
+    assert.equal((html.match(/class="panel-card/g) || []).length, DEFAULT_PANELS.length);
     assert.doesNotMatch(html, /PANEL ERROR/);
-    assert.match(html, /缓存命中/);
+    assert.match(html, /命中率/);
+    assert.match(html, /成就/);
   } finally {
     await server.close();
   }
 });
 
-test('quota countdown advances without moving the subscription expiry date', async () => {
+test('quota page keeps the quota strip and mutes expired pace warnings', async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
   const originalNow = Date.now;
   try {
@@ -41,12 +60,14 @@ test('quota countdown advances without moving the subscription expiry date', asy
     const html = renderToString(React.createElement(QuotaPage, {
       cards: [{ kind: 'Live', provider: 'codex', title: 'Codex', subscription_ends_at_ms: endsAt,
         limits: [{ label: '5 hours', used_pct: 20, resets_in_ms: 3 * 86_400_000, status: 'ok' }] }],
-      sources: [], quotaFetchedAtMs: now - 2 * 86_400_000, now, lang: 1, quotaStale: true,
+      ledger: ledgerFixture(),
+      quotaFetchedAtMs: now - 2 * 86_400_000, now, lang: 1, quotaStale: true,
       preferences: { hiddenCards: ['deepseek'], pinnedCards: [], providerColors: {} },
     }));
     assert.match(html, /expires 11-15/);
     assert.doesNotMatch(html, /quota-expiry-warning/);
     assert.match(html, /1d 0h/);
+    assert.match(html, /quota-strip/);
   } finally {
     Date.now = originalNow;
     await server.close();

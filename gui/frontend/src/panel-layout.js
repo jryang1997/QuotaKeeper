@@ -2,35 +2,52 @@ export const PANEL_COLS = 12;
 export const PANEL_ROW_H = 110;
 export const PANEL_GAP = 14;
 export const PANELS_KEY = 'token-monitor.panels.v1';
-export const PANELS_MAX = 14;
+export const PANELS_MAX = 20;
 
+// 用量页模块目录(2026-10 合并原"面板"页):几何只在这里定义,
+// 标题/描述/内容由 UsageDashboard 按语言装配。w/h 是默认落位与添加时的尺寸。
 export const PANEL_CATALOG = [
-  { id: 'heat', w: 12, h: 4 },
-  { id: 'alltime', w: 4, h: 1 },
-  { id: 'streak', w: 4, h: 1 },
-  { id: 'records', w: 4, h: 1 },
-  { id: 'cache', w: 4, h: 2 },
-  { id: 'punch', w: 8, h: 2 },
-  { id: 'clock', w: 4, h: 3 },
-  { id: 'week', w: 4, h: 2 },
-  { id: 'daily', w: 4, h: 3 },
-  { id: 'models', w: 4, h: 3 },
-  { id: 'sources', w: 4, h: 2 },
-  { id: 'projects', w: 4, h: 3 },
+  { id: 'tokens', w: 3, h: 2, minW: 3, minH: 1 },
+  { id: 'requests', w: 3, h: 2, minW: 3, minH: 1 },
+  { id: 'cost', w: 3, h: 2, minW: 3, minH: 1 },
+  { id: 'value', w: 3, h: 2, minW: 3, minH: 1 },
+  { id: 'trend', w: 12, h: 4, minW: 6, minH: 3 },
+  { id: 'achievements', w: 12, h: 3, minW: 6, minH: 2 },
+  { id: 'cache', w: 4, h: 2, minW: 3, minH: 2 },
+  { id: 'speed', w: 8, h: 2, minW: 4, minH: 2 },
+  { id: 'models', w: 6, h: 4, minW: 4, minH: 3 },
+  { id: 'modelMix', w: 6, h: 4, minW: 4, minH: 3 },
+  { id: 'heat', w: 12, h: 4, minW: 6, minH: 3 },
+  { id: 'punch', w: 8, h: 2, minW: 5, minH: 2 },
+  { id: 'week', w: 4, h: 2, minW: 3, minH: 2 },
+  { id: 'clock', w: 4, h: 3, minW: 3, minH: 3 },
+  { id: 'sources', w: 4, h: 3, minW: 3, minH: 2 },
+  { id: 'projects', w: 4, h: 3, minW: 3, minH: 2 },
+  { id: 'sessions', w: 8, h: 3, minW: 4, minH: 2 },
+  { id: 'alltime', w: 4, h: 1, minW: 3, minH: 1 },
+  { id: 'streak', w: 4, h: 1, minW: 3, minH: 1 },
+  { id: 'records', w: 4, h: 1, minW: 3, minH: 1 },
 ];
+
 export const DEFAULT_PANELS = [
-  { id: 'heat', x: 0, y: 0, w: 12, h: 4, locked: false },
-  { id: 'alltime', x: 0, y: 4, w: 4, h: 1, locked: false },
-  { id: 'streak', x: 4, y: 4, w: 4, h: 1, locked: false },
-  { id: 'records', x: 8, y: 4, w: 4, h: 1, locked: false },
-  { id: 'cache', x: 0, y: 5, w: 4, h: 2, locked: false },
-  { id: 'punch', x: 4, y: 5, w: 8, h: 2, locked: false },
-  { id: 'clock', x: 0, y: 7, w: 4, h: 3, locked: false },
-  { id: 'week', x: 4, y: 7, w: 4, h: 2, locked: false },
-  { id: 'daily', x: 8, y: 7, w: 4, h: 3, locked: false },
-  { id: 'models', x: 4, y: 9, w: 4, h: 3, locked: false },
-  { id: 'sources', x: 8, y: 10, w: 4, h: 2, locked: false },
-  { id: 'projects', x: 0, y: 10, w: 4, h: 3, locked: false },
+  { id: 'tokens', x: 0, y: 0, w: 3, h: 1, locked: false },
+  { id: 'requests', x: 3, y: 0, w: 3, h: 1, locked: false },
+  { id: 'cost', x: 6, y: 0, w: 3, h: 1, locked: false },
+  { id: 'value', x: 9, y: 0, w: 3, h: 1, locked: false },
+  { id: 'trend', x: 0, y: 1, w: 12, h: 4, locked: false },
+  { id: 'achievements', x: 0, y: 5, w: 12, h: 3, locked: false },
+  { id: 'cache', x: 0, y: 8, w: 4, h: 3, locked: false },
+  { id: 'speed', x: 4, y: 8, w: 8, h: 3, locked: false },
+  { id: 'models', x: 0, y: 11, w: 6, h: 4, locked: false },
+  { id: 'modelMix', x: 6, y: 11, w: 6, h: 4, locked: false },
+  { id: 'heat', x: 0, y: 15, w: 12, h: 4, locked: false },
+  { id: 'punch', x: 0, y: 19, w: 8, h: 2, locked: false },
+  { id: 'week', x: 8, y: 19, w: 4, h: 2, locked: false },
+  { id: 'alltime', x: 0, y: 21, w: 4, h: 1, locked: false },
+  { id: 'streak', x: 4, y: 21, w: 4, h: 1, locked: false },
+  { id: 'records', x: 8, y: 21, w: 4, h: 1, locked: false },
+  { id: 'projects', x: 0, y: 22, w: 4, h: 3, locked: false },
+  { id: 'sessions', x: 4, y: 22, w: 8, h: 3, locked: false },
 ];
 
 export const panelOverlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;

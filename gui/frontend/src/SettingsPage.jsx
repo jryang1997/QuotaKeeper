@@ -1,18 +1,20 @@
+// 设置页:五组(外观 / 数据源与凭据 / 桌面与通知 / 基准与货币 / 关于与维护)。
+// 规则:颜色与全局偏好归设置,布局与显隐归所在页面;每个概念只有这一处编辑面。
 import { sendCommand } from './gui-bridge.js';
-import React, { useEffect, useState } from 'react';
-import { Text } from '@astryxdesign/core/Text';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@astryxdesign/core/Spinner';
-import qrcode from 'qrcode-generator';
-import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, STR, fmtCost } from './ui-data.js';
+import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, QUOTA_REPAIR, SOURCE_PATHS, SOURCE_REPAIR, STR, fmtCost, fmtInt } from './ui-data.js';
 import { CURRENCIES, formatCurrency } from './currency.js';
 import { SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
+
+const GROUP_IDS = ['appearance', 'sources', 'desktop', 'benchmark', 'about'];
 
 function SettingsChoice({ label, value, onChange, options }) {
   return (
     <SelectionGroup><div className={`settings-choice${options.length > 3 ? ' settings-choice-many' : ''}`} role="group" aria-label={label}>
       {options.map((option) => (
         <button
-          key={option.value}
+          key={String(option.value)}
           type="button"
           aria-pressed={value === option.value}
           className={`settings-choice-option${value === option.value ? ' is-selected' : ''}`}
@@ -28,9 +30,9 @@ function SettingsChoice({ label, value, onChange, options }) {
   );
 }
 
-function SettingsSection({ title, hint, children, className = '' }) {
+function SettingsSection({ id, title, hint, children, className = '' }) {
   return (
-    <section className={`settings-card ${className}`}>
+    <section className={`settings-card ${className}`} id={id} data-settings-section={id}>
       <header className="settings-card-heading">
         <div>
           <h2>{title}</h2>
@@ -54,44 +56,29 @@ function SettingsRow({ title, hint, children, className = '' }) {
   );
 }
 
-function LanSection({ lang, lan, onToggle }) {
-  const t = (key) => STR[key][lang];
-  const [copied, setCopied] = useState(false);
-  const [showQr, setShowQr] = useState(false);
-  const copyUrl = () => {
-    if (!lan.url) return;
-    navigator.clipboard.writeText(lan.url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-  // 白底容器保证扫码对比度;scalable 让 SVG 自适应容器
-  const qrSvg = showQr && lan.url ? (() => {
-    const qr = qrcode(0, 'M');
-    qr.addData(lan.url);
-    qr.make();
-    return qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
-  })() : null;
-  return (
-    <SettingsRow title={t('lan_title')} hint={t('lan_hint')}>
-      <div className="lan-control">
-        <SettingsChoice
-          label={t('lan_title')}
-          value={lan.enabled}
-          onChange={(value) => { onToggle(value === true); if (value !== true) setShowQr(false); }}
-          options={[{ value: false, label: t('lan_off') }, { value: true, label: t('lan_on') }]}
-        />
-        {lan.enabled && <div className="lan-status" role="status">
-          <span className={`lan-dot${lan.url ? ' is-on' : ''}`} />
-          <code>{lan.url || t('lan_stopped')}</code>
-          {lan.url && <button type="button" onClick={() => setShowQr((open) => !open)} aria-expanded={showQr}>{t('lan_qr')}</button>}
-          {lan.url && <button type="button" onClick={copyUrl}>{copied ? t('lan_copied') : t('lan_copy')}</button>}
-        </div>}
-        {qrSvg && <div className="lan-qr" title={lan.url} dangerouslySetInnerHTML={{ __html: qrSvg }} />}
-        {lan.enabled && <small className="lan-security">{t('lan_security')}</small>}
-      </div>
-    </SettingsRow>
-  );
+// 目录跟随滚动高亮:section 进入视口上半区即激活。
+function useSectionSpy() {
+  const [active, setActive] = useState(GROUP_IDS[0]);
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (visible?.target?.id) setActive(visible.target.id);
+    }, { rootMargin: '-84px 0px -58% 0px', threshold: 0 });
+    for (const id of GROUP_IDS) {
+      const node = document.getElementById(id);
+      if (node) observer.observe(node);
+    }
+    return () => observer.disconnect();
+  }, []);
+  return active;
+}
+
+function scrollToSection(id) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  node.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 const AGENT_STATUS = { ok: 'is-ok', update: 'is-update', warn: 'is-warn', off: 'is-off' };
@@ -119,18 +106,24 @@ function AgentsSection({ lang, agents, scanning, updating, feedback, onScan, onU
   const upgradableAgents = (agents || []).filter(upgradable);
   const titleOf = (id) => agents?.find((agent) => agent.id === id)?.title || id;
   return (
-    <SettingsSection title={t('agents_title')} hint={t('agents_hint')} className="settings-agents">
-      <div className="settings-agents-toolbar">
-        <button type="button" onClick={() => { setConfirming(null); onScan(); }} disabled={scanning}>
-          {scanning ? <><Spinner size="sm" /> {t('agents_scanning')}</> : t('agents_scan')}
-        </button>
-        <button
-          type="button"
-          disabled={scanning || !!updating || upgradableAgents.length === 0}
-          onClick={() => setConfirming(confirming === 'all' ? null : 'all')}
-        >
-          {t('agents_upgrade_all')} · {upgradableAgents.length}
-        </button>
+    <div className="settings-subsection">
+      <div className="settings-subhead">
+        <div>
+          <h3>{t('agents_title')}</h3>
+          <p>{t('agents_hint')}</p>
+        </div>
+        <div className="settings-agents-toolbar">
+          <button type="button" onClick={() => { setConfirming(null); onScan(); }} disabled={scanning}>
+            {scanning ? <><Spinner size="sm" /> {t('agents_scanning')}</> : t('agents_scan')}
+          </button>
+          <button
+            type="button"
+            disabled={scanning || !!updating || upgradableAgents.length === 0}
+            onClick={() => setConfirming(confirming === 'all' ? null : 'all')}
+          >
+            {t('agents_upgrade_all')} · {upgradableAgents.length}
+          </button>
+        </div>
       </div>
       {(agents || []).map((agent) => {
         const status = agentStatus(agent, t);
@@ -182,47 +175,64 @@ function AgentsSection({ lang, agents, scanning, updating, feedback, onScan, onU
           {titleOf(id)}: {ok ? t('agents_update_ok') : t('agents_update_fail')}{!ok && message ? ` · ${message}` : ''}
         </p>
       ))}
-    </SettingsSection>
+    </div>
   );
 }
 
-export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey, agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent, lan, onLanToggle }) {
+// 一张服务商密钥行:状态 + 输入 + 保存/移除;三家用同一形状,不再各写一遍。
+function ProviderKeyRow({ lang, provider, title, hint, placeholder, stored, feedback, onSave, onDelete, status, onOpenDetails }) {
   const t = (key) => STR[key][lang];
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+  const submit = (event) => {
+    event.preventDefault();
+    const key = draft.trim();
+    if (!key || /\s/.test(key)) { setError(t('settings_go_key_invalid')); return; }
+    onSave(key);
+    setDraft('');
+    setError('');
+  };
+  return (
+    <div className="settings-provider" data-provider={provider}>
+      <div className="settings-provider-head">
+        <div>
+          <div className="settings-provider-title">
+            <span className={`source-indicator source-indicator-${status === 'live' ? 'ready' : status === 'error' ? 'error' : 'idle'}`} />
+            <strong>{title}</strong>
+            {status && <span className="settings-provider-state">{status === 'live' ? t('settings_provider_live') : t('settings_provider_unreadable')}</span>}
+          </div>
+          {hint && <p className="settings-provider-hint">{hint}</p>}
+        </div>
+        <span className={`settings-provider-badge${stored ? ' is-on' : ''}`}>{stored ? t('settings_provider_ready') : t('settings_provider_missing')}</span>
+      </div>
+      <form className="settings-provider-form" onSubmit={submit}>
+        <input type="password" autoComplete="off" spellCheck="false" value={draft} onChange={(event) => { setDraft(event.target.value); setError(''); }} placeholder={placeholder} aria-label={placeholder} />
+        <button className="settings-save" type="submit">{t('settings_save')}</button>
+        <button className="settings-reset" type="button" disabled={!stored} onClick={onDelete}>{t('settings_go_key_remove')}</button>
+      </form>
+      {(error || feedback) && <p className="settings-form-error" role="status">{error || feedback}</p>}
+      {status === 'error' && onOpenDetails && <button type="button" className="settings-provider-repair" onClick={onOpenDetails}>{t('welcome_repair')}</button>}
+    </div>
+  );
+}
+
+export default function SettingsPage({
+  lang, preferences, currency, monthlyValue, nativeError, sources = [], cards = [],
+  agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent,
+  goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey,
+  goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey,
+  deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey,
+  onPreferenceChange, onResetAppearance, onShowWelcome, onOpenShare,
+}) {
+  const t = (key) => STR[key][lang];
+  const zh = lang === 0;
   const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
   const [benchmarkOverride, setBenchmarkOverride] = useState(null);
   const [planDraft, setPlanDraft] = useState(initialBenchmark.toFixed(2));
   const [planError, setPlanError] = useState('');
   const [saved, setSaved] = useState(false);
-  const [goKeyDraft, setGoKeyDraft] = useState('');
-  const [goKeyError, setGoKeyError] = useState('');
-  const [goatKeyDraft, setGoatKeyDraft] = useState('');
-  const [goatKeyError, setGoatKeyError] = useState('');
-  const [deepseekKeyDraft, setDeepSeekKeyDraft] = useState('');
-  const [deepseekKeyError, setDeepSeekKeyError] = useState('');
-  const saveGoKey = (event) => {
-    event.preventDefault();
-    const key = goKeyDraft.trim();
-    if (!key || /\s/.test(key)) { setGoKeyError(t('settings_go_key_invalid')); return; }
-    onSaveGoKey(key);
-    setGoKeyDraft('');
-    setGoKeyError('');
-  };
-  const saveGoatKey = (event) => {
-    event.preventDefault();
-    const key = goatKeyDraft.trim();
-    if (!key || /\s/.test(key)) { setGoatKeyError(t('settings_go_key_invalid')); return; }
-    onSaveGoatKey(key);
-    setGoatKeyDraft('');
-    setGoatKeyError('');
-  };
-  const saveDeepSeekKey = (event) => {
-    event.preventDefault();
-    const key = deepseekKeyDraft.trim();
-    if (!key || /\s/.test(key)) { setDeepSeekKeyError(t('settings_go_key_invalid')); return; }
-    onSaveDeepSeekKey(key);
-    setDeepSeekKeyDraft('');
-    setDeepSeekKeyError('');
-  };
+  const [openSource, setOpenSource] = useState('');
+  const active = useSectionSpy();
   useEffect(() => {
     setBenchmarkOverride(null);
     setPlanDraft(initialBenchmark.toFixed(2));
@@ -252,82 +262,52 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
     setSaved(true);
   };
 
+  const cardByProvider = useMemo(() => Object.fromEntries((cards || []).map((card) => [card.provider, card])), [cards]);
+  const otherProviders = PROVIDERS.filter((id) => !['opencode-go', 'goat', 'deepseek'].includes(id));
+
+  const groups = [
+    ['appearance', t('settings_group_appearance')],
+    ['sources', t('settings_group_sources')],
+    ['desktop', t('settings_group_desktop')],
+    ['benchmark', t('settings_group_benchmark')],
+    ['about', t('settings_group_about')],
+  ];
+
   return (
     <div className="settings-page">
-      <header className="settings-intro">
-        <Text type="supporting" className="settings-kicker">{t('settings_kicker')}</Text>
-        <h1>{t('nav_settings')}</h1>
-      </header>
+      <div className="settings-shell">
+        <nav className="settings-toc" aria-label={t('nav_settings')}>
+          {groups.map(([id, label]) => (
+            <button key={id} type="button" className={active === id ? 'is-active' : ''} onClick={() => scrollToSection(id)}>
+              <i aria-hidden="true" />{label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="settings-grid">
-        <SettingsSection title={t('settings_appearance')} className="settings-appearance">
-          <SettingsRow title={t('settings_language')}>
-            <SettingsChoice
-              label={t('settings_language')}
-              value={lang}
-              onChange={(value) => onPreferenceChange('lang', value)}
-              options={[{ value: 0, label: '中文' }, { value: 1, label: 'English' }]}
-            />
-          </SettingsRow>
-          <SettingsRow title={t('settings_theme')} hint={t('settings_theme_hint')}>
-            <SettingsChoice
-              label={t('settings_theme')}
-              value={preferences.theme}
-              onChange={(value) => onPreferenceChange('theme', value)}
-              options={[
-                { value: 'system', label: t('theme_system'), icon: 'theme-icon-system' },
-                { value: 'light', label: t('theme_light'), icon: 'theme-icon-light' },
-                { value: 'dark', label: t('theme_dark'), icon: 'theme-icon-dark' },
-                { value: 'ink', label: t('theme_ink'), icon: 'theme-icon-ink' },
-                { value: 'sand', label: t('theme_sand'), icon: 'theme-icon-sand' },
-              ]}
-            />
-          </SettingsRow>
-          <div className="settings-theme-preview" aria-hidden="true">
-            <span className="settings-preview-window"><i /><i /><i /><b /><b /><b /></span>
-              <span className="settings-preview-copy"><strong>{t('settings_font_sample')}</strong><small>12,480 tokens · {formatCurrency(3.84, currency)}</small></span>
-            <span className="settings-preview-spark" />
-          </div>
-        </SettingsSection>
-
-        <div className="settings-column">
-          <SettingsSection title={t('settings_go_key')} hint={t('settings_go_key_hint')} className="settings-go-key">
-            <p className="settings-go-key-status">{goKeyStored ? t('settings_go_key_stored') : t('settings_go_key_missing')}</p>
-            <form className="settings-go-key-form" onSubmit={saveGoKey}>
-              <input type="password" autoComplete="off" spellCheck="false" value={goKeyDraft} onChange={(event) => { setGoKeyDraft(event.target.value); setGoKeyError(''); }} placeholder={t('settings_go_key_placeholder')} aria-label={t('settings_go_key_placeholder')} />
-              <button className="settings-save" type="submit">{t('settings_save')}</button>
-              <button className="settings-reset" type="button" disabled={!goKeyStored} onClick={onDeleteGoKey}>{t('settings_go_key_remove')}</button>
-            </form>
-            {(goKeyError || goKeyFeedback) && <p className="settings-form-error" role="status">{goKeyError || goKeyFeedback}</p>}
-          </SettingsSection>
-          <SettingsSection title={t('settings_goat_key')} hint={t('settings_goat_key_hint')} className="settings-go-key">
-            <p className="settings-go-key-status">{goatKeyStored ? t('settings_go_key_stored') : (lang === 0 ? '尚未保存专用密钥；仍可读取环境变量或 cmdc 登录态。' : 'No dedicated key saved; an environment variable or cmdc login may still work.')}</p>
-            <form className="settings-go-key-form" onSubmit={saveGoatKey}>
-              <input type="password" autoComplete="off" spellCheck="false" value={goatKeyDraft} onChange={(event) => { setGoatKeyDraft(event.target.value); setGoatKeyError(''); }} placeholder="Command Code API key" aria-label={`${t('settings_goat_key')} API key`} />
-              <button className="settings-save" type="submit">{t('settings_save')}</button>
-              <button className="settings-reset" type="button" disabled={!goatKeyStored} onClick={onDeleteGoatKey}>{t('settings_go_key_remove')}</button>
-            </form>
-            {(goatKeyError || goatKeyFeedback) && <p className="settings-form-error" role="status">{goatKeyError || goatKeyFeedback}</p>}
-          </SettingsSection>
-          <SettingsSection title={lang === 0 ? 'DeepSeek 官方余额' : 'DeepSeek official balance'} hint={lang === 0 ? '使用 DeepSeek 官方 API key 查询账户充值与赠送余额；密钥保存在 Windows 凭据管理器。' : 'Use an official DeepSeek API key to read prepaid and granted balances. The key is stored in Windows Credential Manager.'} className="settings-go-key">
-            <p className="settings-go-key-status">{deepseekKeyStored ? t('settings_go_key_stored') : (lang === 0 ? '尚未保存密钥；也可使用 DEEPSEEK_API_KEY 环境变量。' : 'No key saved; DEEPSEEK_API_KEY also works.')}</p>
-            <form className="settings-go-key-form" onSubmit={saveDeepSeekKey}>
-              <input type="password" autoComplete="off" spellCheck="false" value={deepseekKeyDraft} onChange={(event) => { setDeepSeekKeyDraft(event.target.value); setDeepSeekKeyError(''); }} placeholder="DeepSeek API key" aria-label="DeepSeek API key" />
-              <button className="settings-save" type="submit">{t('settings_save')}</button>
-              <button className="settings-reset" type="button" disabled={!deepseekKeyStored} onClick={onDeleteDeepSeekKey}>{t('settings_go_key_remove')}</button>
-            </form>
-            {(deepseekKeyError || deepseekKeyFeedback) && <p className="settings-form-error" role="status">{deepseekKeyError || deepseekKeyFeedback}</p>}
-          </SettingsSection>
-          <AgentsSection
-            lang={lang}
-            agents={agents}
-            scanning={agentsScanning}
-            updating={agentUpdating}
-            feedback={agentFeedback}
-            onScan={onScanAgents}
-            onUpdate={onUpdateAgent}
-          />
-          <SettingsSection title={t('settings_type')} className="settings-type">
+        <div className="settings-body">
+          <SettingsSection id="appearance" title={t('settings_group_appearance')} className="settings-appearance">
+            <SettingsRow title={t('settings_language')}>
+              <SettingsChoice
+                label={t('settings_language')}
+                value={lang}
+                onChange={(value) => onPreferenceChange('lang', value)}
+                options={[{ value: 0, label: '中文' }, { value: 1, label: 'English' }]}
+              />
+            </SettingsRow>
+            <SettingsRow title={t('settings_theme')} hint={t('settings_theme_hint')}>
+              <SettingsChoice
+                label={t('settings_theme')}
+                value={preferences.theme}
+                onChange={(value) => onPreferenceChange('theme', value)}
+                options={[
+                  { value: 'system', label: t('theme_system'), icon: 'theme-icon-system' },
+                  { value: 'light', label: t('theme_light'), icon: 'theme-icon-light' },
+                  { value: 'dark', label: t('theme_dark'), icon: 'theme-icon-dark' },
+                  { value: 'ink', label: t('theme_ink'), icon: 'theme-icon-ink' },
+                  { value: 'sand', label: t('theme_sand'), icon: 'theme-icon-sand' },
+                ]}
+              />
+            </SettingsRow>
             <SettingsRow title={t('settings_font')}>
               <SettingsChoice
                 label={t('settings_font')}
@@ -339,11 +319,10 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
                 ]}
               />
             </SettingsRow>
-            <div className={`settings-font-sample${preferences.typeface === 'system' ? '' : ` is-${preferences.typeface}`}`}>
-              <span className="settings-font-sample-label">TYPE SPECIMEN · 16</span>
-              <div className="settings-font-sample-en">Token usage, at a glance</div>
-              <div className="settings-font-sample-zh">令牌用量，一目了然</div>
-              <div className="settings-font-sample-numbers">12,480 tokens · {formatCurrency(3.84, currency)}</div>
+            <div className="settings-theme-preview" aria-hidden="true">
+              <span className="settings-preview-window"><i /><i /><i /><b /><b /><b /></span>
+              <span className="settings-preview-copy"><strong>{t('settings_font_sample')}</strong><small>12,480 tokens · {formatCurrency(3.84, currency)}</small></span>
+              <span className="settings-preview-spark" />
             </div>
             <SettingsRow title={t('settings_density')}>
               <SettingsChoice
@@ -367,12 +346,161 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
                 ]}
               />
             </SettingsRow>
+            <SettingsRow title={t('settings_colors')} hint={t('settings_colors_hint')}>
+              <div className="settings-colors">
+                {PROVIDERS.map((provider) => (
+                  <label key={provider} className="settings-color">
+                    <input
+                      type="color"
+                      aria-label={`${provider} ${t('settings_colors')}`}
+                      value={preferences.providerColors[provider] || PROVIDER_COLOR_DEFAULTS[provider]}
+                      onChange={(event) => onPreferenceChange('providerColors', { ...preferences.providerColors, [provider]: event.target.value })}
+                    />
+                    <span>{provider}</span>
+                  </label>
+                ))}
+              </div>
+            </SettingsRow>
           </SettingsSection>
 
-          <SettingsSection title={t('settings_plan')} hint={t('settings_plan_hint')} className="settings-plan">
+          <SettingsSection id="sources" title={t('settings_group_sources')} hint={t('settings_providers_hint')}>
+            <div className="settings-subsection">
+              <div className="settings-subhead">
+                <div><h3>{t('settings_providers_title')}</h3></div>
+              </div>
+              <ProviderKeyRow
+                lang={lang}
+                provider="opencode-go"
+                title={t('settings_go_key')}
+                hint={t('settings_go_key_hint')}
+                placeholder={t('settings_go_key_placeholder')}
+                stored={goKeyStored}
+                feedback={goKeyFeedback}
+                onSave={onSaveGoKey}
+                onDelete={onDeleteGoKey}
+                status={cardByProvider['opencode-go']?.kind === 'Live' ? 'live' : cardByProvider['opencode-go'] ? 'error' : ''}
+              />
+              <ProviderKeyRow
+                lang={lang}
+                provider="goat"
+                title={t('settings_goat_key')}
+                hint={t('settings_goat_key_hint')}
+                placeholder="Command Code API key"
+                stored={goatKeyStored}
+                feedback={goatKeyFeedback}
+                onSave={onSaveGoatKey}
+                onDelete={onDeleteGoatKey}
+                status={cardByProvider.goat?.kind === 'Live' ? 'live' : cardByProvider.goat ? 'error' : ''}
+              />
+              <ProviderKeyRow
+                lang={lang}
+                provider="deepseek"
+                title={t('settings_deepseek_key')}
+                hint={t('settings_deepseek_hint')}
+                placeholder="DeepSeek API key"
+                stored={deepseekKeyStored}
+                feedback={deepseekKeyFeedback}
+                onSave={onSaveDeepSeekKey}
+                onDelete={onDeleteDeepSeekKey}
+                status={cardByProvider.deepseek?.kind === 'Live' ? 'live' : ''}
+              />
+              <SettingsRow title={t('settings_clipboard')} hint={t('settings_clipboard_hint')}>
+                <SettingsChoice
+                  label={t('settings_clipboard')}
+                  value={preferences.clipboardClear !== false}
+                  onChange={(value) => onPreferenceChange('clipboardClear', value)}
+                  options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]}
+                />
+              </SettingsRow>
+            </div>
+
+            <div className="settings-subsection">
+              <div className="settings-subhead">
+                <div><h3>{t('settings_source_other')}</h3></div>
+              </div>
+              {otherProviders.map((provider) => {
+                const card = cardByProvider[provider];
+                const live = card?.kind === 'Live';
+                return (
+                  <div className="settings-source-row" key={provider}>
+                    <span className={`source-indicator source-indicator-${live ? 'ready' : 'idle'}`} />
+                    <strong>{provider}</strong>
+                    <span className="settings-source-state">{live ? (zh ? '额度可读' : 'readable') : (QUOTA_HINT[provider]?.[lang] || (zh ? '未接入 · 走登录态或环境变量' : 'Not connected · login or env var'))}</span>
+                    {!live && <details><summary>{t('welcome_repair')}</summary><p>{QUOTA_REPAIR[provider]?.[lang]}</p></details>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="settings-subsection">
+              <div className="settings-subhead">
+                <div><h3>{t('settings_sources_title')}</h3><p>{t('settings_sources_hint')}</p></div>
+              </div>
+              {sources.map((source) => {
+                const state = source.error ? 'error' : source.records > 0 ? 'ready' : 'idle';
+                const open = openSource === source.client;
+                return (
+                  <div className={`settings-source-row is-${state}`} key={source.client}>
+                    <span className={`source-indicator source-indicator-${state}`} />
+                    <strong>{source.label}</strong>
+                    <span className="settings-source-state">
+                      {source.error ? t('source_error') : source.records > 0 ? `${fmtInt(source.records)} ${t('source_ready')}` : t('source_no_records')}
+                    </span>
+                    <button type="button" className="settings-source-toggle" aria-expanded={open} onClick={() => setOpenSource(open ? '' : source.client)}>{t('source_diagnostic')}</button>
+                    {open && <div className="settings-source-detail">
+                      <span>{t('source_location')} · <code>{SOURCE_PATHS[source.client] || '—'}</code></span>
+                      <p>{SOURCE_REPAIR[source.client]?.[lang]}</p>
+                      {source.error && <p className="is-error">{source.error}</p>}
+                    </div>}
+                  </div>
+                );
+              })}
+              {sources.length === 0 && <p className="settings-agent-path" role="status">{t('settings_sources_empty')}</p>}
+            </div>
+
+            <AgentsSection
+              lang={lang}
+              agents={agents}
+              scanning={agentsScanning}
+              updating={agentUpdating}
+              feedback={agentFeedback}
+              onScan={onScanAgents}
+              onUpdate={onUpdateAgent}
+            />
+          </SettingsSection>
+
+          <SettingsSection id="desktop" title={t('settings_group_desktop')} hint={t('settings_desktop_hint')}>
+            <SettingsRow title={t('settings_close_behavior')}>
+              <SettingsChoice label={t('settings_close_behavior')} value={preferences.closeBehavior} onChange={(value) => onPreferenceChange('closeBehavior', value)} options={[{ value: 'tray', label: t('settings_close_tray') }, { value: 'exit', label: t('settings_close_exit') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_overlay')} hint={t('settings_overlay_hint')}>
+              <button type="button" className="settings-inline-action" onClick={() => sendCommand({ cmd: 'toggleOverlay' })}>{t('settings_overlay_toggle')}</button>
+            </SettingsRow>
+            <SettingsRow title={t('settings_shortcut')} hint={t('settings_shortcut_hint')}>
+              <SettingsChoice label={t('settings_shortcut')} value={preferences.globalShortcut} onChange={(value) => onPreferenceChange('globalShortcut', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_autostart')} hint={t('settings_autostart_hint')}>
+              <SettingsChoice label={t('settings_autostart')} value={preferences.autostart} onChange={(value) => onPreferenceChange('autostart', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            {nativeError && <p className="settings-form-error" role="alert">{nativeError}</p>}
+            <SettingsRow title={t('settings_notifications')} hint={t('settings_notifications_hint')}>
+              <SettingsChoice label={t('settings_notifications')} value={preferences.notifications} onChange={(value) => onPreferenceChange('notifications', value)} options={[{ value: 'on', label: t('settings_alerts_on') }, { value: 'off', label: t('settings_alerts_off') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_pace_alerts')} hint={t('settings_pace_alerts_hint')}>
+              <SettingsChoice label={t('settings_pace_alerts')} value={preferences.paceAlerts} onChange={(value) => onPreferenceChange('paceAlerts', value)} options={[{ value: true, label: t('settings_alerts_on') }, { value: false, label: t('settings_alerts_off') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('settings_quiet_hours')} hint={t('settings_quiet_hours_hint')}>
+              <SettingsChoice label={t('settings_quiet_hours')} value={preferences.quietHours} onChange={(value) => onPreferenceChange('quietHours', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            </SettingsRow>
+            <SettingsRow title={t('lan_title')} hint={t('settings_lan_pointer')}>
+              <button type="button" className="settings-inline-action" onClick={onOpenShare}>{t('settings_lan_pointer_action')}</button>
+            </SettingsRow>
+          </SettingsSection>
+
+          <SettingsSection id="benchmark" title={t('settings_group_benchmark')} hint={t('settings_plan_hint')}>
             <SettingsRow title={t('settings_currency')} hint={t('settings_currency_hint')}>
               <select className="settings-currency-select" value={preferences.currency} onChange={(event) => onPreferenceChange('currency', event.target.value)} aria-label={t('settings_currency')}>
-                {CURRENCIES.map((code) => <option key={code} value={code}>{code} · {new Intl.DisplayNames([lang === 0 ? 'zh-CN' : 'en'], { type: 'currency' }).of(code)}</option>)}
+                {CURRENCIES.map((code) => <option key={code} value={code}>{code} · {new Intl.DisplayNames([zh ? 'zh-CN' : 'en'], { type: 'currency' }).of(code)}</option>)}
               </select>
               <p className="settings-currency-rate" role="status">{preferences.currency === 'USD' ? t('settings_currency_usd') : currency?.rate > 0 ? `${t('settings_currency_rate')} 1 USD ≈ ${formatCurrency(1, currency)} · ${currency.date || '—'}${currency.stale ? ` · ${t('settings_currency_stale')}` : ''}` : currency?.error ? t('settings_currency_error') : t('settings_currency_loading')}</p>
               <small className="settings-currency-source">{t('settings_currency_source')} <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a></small>
@@ -406,44 +534,20 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
             </div>
           </SettingsSection>
 
-          <SettingsSection title={t('settings_desktop')} hint={t('settings_desktop_hint')} className="settings-desktop">
-            <SettingsRow title={t('settings_close_behavior')}>
-              <SettingsChoice label={t('settings_close_behavior')} value={preferences.closeBehavior} onChange={(value) => onPreferenceChange('closeBehavior', value)} options={[{ value: 'tray', label: t('settings_close_tray') }, { value: 'exit', label: t('settings_close_exit') }]} />
+          <SettingsSection id="about" title={t('settings_group_about')} hint={t('settings_about_hint')}>
+            <SettingsRow title={t('settings_version')}>
+              <span className="settings-version">Token Monitor · v0.1</span>
             </SettingsRow>
-            <SettingsRow title={t('settings_shortcut')} hint={t('settings_shortcut_hint')}>
-              <SettingsChoice label={t('settings_shortcut')} value={preferences.globalShortcut} onChange={(value) => onPreferenceChange('globalShortcut', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            <SettingsRow title={t('welcome_reopen')} hint={t('welcome_intro')}>
+              <button type="button" className="settings-inline-action" onClick={onShowWelcome}>{t('welcome_reopen')}</button>
             </SettingsRow>
-            <SettingsRow title={t('settings_autostart')} hint={t('settings_autostart_hint')}>
-              <SettingsChoice label={t('settings_autostart')} value={preferences.autostart} onChange={(value) => onPreferenceChange('autostart', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
+            <SettingsRow title={t('settings_reset_all')}>
+              <button type="button" className="settings-inline-action" onClick={onResetAppearance}>{t('settings_reset_all')}</button>
             </SettingsRow>
-            {nativeError && <p className="settings-form-error" role="alert">{nativeError}</p>}
-            <SettingsRow title={t('settings_notifications')} hint={t('settings_notifications_hint')}>
-              <SettingsChoice label={t('settings_notifications')} value={preferences.notifications} onChange={(value) => onPreferenceChange('notifications', value)} options={[{ value: 'on', label: t('settings_alerts_on') }, { value: 'off', label: t('settings_alerts_off') }]} />
+            <SettingsRow title={t('settings_quit')}>
+              <button type="button" className="settings-inline-action is-danger" onClick={() => sendCommand({ cmd: 'quit' })}>{t('settings_quit')}</button>
             </SettingsRow>
-            <SettingsRow title={t('settings_pace_alerts')} hint={t('settings_pace_alerts_hint')}>
-              <SettingsChoice label={t('settings_pace_alerts')} value={preferences.paceAlerts} onChange={(value) => onPreferenceChange('paceAlerts', value)} options={[{ value: true, label: t('settings_alerts_on') }, { value: false, label: t('settings_alerts_off') }]} />
-            </SettingsRow>
-            <SettingsRow title={t('settings_quiet_hours')} hint={t('settings_quiet_hours_hint')}>
-              <SettingsChoice label={t('settings_quiet_hours')} value={preferences.quietHours} onChange={(value) => onPreferenceChange('quietHours', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
-            </SettingsRow>
-            <LanSection lang={lang} lan={lan} onToggle={onLanToggle} />
-            <button type="button" className="settings-quit" onClick={() => sendCommand({ cmd: 'quit' })}>{t('settings_quit')}</button>
           </SettingsSection>
-
-          <SettingsSection title={t('cards_custom')} hint={t('cards_custom_hint')} className="settings-cards">
-            {PROVIDERS.map((provider) => <div className="settings-provider-row" key={provider}>
-              <span>{provider}</span>
-              <label><span>{lang === 0 ? '颜色' : 'Color'}</span><input type="color" aria-label={`${provider} ${lang === 0 ? '颜色' : 'color'}`} value={preferences.providerColors[provider] || PROVIDER_COLOR_DEFAULTS[provider]} onChange={(event) => onPreferenceChange('providerColors', { ...preferences.providerColors, [provider]: event.target.value })} /></label>
-              <button type="button" onClick={() => onPreferenceChange('pinnedCards', preferences.pinnedCards.includes(provider) ? preferences.pinnedCards.filter((item) => item !== provider) : [...preferences.pinnedCards, provider])}>{preferences.pinnedCards.includes(provider) ? t('card_unpin') : t('card_pin')}</button>
-              <button type="button" onClick={() => onPreferenceChange('hiddenCards', preferences.hiddenCards.includes(provider) ? preferences.hiddenCards.filter((item) => item !== provider) : [...preferences.hiddenCards, provider])}>{preferences.hiddenCards.includes(provider) ? t('card_show') : t('card_hide')}</button>
-            </div>)}
-            <div className="settings-card-footer"><button type="button" onClick={onResetCards}>{t('cards_restore')}</button><button type="button" onClick={onShowWelcome}>{t('welcome_reopen')}</button></div>
-          </SettingsSection>
-
-          <div className="settings-footer">
-            <span>Token Monitor <span className="settings-footer-dot">·</span> v0.1</span>
-            <button type="button" onClick={onResetAppearance}>{t('settings_reset_all')}</button>
-          </div>
         </div>
       </div>
     </div>

@@ -10,7 +10,7 @@ const ModuleContent = memo(function ModuleContent({ id, renderModule, modular })
   return <div className={`panel-body${modular ? ' module-body' : ''}`}>{renderModule(id)}</div>;
 });
 
-function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, modular, narrow, lang, reduced, onStart, onLock, onTop, onRemove }) {
+function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, modular, narrow, lang, reduced, editing, onStart, onLock, onTop, onRemove }) {
   const rect = panelRect(panel, gridWidth);
   const x = useMotionValue(rect.x);
   const y = useMotionValue(rect.y);
@@ -32,24 +32,26 @@ function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, mod
     });
     return values.stop;
   }, [rect.x, rect.y, rect.width, rect.height, active, reduced, values]);
-  const title = catalog.find((item) => item.id === panel.id)?.title || panel.id;
+  const spec = catalog.find((item) => item.id === panel.id);
+  const title = spec?.title || panel.id;
+  const bare = !!spec?.bare;
   const lockTitle = lang === 0 ? '锁定/解锁拖拽' : 'Lock/unlock';
   const removeTitle = lang === 0 ? '移除面板' : 'Remove panel';
-  return <motion.div data-panel-id={panel.id} className={`panel-card${active ? ` is-${active === 'move' ? 'dragging' : 'resizing'}` : ''}${panel.locked ? ' is-locked' : ''}`}
+  return <motion.div data-panel-id={panel.id} className={`panel-card${active ? ` is-${active === 'move' ? 'dragging' : 'resizing'}` : ''}${panel.locked ? ' is-locked' : ''}${editing ? '' : ' is-static'}${bare && !editing ? ' is-bare' : ''}`}
     style={{ x, y, width, height }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE}>
-    <div className="panel-head" onPointerDown={(event) => !narrow && onStart(event, panel.id, 'move', values)}>
-      <span className="panel-title" title={title}>{title}</span>
-      <span className="panel-meta">{meta?.(panel.id)}</span>
-      <span className="panel-head-btns" onPointerDown={(event) => event.stopPropagation()}>
+    {(!bare || editing) && <div className="panel-head" onPointerDown={(event) => editing && !narrow && onStart(event, panel.id, 'move', values)}>
+      {!bare && <span className="panel-title" title={title}>{title}</span>}
+      {!bare && <span className="panel-meta">{meta?.(panel.id)}</span>}
+      {editing && <span className="panel-head-btns" onPointerDown={(event) => event.stopPropagation()}>
         <button type="button" className="panel-btn" disabled={panel.locked} onClick={() => onTop(panel.id)} aria-label={`${title} ${lang === 0 ? '移到顶部' : 'Move to top'}`} title={lang === 0 ? '移到顶部' : 'Move to top'}><svg viewBox="0 0 24 24"><path d="M12 19V5" /><path d="M5 12l7-7 7 7" /></svg></button>
         <button type="button" className={`panel-btn${panel.locked ? ' is-on' : ''}`} onClick={() => onLock(panel.id)} title={lockTitle} aria-label={lockTitle}>
           <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
         </button>
         <button type="button" className="panel-btn" onClick={() => onRemove(panel.id)} title={removeTitle} aria-label={removeTitle}><svg viewBox="0 0 24 24"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></svg></button>
-      </span>
-    </div>
+      </span>}
+    </div>}
     <ModuleContent id={panel.id} renderModule={renderModule} modular={modular} />
-    {!panel.locked && !narrow && <div className="panel-resize" role="slider" tabIndex={0} aria-label={`${title} ${lang === 0 ? '调整大小，方向键调整' : 'resize, use arrow keys'}`} aria-valuemin={1} aria-valuemax={12} aria-valuenow={panel.w} aria-valuetext={`${panel.w} × ${panel.h}`}
+    {editing && !panel.locked && !narrow && <div className="panel-resize" role="slider" tabIndex={0} aria-label={`${title} ${lang === 0 ? '调整大小，方向键调整' : 'resize, use arrow keys'}`} aria-valuemin={1} aria-valuemax={12} aria-valuenow={panel.w} aria-valuetext={`${panel.w} × ${panel.h}`}
       onPointerDown={(event) => onStart(event, panel.id, 'resize', values)} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault();
@@ -58,7 +60,7 @@ function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, mod
   </motion.div>;
 }
 
-export default function ModuleBoard({ catalog, defaults, storageKey, renderModule, lang, meta, modular = true, hiddenIds = [] }) {
+export default function ModuleBoard({ catalog, defaults, storageKey, renderModule, lang, meta, modular = true, editing = true, hideTools = false, hiddenIds = [], onRestoreHidden }) {
   const t = (key) => STR[key][lang];
   const reduced = useMotionPreference();
   const gridRef = useRef(null);
@@ -193,6 +195,7 @@ export default function ModuleBoard({ catalog, defaults, storageKey, renderModul
   }, [reduced, modular]);
 
   const startDrag = (event, id, mode, values) => {
+    if (!editing) return;
     const panel = panelsRef.current.find((item) => item.id === id);
     if (!panel || panel.locked || gesture.current || (event && (event.button !== 0 || !event.isPrimary))) return;
     const cat = catalog.find((item) => item.id === id);
@@ -252,25 +255,25 @@ export default function ModuleBoard({ catalog, defaults, storageKey, renderModul
   const renderList = panels.filter((panel) => enabled.includes(panel.id) && !hiddenIds.includes(panel.id)).map((panel) => previewById?.get(panel.id) || panel);
   const maxBottom = Math.max(3, ...renderList.map((panel) => panel.y + panel.h));
   const ghost = drag?.target && panelRect(drag.target, gridWidth);
-  return <div className={`panel-page${modular ? ' module-board' : ''}${narrow ? ' is-narrow' : ''}${drag ? ' is-manipulating' : ''}`}>
-    <div className="panel-tools">
+  return <div className={`panel-page${modular ? ' module-board' : ''}${narrow ? ' is-narrow' : ''}${drag ? ' is-manipulating' : ''}${editing ? ' is-editing' : ' is-reading'}`}>
+    {editing && !hideTools && <div className="panel-tools">
       <span className="panel-hint">{`${renderList.length}/${PANELS_MAX}`}</span>
       <button type="button" className="panel-tool" onClick={() => setPanels((items) => items.map((panel) => ({ ...panel, locked: !allLocked })))}>{allLocked ? t('panels_unlock_all') : t('panels_lock_all')}</button>
       <button type="button" className="panel-tool" onClick={resetLayout}>{t('panels_reset')}</button>
       <div className="panel-add" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" className="panel-tool panel-tool-primary" aria-expanded={menuOpen} aria-controls="panel-add-menu" onClick={() => setMenuOpen((open) => !open)}>+ {(lang === 0 ? '选择模块' : 'Choose modules')}</button>
+        <button type="button" className="panel-tool panel-tool-primary" aria-expanded={menuOpen} aria-controls="panel-add-menu" onClick={() => setMenuOpen((open) => !open)}>+ {t('panels_add')}</button>
         <AnimatePresence>{menuOpen && <PopoverSurface id="panel-add-menu" className="panel-menu">
-          {catalog.map((cat) => <button key={cat.id} type="button" className={`panel-menu-item${enabled.includes(cat.id) ? ' is-on' : ''}`} aria-pressed={enabled.includes(cat.id) && !hiddenIds.includes(cat.id)} onClick={() => addPanel(cat.id)} disabled={hiddenIds.includes(cat.id) || (!enabled.includes(cat.id) && enabled.length >= PANELS_MAX)}>
-            <span className="panel-menu-copy"><b>{cat.title}</b><small>{hiddenIds.includes(cat.id) ? (lang === 0 ? '在设置中恢复此套餐' : 'Restore in Settings') : cat.description}</small></span><i className={`panel-menu-dot${enabled.includes(cat.id) ? ' is-on' : ''}`} />
+          {catalog.map((cat) => <button key={cat.id} type="button" className={`panel-menu-item${enabled.includes(cat.id) ? ' is-on' : ''}`} aria-pressed={enabled.includes(cat.id) && !hiddenIds.includes(cat.id)} onClick={() => (hiddenIds.includes(cat.id) ? onRestoreHidden?.(cat.id) : addPanel(cat.id))} disabled={!hiddenIds.includes(cat.id) && !enabled.includes(cat.id) && enabled.length >= PANELS_MAX}>
+            <span className="panel-menu-copy"><b>{cat.title}</b><small>{hiddenIds.includes(cat.id) ? (lang === 0 ? '已隐藏 · 点击恢复' : 'Hidden · click to restore') : cat.description}</small></span><i className={`panel-menu-dot${enabled.includes(cat.id) ? ' is-on' : ''}`} />
           </button>)}
         </PopoverSurface>}</AnimatePresence>
       </div>
-    </div>
+    </div>}
     <div ref={gridRef} className="panel-grid" style={{ height: narrow ? undefined : maxBottom * (PANEL_ROW_H + PANEL_GAP) - PANEL_GAP }}>
       {drag?.align.v.map((x) => <i key={`v${x}`} className="panel-align-v" style={{ left: x * (gridWidth + PANEL_GAP) / PANEL_COLS }} />)}
       {drag?.align.h.map((y) => <i key={`h${y}`} className="panel-align-h" style={{ top: y * (PANEL_ROW_H + PANEL_GAP) }} />)}
       {ghost && <motion.div className="panel-ghost" initial={false} animate={{ x: ghost.x, y: ghost.y, width: ghost.width, height: ghost.height }} transition={reduced ? { duration: 0 } : LAYOUT_SPRING} />}
-      <AnimatePresence initial={false}>{gridWidth != null && renderList.map((panel) => <FluidPanel key={panel.id} panel={panel} gridWidth={gridWidth} active={drag?.id === panel.id ? drag.mode : null} catalog={catalog} renderModule={renderModule} meta={meta} modular={modular} narrow={narrow} lang={lang} reduced={reduced} onStart={startDrag} onLock={toggleLock} onTop={moveToTop} onRemove={removePanel} />)}</AnimatePresence>
+      <AnimatePresence initial={false}>{gridWidth != null && renderList.map((panel) => <FluidPanel key={panel.id} panel={panel} gridWidth={gridWidth} active={drag?.id === panel.id ? drag.mode : null} catalog={catalog} renderModule={renderModule} meta={meta} modular={modular} narrow={narrow} lang={lang} reduced={reduced} editing={editing} onStart={startDrag} onLock={toggleLock} onTop={moveToTop} onRemove={removePanel} />)}</AnimatePresence>
       {renderList.length === 0 && <div className="panel-empty">{t('no_data')}</div>}
     </div>
   </div>;

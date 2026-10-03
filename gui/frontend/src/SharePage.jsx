@@ -1,12 +1,14 @@
-// 分享卡编辑器:1080 宽画布上复用 ModuleBoard 自由拖拽/缩放数据模块,
-// snapdom 把画布光栅化成 PNG 经 IPC 存盘。画布自带品牌头,导出时隐藏编辑器部件。
+// 分享页:两个"把数据带出去"的形态——桌面分享卡(PNG)与局域网看板(手机/平板)。
+// 编辑器工具条在画布外;画布内只保留模块本身,编辑所见即导出所得。
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ModuleBoard from './ModuleBoard.jsx';
 import { STR, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
 import { sendCommand } from './gui-bridge.js';
 import { snapdom } from '@zumer/snapdom';
+import qrcode from 'qrcode-generator';
 
 const PALETTE_KEY = 'token-monitor.share-palette.v1';
+const SHARE_LAYOUT_KEY = 'token-monitor.share-layout.v1';
 
 function todayStamp(lang) {
   const now = new Date();
@@ -24,14 +26,64 @@ function peakHourOf(hourly) {
   return best;
 }
 
+// 局域网看板:开关 + 地址 + 二维码;数据只读、不含密钥。
+function LanBoard({ lang, lan, onToggle }) {
+  const t = (key) => STR[key][lang];
+  const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const copyUrl = () => {
+    if (!lan.url) return;
+    navigator.clipboard.writeText(lan.url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  // 白底容器保证扫码对比度;scalable 让 SVG 自适应容器
+  const qrSvg = showQr && lan.url ? (() => {
+    const qr = qrcode(0, 'M');
+    qr.addData(lan.url);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+  })() : null;
+  return (
+    <section className="lan-board">
+      <header className="lan-board-head">
+        <div>
+          <span className="eyebrow">// {t('lan_title')}</span>
+          <h2>{t('lan_title')}</h2>
+          <p>{t('lan_hint')}</p>
+        </div>
+        <div className="lan-board-switch" role="group" aria-label={t('lan_title')}>
+          <button type="button" className={!lan.enabled ? 'is-selected' : ''} onClick={() => { onToggle(false); setShowQr(false); }}>{t('lan_off')}</button>
+          <button type="button" className={lan.enabled ? 'is-selected' : ''} onClick={() => onToggle(true)}>{t('lan_on')}</button>
+        </div>
+      </header>
+      {lan.enabled && (
+        <div className="lan-board-body">
+          <div className="lan-board-status" role="status">
+            <span className={`lan-dot${lan.url ? ' is-on' : ''}`} />
+            <code>{lan.url || t('lan_stopped')}</code>
+            {lan.url && <button type="button" onClick={() => setShowQr((open) => !open)} aria-expanded={showQr}>{t('lan_qr')}</button>}
+            {lan.url && <button type="button" onClick={copyUrl}>{copied ? t('lan_copied') : t('lan_copy')}</button>}
+          </div>
+          {qrSvg && <div className="lan-qr" title={lan.url} dangerouslySetInnerHTML={{ __html: qrSvg }} />}
+          <small className="lan-security">{t('lan_security')}</small>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // 模块主体都是「mono 眉题 + 大数字/分块条」的同族语言,导出后与编辑器部件分离。
-export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
+export default function SharePage({ ledger, monthlyValue, lang, shareStatus, lan, onLanToggle }) {
   const t = (key) => STR[key][lang];
   const zh = lang === 0;
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
+  const [tab, setTab] = useState('card');
   const [exporting, setExporting] = useState(false);
   const [scale, setScale] = useState(1);
+  const [boardKey, setBoardKey] = useState(0);
   const [palette, setPalette] = useState(() => {
     try { return localStorage.getItem(PALETTE_KEY) === 'paper' ? 'paper' : 'deep'; } catch { return 'deep'; }
   });
@@ -49,7 +101,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
     const observer = new ResizeObserver(fit);
     if (viewportRef.current) observer.observe(viewportRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [tab]);
 
   const data = useMemo(() => {
     const L = ledger;
@@ -75,10 +127,10 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
       content: (
         <div className="share-block share-hero">
           <span className="share-eyebrow">// {zh ? '今日 TOKEN' : "TODAY'S TOKENS"}</span>
-          <strong className="share-number">{hasToday ? fmtTokens(L.today.total) : '—'}</strong>
+          <strong className="share-number">{hasToday ? fmtTokens(L.today.total, zh) : '—'}</strong>
           <div className="share-hero-sub">
             <span>{fmtInt(L.today.messages)} {zh ? '次请求' : 'requests'}</span>
-            {L.burn_rate != null && L.burn_rate > 0 && <span>{zh ? '燃烧' : 'burn'} {fmtTokens(Math.round(L.burn_rate))}/min</span>}
+            {L.burn_rate != null && L.burn_rate > 0 && <span>{zh ? '燃烧' : 'burn'} {fmtTokens(Math.round(L.burn_rate), zh)}/min</span>}
           </div>
         </div>
       ),
@@ -90,7 +142,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
           <span className="share-eyebrow">// {zh ? '活跃时段 · 24H' : 'ACTIVE HOURS · 24H'}</span>
           <div className="share-hour-bars">
             {hourly.map((value, hour) => (
-              <i key={hour} className={hour === data.peakHour && value > 0 ? 'is-peak' : ''} style={{ height: `${Math.max(3, (value / hourMax) * 100)}%` }} title={`${hour}:00`} />
+              <i key={hour} className={hour === peakHour && value > 0 ? 'is-peak' : ''} style={{ height: `${Math.max(3, (value / hourMax) * 100)}%` }} title={`${hour}:00`} />
             ))}
           </div>
           <div className="share-hour-scale"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
@@ -108,7 +160,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
             <div className="share-rank" key={row.model}>
               <span className="share-rank-name" title={row.model}>{index + 1} · {row.model}</span>
               <div className="share-rank-bar"><i style={{ width: `${Math.max(4, (row.agg.total / modelMax) * 100)}%` }} /></div>
-              <span className="share-rank-value">{fmtTokens(row.agg.total)}</span>
+              <span className="share-rank-value">{fmtTokens(row.agg.total, zh)}</span>
             </div>
           ))}
         </div>
@@ -121,7 +173,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
           <span className="share-eyebrow">// {zh ? 'CODING AGENT' : 'BY AGENT'}</span>
           <div className="share-chips">
             {agents.map((row) => (
-              <span className="share-chip" key={row.client}>{row.label || row.client}<b>{fmtTokens(row.agg.total)}</b></span>
+              <span className="share-chip" key={row.client}>{row.label || row.client}<b>{fmtTokens(row.agg.total, zh)}</b></span>
             ))}
             {agents.length === 0 && <div className="share-caption">{t('share_empty')}</div>}
           </div>
@@ -134,7 +186,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
         <div className="share-block">
           <span className="share-eyebrow">// {zh ? '近 14 天' : 'LAST 14 DAYS'}</span>
           <div className="share-day-bars">
-            {days.map((day) => <i key={day.date} style={{ height: `${Math.max(3, (day.tokens / dayMax) * 100)}%` }} title={`${day.date} · ${fmtTokens(day.tokens)}`} />)}
+            {days.map((day) => <i key={day.date} style={{ height: `${Math.max(3, (day.tokens / dayMax) * 100)}%` }} title={`${day.date} · ${fmtTokens(day.tokens, zh)}`} />)}
           </div>
         </div>
       ),
@@ -158,7 +210,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
           <span className="share-eyebrow">// {zh ? '今日之最' : 'HIGHLIGHTS'}</span>
           <div className="share-summary">
             <span>{zh ? '最活跃' : 'Peak'} {String(peakHour).padStart(2, '0')}:00</span>
-            <span>{zh ? '本月' : 'Month'} {fmtTokens(L.month.total)}</span>
+            <span>{zh ? '本月' : 'Month'} {fmtTokens(L.month.total, zh)}</span>
             {(L.weekday || []).length > 0 && (() => {
               const names = zh ? ['一', '二', '三', '四', '五', '六', '日'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
               let best = 0;
@@ -192,6 +244,11 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
     return panel;
   });
 
+  const resetLayout = () => {
+    try { localStorage.removeItem(SHARE_LAYOUT_KEY); } catch { /* session only */ }
+    setBoardKey((value) => value + 1);
+  };
+
   const exportPng = async () => {
     const canvas = canvasRef.current;
     if (!canvas || exporting) return;
@@ -215,27 +272,34 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus }) {
 
   return (
     <div className="share-page">
-      <div className="share-toolbar">
-        <div className="share-palettes" role="group" aria-label={t('share_palette')}>
-          <button type="button" className={palette === 'deep' ? 'is-selected' : ''} onClick={() => setPalette('deep')}>{t('share_palette_deep')}</button>
-          <button type="button" className={palette === 'paper' ? 'is-selected' : ''} onClick={() => setPalette('paper')}>{t('share_palette_paper')}</button>
-        </div>
-        <span className="share-hint">{t('share_hint')}</span>
-        <button type="button" className="share-export" onClick={exportPng} disabled={exporting}>{exporting ? t('share_exporting') : t('share_export')}</button>
+      <div className="share-tabs" role="tablist" aria-label={t('nav_share')}>
+        <button type="button" role="tab" aria-selected={tab === 'card'} className={tab === 'card' ? 'is-selected' : ''} onClick={() => setTab('card')}>{t('share_tab_card')}</button>
+        <button type="button" role="tab" aria-selected={tab === 'lan'} className={tab === 'lan' ? 'is-selected' : ''} onClick={() => setTab('lan')}>{t('share_tab_lan')}</button>
       </div>
-      {shareStatus && <div className={`share-status is-${shareStatus}`} role="status">{t(`share_${shareStatus}`)}</div>}
-      <div className="share-viewport" ref={viewportRef}>
-        <div style={{ height: (canvasRef.current?.offsetHeight || 0) * scale, minHeight: 200 }}>
-          <div className={`share-canvas is-${palette}`} ref={canvasRef} style={{ transform: `scale(${scale})` }}>
-            <header className="share-brand">
-              <span className="share-brand-mark" />
-              <span>TOKEN MONITOR · {todayStamp(lang)}</span>
-            </header>
-            <ModuleBoard storageKey="token-monitor.share-layout.v1" lang={lang} catalog={withData} defaults={defaults} renderModule={(id) => withData.find((module) => module.id === id)?.content} />
-            <footer className="share-foot">{zh ? '由 Token Monitor 生成' : 'Made with Token Monitor'}</footer>
+      {tab === 'card' ? <>
+        <div className="share-toolbar">
+          <div className="share-palettes" role="group" aria-label={t('share_palette')}>
+            <button type="button" className={palette === 'deep' ? 'is-selected' : ''} onClick={() => setPalette('deep')}>{t('share_palette_deep')}</button>
+            <button type="button" className={palette === 'paper' ? 'is-selected' : ''} onClick={() => setPalette('paper')}>{t('share_palette_paper')}</button>
+          </div>
+          <span className="share-hint">{t('share_hint')}</span>
+          <button type="button" className="share-tool" onClick={resetLayout}>{t('panels_reset')}</button>
+          <button type="button" className="share-export" onClick={exportPng} disabled={exporting}>{exporting ? t('share_exporting') : t('share_export')}</button>
+        </div>
+        {shareStatus && <div className={`share-status is-${shareStatus}`} role="status">{t(`share_${shareStatus}`)}</div>}
+        <div className="share-viewport" ref={viewportRef}>
+          <div style={{ height: (canvasRef.current?.offsetHeight || 0) * scale, minHeight: 200 }}>
+            <div className={`share-canvas is-${palette}`} ref={canvasRef} style={{ transform: `scale(${scale})` }}>
+              <header className="share-brand">
+                <span className="share-brand-mark" />
+                <span>TOKEN MONITOR · {todayStamp(lang)}</span>
+              </header>
+              <ModuleBoard key={boardKey} storageKey={SHARE_LAYOUT_KEY} lang={lang} catalog={withData} defaults={defaults} hideTools renderModule={(id) => withData.find((module) => module.id === id)?.content} />
+              <footer className="share-foot">{t('share_footer')}</footer>
+            </div>
           </div>
         </div>
-      </div>
+      </> : <LanBoard lang={lang} lan={lan} onToggle={onLanToggle} />}
     </div>
   );
 }

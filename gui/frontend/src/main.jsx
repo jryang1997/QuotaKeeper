@@ -5,6 +5,7 @@ import '@astryxdesign/core/astryx.css';
 import '@astryxdesign/theme-neutral/theme.css';
 import './app.css';
 import './usage-dashboard.css';
+import './ia.css';
 import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
 import UsageDashboard from './UsageDashboard.jsx';
@@ -12,20 +13,21 @@ import SettingsPage from './SettingsPage.jsx';
 import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPreferences } from './gui-preferences.js';
 import { fetchExchangeRate, readExchangeRates } from './currency.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
-import PanelsPage from './PanelsPage.jsx';
 import SharePage from './SharePage.jsx';
 import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
-import { MotionProvider, useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
+import { MotionProvider, PopoverSurface, useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 import { CONTROL_SPRING, FADE } from './motion-tuning.js';
 import { Card } from '@astryxdesign/core/Card';
 import { Text } from '@astryxdesign/core/Text';
 import { Button } from '@astryxdesign/core/Button';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Toast } from '@astryxdesign/core/Toast';
+import { AchievementToasts, AchievementsModal, useAchievements } from './Achievements.jsx';
 
 const PageTransition = lazy(() => import('./PageTransition.jsx'));
 
-const NAV_ITEMS = ['quota', 'usage', 'heat', 'share', 'settings'];
+const NAV_ITEMS = ['quota', 'usage', 'share', 'settings'];
+const EDITABLE_PAGES = { quota: true, usage: true };
 
 function NavIcon({ page }) {
   if (page === 'quota') {
@@ -36,40 +38,66 @@ function NavIcon({ page }) {
     // 带轴圆帽柱:轴一次画到位,三根柱节奏降序,读作「用量」
     return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M8 17v-4" /><path d="M13 17V8" /><path d="M18 17v-7" /></svg>;
   }
-  if (page === 'share') {
-    // 分享:三节点连线,读作「卡片 → 分享出去」
-    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></svg>;
-  }
   if (page === 'settings') {
     // lucide 现代齿轮:外环由 8 组对称圆弧构成,光学中心与圆孔重合
     return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>;
   }
-  // 热力:3×3 实心点阵,呼应面板页的点阵大数字
-  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">{[5.5, 12, 18.5].map((y) => [5.5, 12, 18.5].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" fill="currentColor" stroke="none" />))}</svg>;
+  // 分享:三节点连线,读作「卡片 → 分享出去」
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></svg>;
 }
 
 function PrimaryNav({ lang, page, onNavigate, variant }) {
   const reduced = useMotionPreference();
   return (
     <LayoutGroup id={`navigation-${variant}`}>
-    <nav className={`primary-nav primary-nav-${variant}`} aria-label={lang === 0 ? '主导航' : 'Main navigation'}>
-      {NAV_ITEMS.map((key) => {
-        const active = page === key;
-        return (
-          <button
-            key={key}
-            className={`nav-item${active ? ' nav-item-active' : ''}`}
-            onClick={() => onNavigate(key)}
-            aria-current={active ? 'page' : undefined}
-          >
-            {active && <motion.span layoutId={reduced ? undefined : 'active-navigation'} className="nav-active-indicator" aria-hidden="true" transition={reduced ? { duration: 0 } : CONTROL_SPRING} />}
-            <NavIcon page={key} />
-            <span className="nav-label">{STR[`nav_${key}`][lang]}</span>
-          </button>
-        );
-      })}
-    </nav>
+      <nav className={`primary-nav primary-nav-${variant}`} aria-label={lang === 0 ? '主导航' : 'Main navigation'}>
+        {NAV_ITEMS.map((key) => {
+          const active = page === key;
+          return (
+            <button
+              key={key}
+              className={`nav-item${active ? ' nav-item-active' : ''}`}
+              onClick={() => onNavigate(key)}
+              aria-current={active ? 'page' : undefined}
+            >
+              {active && <motion.span layoutId={reduced ? undefined : 'active-navigation'} className="nav-active-indicator" aria-hidden="true" transition={reduced ? { duration: 0 } : CONTROL_SPRING} />}
+              <NavIcon page={key} />
+              <span className="nav-label">{STR[`nav_${key}`][lang]}</span>
+            </button>
+          );
+        })}
+      </nav>
     </LayoutGroup>
+  );
+}
+
+// 数据状态:正常时收进侧栏一枚极小的状态点,点开才看明细;异常才在页内提示。
+function DataStatus({ lang, data, refreshing, age, quotaStale, ledgerStale, quotaAge, ledgerAge }) {
+  const t = (key) => STR[key][lang];
+  const [open, setOpen] = useState(false);
+  const stale = quotaStale || ledgerStale;
+  return (
+    <div className="sidebar-status-wrap">
+      <button type="button" className={`sidebar-status${stale ? ' is-stale' : ''}`} aria-expanded={open} onClick={() => setOpen((value) => !value)} title={t('freshness_open')}>
+        {refreshing ? (
+          <><Spinner size="sm" /> <span>{t('refreshing')}</span></>
+        ) : (
+          <><i className={`status-dot${stale ? ' is-stale' : ''}`} aria-hidden="true" /><span className="sidebar-age">{t('updated')} {age != null ? fmtRel(age * 1000) : '—'}</span></>
+        )}
+      </button>
+      <AnimatePresence>{open && <PopoverSurface className="status-popover" role="status">
+        <span className="status-popover-title">{t('freshness_title')}</span>
+        <div className={`status-row${quotaStale ? ' is-stale' : ''}`}>
+          <i /><span>{t('freshness_quota')}</span>
+          <strong>{quotaStale ? t('freshness_stale') : quotaAge == null ? t('freshness_waiting') : `${fmtRel(quotaAge)}`}</strong>
+        </div>
+        <div className={`status-row${ledgerStale ? ' is-stale' : ''}`}>
+          <i /><span>{t('freshness_local')}</span>
+          <strong>{ledgerStale ? t('freshness_stale') : ledgerAge == null ? t('freshness_waiting') : `${fmtRel(ledgerAge)}`}</strong>
+        </div>
+        {data?.quotaError && <p className="status-popover-error">{data.quotaError}</p>}
+      </PopoverSurface>}</AnimatePresence>
+    </div>
   );
 }
 
@@ -119,6 +147,8 @@ function App() {
   const [planModels, setPlanModels] = useState({});
   const [shareStatus, setShareStatus] = useState(null);
   const [lan, setLan] = useState({ enabled: false, port: null, url: null });
+  const [achOpen, setAchOpen] = useState(false);
+  const [editing, setEditing] = useState({ quota: false, usage: false });
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
@@ -131,6 +161,7 @@ function App() {
   const refreshRequestedAt = useRef(0);
   const mainRef = useRef(null);
   const scrollByPage = useRef({});
+  const achievements = useAchievements(data?.ledger, lang);
   useLayoutEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollByPage.current[page] || 0;
   }, [page]);
@@ -264,9 +295,9 @@ function App() {
     });
   }, []);
 
-  const resetCards = useCallback(() => {
+  const restoreCard = useCallback((provider) => {
     setPreferences((current) => {
-      const next = { ...current, pinnedCards: [], hiddenCards: [], providerColors: {} };
+      const next = { ...current, hiddenCards: current.hiddenCards.filter((item) => item !== provider) };
       saveGuiPreferences(next);
       return next;
     });
@@ -315,9 +346,8 @@ function App() {
       if (event.altKey || event.ctrlKey || event.metaKey || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
-      else if (event.key === '3') setPage('heat');
-      else if (event.key === '4') setPage('share');
-      else if (event.key === '5') setPage('settings');
+      else if (event.key === '3') setPage('share');
+      else if (event.key === '4') setPage('settings');
       else if (event.key.toLowerCase() === 'r' && !refreshing) refresh();
       else if (event.key.toLowerCase() === 'p') cycleTheme();
       else return;
@@ -334,14 +364,20 @@ function App() {
   const ledgerAge = data?.fetched_at_ms ? now - data.fetched_at_ms : null;
   const quotaStale = data && (data.quotaError || quotaAge == null || quotaAge > 120_000);
   const ledgerStale = data && (ledgerAge == null || ledgerAge > 20_000);
+  const currency = { code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError };
+  const setPageEditing = (key, value) => setEditing((current) => ({ ...current, [key]: value }));
   const pageContent = page === 'settings' ? (
     <SettingsPage
       lang={lang}
       preferences={preferences}
+      currency={currency}
+      monthlyValue={data?.monthly_value}
+      sources={data?.ledger?.sources || []}
+      cards={data?.cards || []}
       onPreferenceChange={updatePreference}
       onResetAppearance={resetAppearance}
-      onResetCards={resetCards}
       onShowWelcome={() => setShowWelcome(true)}
+      onOpenShare={() => setPage('share')}
       nativeError={nativeError}
       goKeyStored={goKeyStored}
       goKeyFeedback={goKeyFeedback}
@@ -361,20 +397,43 @@ function App() {
       agentFeedback={agentFeedback}
       onScanAgents={scanAgents}
       onUpdateAgent={updateAgent}
-      lan={lan}
-      onLanToggle={(enabled) => sendCommand({ cmd: 'setLanDashboard', enabled })}
-      monthlyValue={data?.monthly_value}
-      currency={{ code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError }}
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage cards={data.cards} sources={data.ledger?.sources} ledger={data.ledger} goatUsage={data.goat_usage} deepseekBalance={data.deepseek_balance} quotaFetchedAtMs={data.quota_fetched_at_ms} quotaStale={quotaStale} now={now} lang={lang} preferences={preferences} onTogglePin={(provider) => toggleCard('pinnedCards', provider)} onToggleHidden={(provider) => toggleCard('hiddenCards', provider)} onOpenSettings={() => setPage('settings')} planModels={planModels} onPreferenceChange={updatePreference} /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
-      {page === 'usage' && <UsageDashboard ledger={data.ledger} cards={data.cards} monthlyValue={data.monthly_value} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} reduceMotion={preferences.motion === 'reduced'} onOpenSettings={() => setPage('settings')} />}
-      {page === 'heat' && <PanelsPage ledger={data.ledger} lang={lang} currency={{ code: preferences.currency, rate: exchangeRate?.rate }} />}
-      {page === 'share' && <SharePage ledger={data.ledger} monthlyValue={data.monthly_value} lang={lang} shareStatus={shareStatus} />}
+      {page === 'quota' && (data.cards?.length ? <QuotaPage
+        cards={data.cards}
+        ledger={data.ledger}
+        goatUsage={data.goat_usage}
+        deepseekBalance={data.deepseek_balance}
+        quotaFetchedAtMs={data.quota_fetched_at_ms}
+        quotaStale={quotaStale}
+        now={now}
+        lang={lang}
+        preferences={preferences}
+        planModels={planModels}
+        editing={editing.quota}
+        onToggleEditing={(value) => setPageEditing('quota', value)}
+        onRestoreCard={restoreCard}
+        onTogglePin={(provider) => toggleCard('pinnedCards', provider)}
+        onToggleHidden={(provider) => toggleCard('hiddenCards', provider)}
+        onOpenSettings={() => setPage('settings')}
+        onPreferenceChange={updatePreference}
+      /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      {page === 'usage' && <UsageDashboard
+        ledger={data.ledger}
+        monthlyValue={data.monthly_value}
+        lang={lang}
+        currency={{ code: preferences.currency, rate: exchangeRate?.rate }}
+        onOpenSettings={() => setPage('settings')}
+        onOpenAchievements={() => setAchOpen(true)}
+        editing={editing.usage}
+        onToggleEditing={(value) => setPageEditing('usage', value)}
+      />}
+      {page === 'share' && <SharePage ledger={data.ledger} monthlyValue={data.monthly_value} lang={lang} shareStatus={shareStatus} lan={lan} onLanToggle={(enabled) => sendCommand({ cmd: 'setLanDashboard', enabled })} />}
     </>
   ) : null;
 
+  const stale = quotaStale || ledgerStale;
   return (
     <MotionProvider reduceMotion={reducedMotion}><div
       className="app"
@@ -392,15 +451,7 @@ function App() {
         </div>
         <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="desktop" />
         <div className="sidebar-foot">
-          <div className="sidebar-status">
-            {refreshing ? (
-              <><Spinner size="sm" /> <span>{t('refreshing')}</span></>
-            ) : (
-              <span className="sidebar-age">
-                {t('updated')} {age != null ? fmtRel(age * 1000) : '—'}
-              </span>
-            )}
-          </div>
+          <DataStatus lang={lang} data={data} refreshing={refreshing} age={age} quotaStale={quotaStale} ledgerStale={ledgerStale} quotaAge={quotaAge} ledgerAge={ledgerAge} />
         </div>
       </aside>
 
@@ -420,6 +471,10 @@ function App() {
               </div>
             </SelectionGroup>
           </div>}
+          {EDITABLE_PAGES[page] && <button type="button" className={`toolbar-edit${editing[page] ? ' is-on' : ''}`} aria-pressed={editing[page]} title={t('edit_layout_hint')} onClick={() => setPageEditing(page, !editing[page])}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>
+            <span>{editing[page] ? t('edit_layout_done') : t('edit_layout')}</span>
+          </button>}
           <button className="toolbar-theme" type="button" onClick={cycleTheme} title={`${t('theme_quick')} (P)`} aria-label={`${t('theme_quick')}: ${t(`theme_${preferences.theme}`)}`}>
             <span className={`toolbar-theme-swatch toolbar-theme-${preferences.theme}`} aria-hidden="true" />
             <span>{t(`theme_${preferences.theme}`)}</span>
@@ -428,21 +483,17 @@ function App() {
             {t('refresh')}
           </Button>
         </div>
-        {page !== 'settings' && data && <div className="freshness-strip" role="status">
-          <span className={quotaStale ? 'freshness-badge is-stale' : 'freshness-badge'} title={data.quota_fetched_at_ms ? new Date(data.quota_fetched_at_ms).toLocaleString() : undefined}><i />{t('freshness_quota')} · {quotaStale && `${t('freshness_stale')} · `}{quotaAge == null ? t('freshness_waiting') : `${t('freshness_last_success')} ${fmtRel(quotaAge)}`}</span>
-          <span className={ledgerStale ? 'freshness-badge is-stale' : 'freshness-badge'} title={data.fetched_at_ms ? new Date(data.fetched_at_ms).toLocaleString() : undefined}><i />{t('freshness_local')} · {ledgerStale && `${t('freshness_stale')} · `}{ledgerAge == null ? t('freshness_waiting') : `${t('freshness_last_success')} ${fmtRel(ledgerAge)}`}</span>
-        </div>}
+        {staleCache && (
+          <div className="banner-cache" role="status">
+            <Spinner size="sm" /> <Text type="supporting">{t('cache_replay')}</Text>
+          </div>
+        )}
         {page !== 'settings' && data?.quotaError && (
           <div className="banner-error">
             <Toast kind="error">{t('quota_error')}: {data.quotaError}</Toast>
           </div>
         )}
-        {page !== 'settings' && staleCache && (
-          <div className="banner-cache" role="status">
-            <Spinner size="sm" /> <Text type="supporting">{t('cache_replay')}</Text>
-          </div>
-        )}
-        {page !== 'settings' && !data ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (
+        {!data ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (
           <Suspense fallback={<div className="page-content">{pageContent}</div>}>
             <PageTransition page={page} reduceMotion={preferences.motion === 'reduced'}>{pageContent}</PageTransition>
           </Suspense>
@@ -450,6 +501,8 @@ function App() {
       </main>
       <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="mobile" />
       <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
+      <AnimatePresence>{achOpen && <AchievementsModal key="achievements" ledger={data?.ledger} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
+      <AchievementToasts items={achievements.toasts} lang={lang} onDismiss={achievements.dismiss} />
     </div>
     </MotionProvider>
   );

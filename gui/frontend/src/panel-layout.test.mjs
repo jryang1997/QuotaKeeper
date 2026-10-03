@@ -17,7 +17,7 @@ const storage = (state) => ({
 });
 const defaultState = () => ({
   panels: DEFAULT_PANELS.map((panel) => ({ ...panel })),
-  enabled: PANEL_CATALOG.map(({ id }) => id),
+  enabled: DEFAULT_PANELS.map(({ id }) => id),
 });
 
 test('saved default layout can be restored', () => {
@@ -68,9 +68,9 @@ test('page layouts persist independently and enforce readable module sizes', () 
   const catalog = [{ id: 'cost', minW: 3, minH: 2 }];
   const usage = [{ id: 'cost', x: 6, y: 0, w: 3, h: 2, locked: true }];
   savePanelState(usage, ['cost'], memory, 'usage');
-  savePanelState(DEFAULT_PANELS, PANEL_CATALOG.map(({ id }) => id), memory, 'panels');
+  savePanelState(DEFAULT_PANELS, DEFAULT_PANELS.map(({ id }) => id), memory, 'panels');
   assert.deepEqual(readPanelState(memory, 'usage', catalog), { panels: usage, enabled: ['cost'] });
-  assert.equal(readPanelState(memory, 'panels').panels.length, 12);
+  assert.equal(readPanelState(memory, 'panels').panels.length, DEFAULT_PANELS.length);
   savePanelState([{ ...usage[0], w: 1 }], ['cost'], memory, 'usage');
   assert.equal(readPanelState(memory, 'usage', catalog), null);
 });

@@ -8,16 +8,21 @@ import fs from 'node:fs';
 
 const [port, out, js, urlFilter] = [process.argv[2], process.argv[3], process.argv[4], process.argv[5]];
 
-function listTargets(port) {
+function listOnce(host, port, headerHost) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '::1', port, path: '/json/list', method: 'GET', headers: { Host: `[::1]:${port}` } }, (res) => {
+    const req = http.request({ host, port, path: '/json/list', method: 'GET', headers: { Host: headerHost } }, (res) => {
       let body = '';
       res.on('data', (chunk) => (body += chunk));
-      res.on('end', () => { try { resolve(JSON.parse(body)); } catch (error) { reject(error); } });
+      res.on('end', () => { try { const parsed = JSON.parse(body); Array.isArray(parsed) && parsed.length ? resolve(parsed) : reject(new Error('no targets')); } catch (error) { reject(error); } });
     });
     req.on('error', reject);
     req.end();
   });
+}
+
+// WebView2 的调试端口有时绑 IPv6 回环、有时绑 127.0.0.1,两种都试。
+function listTargets(port) {
+  return listOnce('::1', port, `[::1]:${port}`).catch(() => listOnce('127.0.0.1', port, `127.0.0.1:${port}`));
 }
 
 class Cdp {
@@ -117,7 +122,8 @@ if (!page) { console.error('no page target:', targets.map((target) => target.url
 const cdp = await Cdp.connect(page.webSocketDebuggerUrl);
 await cdp.call('Page.enable');
 if (js) {
-  await cdp.call('Runtime.evaluate', { expression: js, awaitPromise: false });
+  const evaluated = await cdp.call('Runtime.evaluate', { expression: js, awaitPromise: false, returnByValue: true });
+  if (process.env.CDP_PRINT) console.log('eval:', JSON.stringify(evaluated.result?.value ?? evaluated.result));
   await new Promise((resolve) => setTimeout(resolve, 800));
 }
 const { data } = await cdp.call('Page.captureScreenshot', { format: 'png' });

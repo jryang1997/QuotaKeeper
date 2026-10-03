@@ -1,12 +1,17 @@
+// 用量页模块主体:热力图/作息/时钟/榜单/纪录/缓存/成就。
+// 标签一律走 STR(大小写风格:可读文案本地化,大写英文只留给"术语标签"如 PEAK)。
 import React, { useState } from 'react';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { CLIENT_COLORS, STR, fmtInt, fmtTokens } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
 import { formatCurrency } from './currency.js';
+import { AchievementsPanel } from './Achievements.jsx';
 
 const WEEKDAY_ZH = ['一', '二', '三', '四', '五', '六', '日'];
 const WEEKDAY_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const t = (key, lang) => STR[key][lang];
 
 function HeatPanel({ ledger, lang, currency }) {
   const totals = ledger?.daily_totals || [];
@@ -101,13 +106,13 @@ function clockArc(r0, r1, a0, a1) {
   return `M ${p(r0, a0)} L ${p(r1, a0)} A ${r1} ${r1} 0 ${large} 1 ${p(r1, a1)} L ${p(r0, a1)} A ${r0} ${r0} 0 ${large} 0 ${p(r0, a0)} Z`;
 }
 
-function ClockPanel({ ledger }) {
+function ClockPanel({ ledger, lang }) {
   const hourly = ledger?.hourly || Array(24).fill(0);
   const max = Math.max(1, ...hourly);
   const peak = hourly.indexOf(Math.max(...hourly));
   return (
     <div className="clock">
-      <svg viewBox="-60 -60 120 120" role="img" aria-label="hourly distribution">
+      <svg viewBox="-60 -60 120 120" role="img" aria-label={t('panel_clock', lang)}>
         {hourly.map((v, h) => {
           if (v <= 0) return null;
           const a0 = -90 + h * 15 + 1.2;
@@ -162,32 +167,21 @@ function WeekPanel({ ledger, lang }) {
   );
 }
 
-function ModelsPanel({ ledger }) {
-  const rows = [...(ledger?.by_model || [])]
-    .sort((a, b) => b.agg.total - a.agg.total)
-    .slice(0, 6)
-    .map((m) => ({
-      key: m.model,
-      label: m.model,
-      v: m.agg.total,
-      title: m.aliases?.length ? `${m.model} ← ${m.aliases.join(', ')}` : undefined,
-    }));
-  return <BoardPanel rows={rows} color="var(--color-text-purple)" showRank />;
-}
-
-function SourcesPanel({ ledger }) {
+function SourcesPanel({ ledger, lang }) {
   const rows = ledger?.month_by_client || [];
   const total = rows.reduce((s, r) => s + r.agg.total, 0) || 1;
+  const label = (client) => (ledger?.sources || []).find((source) => source.client === client)?.label || client;
+  if (rows.length === 0) return <div className="board-empty">—</div>;
   return (
     <div className="share">
       <div className="share-track">
         {rows.map((r) => (
-          <div key={r.client} style={{ flexGrow: Math.max(1, r.agg.total), background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} title={`${r.client} ${fmtTokens(r.agg.total)}`} />
+          <div key={r.client} style={{ flexGrow: Math.max(1, r.agg.total), background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} title={`${label(r.client)} ${fmtTokens(r.agg.total)}`} />
         ))}
       </div>
       <div className="share-legend">
         {rows.map((r) => (
-          <span key={r.client}><i style={{ background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} />{r.client} {Math.round((r.agg.total / total) * 100)}%</span>
+          <span key={r.client}><i style={{ background: CLIENT_COLORS[r.client] || 'var(--color-text-secondary)' }} />{label(r.client)} {Math.round((r.agg.total / total) * 100)}%</span>
         ))}
       </div>
     </div>
@@ -198,32 +192,36 @@ function ProjectsPanel({ ledger }) {
   const rows = [...(ledger?.by_project || [])]
     .sort((a, b) => b.agg.total - a.agg.total)
     .slice(0, 6)
-    .map((p) => ({ key: p.project, label: p.project || '—', v: p.agg.total, sub: p.sessions }));
-  const topV = rows[0]?.v || 1;
+    .map((p) => ({ key: p.project, label: p.project || '—', v: p.agg.total }));
+  return <BoardPanel rows={rows} color="var(--sum-orange)" showRank />;
+}
+
+function SessionsPanel({ ledger, lang }) {
+  const rows = [...(ledger?.by_session || [])].sort((a, b) => b.agg.total - a.agg.total).slice(0, 8);
+  const topV = rows[0]?.agg.total || 1;
   if (rows.length === 0) return <div className="board-empty">—</div>;
   return (
     <div className="board">
-      {rows.map((r, i) => (
-        <div className="board-row" key={r.key}>
-          <span className="board-rank">{String(i + 1).padStart(2, '0')}</span>
-          <span className="board-label" title={r.label}>{r.label}</span>
-          <BlockBar pct={(r.v / topV) * 100} color="var(--sum-orange)" />
-          <span className="board-value">{fmtTokens(r.v)}</span>
+      {rows.map((row) => (
+        <div className="board-row" key={`${row.client}:${row.session}`}>
+          <span className="board-label" title={row.session}>{row.label || row.client}</span>
+          <BlockBar pct={(row.agg.total / topV) * 100} color={CLIENT_COLORS[row.client] || 'var(--color-text-blue)'} />
+          <span className="board-value">{fmtTokens(row.agg.total, lang === 0)}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function AllTimePanel({ ledger, currency }) {
+function AllTimePanel({ ledger, lang, currency }) {
   const days = ledger?.daily_totals || [];
   const sum = (f) => days.reduce((s, d) => s + (f(d) || 0), 0);
   const active = days.filter((d) => d.tokens > 0).length;
   const cells = [
-    [fmtTokens(sum((d) => d.tokens)), 'TOKENS'],
-    [fmtInt(sum((d) => d.messages)), 'RUNS'],
-    [`~${formatCurrency(sum((d) => d.cost), currency)}`, 'COST'],
-    [String(active), 'DAYS'],
+    [fmtTokens(sum((d) => d.tokens), lang === 0), t('panel_label_tokens', lang)],
+    [fmtInt(sum((d) => d.messages)), t('panel_label_runs', lang)],
+    [`~${formatCurrency(sum((d) => d.cost), currency)}`, t('panel_label_cost', lang)],
+    [String(active), t('panel_label_days', lang)],
   ];
   return (
     <div className="big4">
@@ -232,7 +230,7 @@ function AllTimePanel({ ledger, currency }) {
   );
 }
 
-function StreakPanel({ ledger }) {
+function StreakPanel({ ledger, lang }) {
   const days = ledger?.daily_totals || [];
   let cur = 0;
   for (let i = days.length - 1; i >= 0 && days[i].tokens > 0; i--) cur++;
@@ -245,15 +243,15 @@ function StreakPanel({ ledger }) {
   const active = days.filter((d) => d.tokens > 0).length;
   return (
     <div className="big4">
-      <div><b>{cur}<i className="big4-unit">d</i></b><span>{'CURRENT'}</span></div>
-      <div><b>{best}<i className="big4-unit">d</i></b><span>{'LONGEST'}</span></div>
-      <div><b>{active}</b><span>{'ACTIVE'}</span></div>
-      <div><b title={String(days.reduce((s, d) => s + d.tokens, 0))}>{fmtTokens(days.reduce((s, d) => s + d.tokens, 0))}</b><span>{'26W'}</span></div>
+      <div><b>{cur}<i className="big4-unit">d</i></b><span>{t('panel_current', lang)}</span></div>
+      <div><b>{best}<i className="big4-unit">d</i></b><span>{t('panel_longest', lang)}</span></div>
+      <div><b>{active}</b><span>{t('panel_active_days', lang)}</span></div>
+      <div><b title={String(days.reduce((s, d) => s + d.tokens, 0))}>{fmtTokens(days.reduce((s, d) => s + d.tokens, 0), lang === 0)}</b><span>{t('panel_window', lang)}</span></div>
     </div>
   );
 }
 
-function RecordsPanel({ ledger, currency }) {
+function RecordsPanel({ ledger, lang, currency }) {
   const days = ledger?.daily_totals || [];
   const maxDay = days.reduce((m, d) => (d.tokens > (m?.tokens || 0) ? d : m), null);
   const topSession = (ledger?.by_session || [])[0];
@@ -265,9 +263,9 @@ function RecordsPanel({ ledger, currency }) {
     }, null);
   return (
     <div className="records">
-      <div className="records-row"><span className="records-label">BUSIEST DAY</span><span className="records-value" title={maxDay?.date}>{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
-      <div className="records-row"><span className="records-label">TOP SESSION</span><span className="records-value" title={topSession?.session}>{topSession?.session || '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
-      <div className="records-row"><span className="records-label">PRICIEST MODEL</span><span className="records-value" title={priciest?.label}>{priciest?.label || '—'}</span><span className="records-sub">{priciest ? `${formatCurrency(priciest.r, currency)}/req` : ''}</span></div>
+      <div className="records-row"><span className="records-label">{t('panel_busiest_day', lang)}</span><span className="records-value" title={maxDay?.date}>{maxDay ? maxDay.date.slice(5) : '—'}</span><span className="records-sub">{fmtTokens(maxDay?.tokens)}</span></div>
+      <div className="records-row"><span className="records-label">{t('panel_top_session', lang)}</span><span className="records-value" title={topSession?.session}>{topSession?.session || '—'}</span><span className="records-sub">{fmtTokens(topSession?.agg.total)}</span></div>
+      <div className="records-row"><span className="records-label">{t('panel_priciest_model', lang)}</span><span className="records-value" title={priciest?.label}>{priciest?.label || '—'}</span><span className="records-sub">{priciest ? `${formatCurrency(priciest.r, currency)}${t('panel_per_request', lang)}` : ''}</span></div>
     </div>
   );
 }
@@ -276,16 +274,16 @@ function CachePanel({ ledger, lang }) {
   const m = ledger?.month;
   const hit = m && m.input + m.cache_read > 0 ? (m.cache_read / (m.input + m.cache_read)) * 100 : 0;
   const mix = m ? [
-    ['input', m.input, 'var(--color-text-blue)'],
-    ['output', m.output, 'var(--color-text-green)'],
+    [t('panel_io_input', lang), m.input, 'var(--color-text-blue)'],
+    [t('panel_io_output', lang), m.output, 'var(--color-text-green)'],
     [STR.panel_cache_read[lang], m.cache_read, 'var(--color-text-purple)'],
     [STR.panel_cache_write[lang], m.cache_write, 'var(--color-text-orange)'],
-    ['reasoning', m.reasoning, 'var(--color-text-secondary)'],
+    [t('panel_io_reasoning', lang), m.reasoning, 'var(--color-text-secondary)'],
   ] : [];
   const mixTotal = mix.reduce((s, [, v]) => s + v, 0) || 1;
   return (
     <div className="cache">
-      <div className="cache-hit"><b>{hit.toFixed(1)}<i className="big4-unit">%</i></b><span>{'CACHE HIT'}</span></div>
+      <div className="cache-hit"><b>{hit.toFixed(1)}<i className="big4-unit">%</i></b><span>{t('panel_cache_hit', lang)}</span></div>
       <div className="cache-mix">
         <div className="cache-track">
           {mix.map(([k, v, color]) => <div key={k} style={{ flexGrow: Math.max(1, v), background: color }} title={`${k} ${fmtTokens(v)}`} />)}
@@ -298,39 +296,19 @@ function CachePanel({ ledger, lang }) {
   );
 }
 
-function DailyPanel({ ledger, currency }) {
-  const last30 = (ledger?.daily_totals || []).slice(-30);
-  const max = Math.max(1, ...last30.map((d) => d.tokens));
-  return (
-    <div className="daily">
-      <div className="daily-bars">
-        {last30.map((d) => (
-          <Tooltip key={d.date} content={`${d.date} · ${fmtTokens(d.tokens)} / ${formatCurrency(d.cost, currency)}`}>
-            <div className="daily-bar" style={{ height: `${Math.max(2, (d.tokens / max) * 100)}%` }} />
-          </Tooltip>
-        ))}
-      </div>
-      <div className="daily-axis">
-        <span>{last30[0]?.date?.slice(5) || ''}</span>
-        <span>{last30[last30.length - 1]?.date?.slice(5) || ''}</span>
-      </div>
-    </div>
-  );
-}
-
 export const PANEL_BODIES = {
   heat: HeatPanel,
   punch: PunchPanel,
   clock: ClockPanel,
   week: WeekPanel,
-  models: ModelsPanel,
   sources: SourcesPanel,
   projects: ProjectsPanel,
+  sessions: SessionsPanel,
   alltime: AllTimePanel,
   streak: StreakPanel,
   records: RecordsPanel,
   cache: CachePanel,
-  daily: DailyPanel,
+  achievements: AchievementsPanel,
 };
 
 export class PanelErrorBoundary extends React.Component {
@@ -348,12 +326,12 @@ export function panelMeta(id, ledger, lang) {
   switch (id) {
     case 'heat': {
       const total = (L.daily_totals || []).reduce((s, d) => s + d.tokens, 0);
-      return fmtTokens(total);
+      return fmtTokens(total, lang === 0);
     }
     case 'punch': {
       const flat = (L.weekday_hour || []).flat();
       const max = Math.max(0, ...flat);
-      return max > 0 ? fmtTokens(max) : '';
+      return max > 0 ? fmtTokens(max, lang === 0) : '';
     }
     case 'clock': {
       const peak = (L.hourly || []).indexOf(Math.max(0, ...(L.hourly || [0])));
@@ -364,14 +342,10 @@ export function panelMeta(id, ledger, lang) {
       const idx = (L.weekday || []).indexOf(Math.max(0, ...(L.weekday || [0])));
       return (L.weekday || [0]).some((v) => v > 0) ? names[idx] : '';
     }
-    case 'models': {
-      return String((L.by_model || []).length);
-    }
     case 'sources': return `${(L.month_by_client || []).length}`;
-    case 'projects': {
-      return String((L.by_project || []).length);
-    }
-    case 'alltime': return fmtTokens((L.daily_totals || []).reduce((s, d) => s + d.tokens, 0));
+    case 'projects': return String((L.by_project || []).length);
+    case 'sessions': return String((L.by_session || []).length);
+    case 'alltime': return fmtTokens((L.daily_totals || []).reduce((s, d) => s + d.tokens, 0), lang === 0);
     case 'streak': {
       let cur = 0;
       const days = L.daily_totals || [];
@@ -386,7 +360,13 @@ export function panelMeta(id, ledger, lang) {
       const m = L.month;
       return m && m.input + m.cache_read > 0 ? `${Math.round((m.cache_read / (m.input + m.cache_read)) * 100)}%` : '';
     }
-    case 'daily': return fmtTokens((L.daily_totals || []).slice(-30).reduce((s, d) => s + d.tokens, 0));
+    case 'achievements': return '';
+    case 'models': return String((L.by_model || []).length);
+    case 'speed': {
+      const timed = (L.by_model || []).filter((m) => m.speed && m.speed.duration_ms_total > 0 && m.speed.timed_calls > 0);
+      const fastest = timed.reduce((best, m) => Math.max(best, m.speed.output_total / (m.speed.duration_ms_total / 1000)), 0);
+      return fastest > 0 ? `${Math.round(fastest)} t/s` : '';
+    }
     default: return '';
   }
 }
