@@ -1,6 +1,7 @@
 import { sendCommand } from './gui-bridge.js';
 import React, { useEffect, useState } from 'react';
 import { Text } from '@astryxdesign/core/Text';
+import { Spinner } from '@astryxdesign/core/Spinner';
 import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, STR, fmtCost } from './ui-data.js';
 import { CURRENCIES, formatCurrency } from './currency.js';
 import { SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
@@ -52,7 +53,99 @@ function SettingsRow({ title, hint, children, className = '' }) {
   );
 }
 
-export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey }) {
+const AGENT_STATUS = { ok: 'is-ok', update: 'is-update', warn: 'is-warn', off: 'is-off' };
+
+function defaultInstall(agent) {
+  return agent.installs?.find((install) => install.isDefault) || agent.installs?.[0];
+}
+
+function agentStatus(agent, t) {
+  if (!agent.installed) return { label: t('agents_not_installed'), kind: 'off' };
+  const install = defaultInstall(agent);
+  if (!install?.version) return { label: t('agents_unreadable'), kind: 'warn' };
+  if (agent.upgradable) return { label: t('agents_outdated'), kind: 'update' };
+  return { label: t('agents_up_to_date'), kind: 'ok' };
+}
+
+function AgentsSection({ lang, agents, scanning, updating, feedback, onScan, onUpdate }) {
+  const t = (key) => STR[key][lang];
+  const [confirming, setConfirming] = useState(null);
+  useEffect(() => {
+    if (!agents && !scanning) onScan();
+    // 挂载时自动检测一次;结果由 __onAgentsScanned 回推
+  }, []);
+  const upgradable = (agent) => !!(agent.upgradable && defaultInstall(agent)?.updateCommand);
+  const upgradableAgents = (agents || []).filter(upgradable);
+  const titleOf = (id) => agents?.find((agent) => agent.id === id)?.title || id;
+  return (
+    <SettingsSection title={t('agents_title')} hint={t('agents_hint')} className="settings-agents">
+      <div className="settings-agents-toolbar">
+        <button type="button" onClick={() => { setConfirming(null); onScan(); }} disabled={scanning}>
+          {scanning ? <><Spinner size="sm" /> {t('agents_scanning')}</> : t('agents_scan')}
+        </button>
+        <button
+          type="button"
+          disabled={scanning || !!updating || upgradableAgents.length === 0}
+          onClick={() => setConfirming(confirming === 'all' ? null : 'all')}
+        >
+          {t('agents_upgrade_all')} · {upgradableAgents.length}
+        </button>
+      </div>
+      {(agents || []).map((agent) => {
+        const status = agentStatus(agent, t);
+        const install = defaultInstall(agent);
+        const busy = updating === agent.id || updating === 'all';
+        return (
+          <div className={`settings-agent-row${agent.installed ? '' : ' is-off'}`} key={agent.id}>
+            <div className="settings-agent-line">
+              <strong>{agent.title}</strong>
+              <span className={`settings-agent-badge ${AGENT_STATUS[status.kind]}`}>{status.label}</span>
+              <span className="settings-agent-version">
+                {install?.version ? (status.kind === 'update' ? `${install.version} → ${agent.latest}` : install.version) : ''}
+              </span>
+              {install?.updateCommand && !busy && status.kind === 'update' && (
+                <button type="button" className="settings-agent-upgrade" onClick={() => setConfirming(agent.id)}>{t('agents_upgrade')}</button>
+              )}
+              {busy && <span className="settings-agent-busy"><Spinner size="sm" /> {t('agents_running')}</span>}
+            </div>
+            {install && <small className="settings-agent-path">{install.path}</small>}
+            {install && !install.updateCommand && install.version && status.kind !== 'off' && (
+              <small className="settings-agent-path is-manual">{t('agents_manual')}</small>
+            )}
+            {confirming === agent.id && install?.updateCommand && (
+              <div className="settings-agent-confirm">
+                <span>{t('agents_confirm_hint')}</span>
+                <code>{install.updateCommand}</code>
+                <div>
+                  <button type="button" onClick={() => { setConfirming(null); onUpdate(agent.id); }}>{t('agents_confirm')}</button>
+                  <button type="button" onClick={() => setConfirming(null)}>{t('agents_cancel')}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {confirming === 'all' && (
+        <div className="settings-agent-confirm">
+          <span>{t('agents_confirm_hint')}</span>
+          {upgradableAgents.map((agent) => <code key={agent.id}>{defaultInstall(agent).updateCommand}</code>)}
+          <div>
+            <button type="button" onClick={() => { setConfirming(null); onUpdate('all'); }}>{t('agents_confirm')}</button>
+            <button type="button" onClick={() => setConfirming(null)}>{t('agents_cancel')}</button>
+          </div>
+        </div>
+      )}
+      {(agents || []).length === 0 && !scanning && <p className="settings-agent-path" role="status">{t('agents_empty')}</p>}
+      {feedback?.results?.map(([id, ok, message]) => (
+        <p className={ok ? 'settings-agent-feedback is-ok' : 'settings-agent-feedback is-fail'} role="status" key={id}>
+          {titleOf(id)}: {ok ? t('agents_update_ok') : t('agents_update_fail')}{!ok && message ? ` · ${message}` : ''}
+        </p>
+      ))}
+    </SettingsSection>
+  );
+}
+
+export default function SettingsPage({ lang, preferences, currency, onPreferenceChange, onResetAppearance, onResetCards, onShowWelcome, monthlyValue, nativeError, goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey, goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey, deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey, agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent }) {
   const t = (key) => STR[key][lang];
   const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
   const [benchmarkOverride, setBenchmarkOverride] = useState(null);
@@ -184,6 +277,15 @@ export default function SettingsPage({ lang, preferences, currency, onPreference
             </form>
             {(deepseekKeyError || deepseekKeyFeedback) && <p className="settings-form-error" role="status">{deepseekKeyError || deepseekKeyFeedback}</p>}
           </SettingsSection>
+          <AgentsSection
+            lang={lang}
+            agents={agents}
+            scanning={agentsScanning}
+            updating={agentUpdating}
+            feedback={agentFeedback}
+            onScan={onScanAgents}
+            onUpdate={onUpdateAgent}
+          />
           <SettingsSection title={t('settings_type')} className="settings-type">
             <SettingsRow title={t('settings_font')}>
               <SettingsChoice

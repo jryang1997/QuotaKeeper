@@ -107,6 +107,10 @@ function App() {
   const [goatKeyFeedback, setGoatKeyFeedback] = useState('');
   const [deepseekKeyStored, setDeepSeekKeyStored] = useState(false);
   const [deepseekKeyFeedback, setDeepSeekKeyFeedback] = useState('');
+  const [agents, setAgents] = useState(null);
+  const [agentsScanning, setAgentsScanning] = useState(false);
+  const [agentUpdating, setAgentUpdating] = useState(null);
+  const [agentFeedback, setAgentFeedback] = useState(null);
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
@@ -188,6 +192,14 @@ function App() {
           });
         } else setNativeError('');
       },
+      __onAgentsScanned: (payload) => {
+        setAgents(Array.isArray(payload) ? payload : []);
+        setAgentsScanning(false);
+      },
+      __onAgentUpdateResult: ({ results }) => {
+        setAgentUpdating(null);
+        setAgentFeedback({ ok: Array.isArray(results) && results.length > 0 && results.every(([, ok]) => ok), results });
+      },
     });
     sendCommand({ cmd: 'queryNativePreferences' });
     return unregister;
@@ -198,6 +210,17 @@ function App() {
     setRefreshing(true);
     // wry 在 WebView2 上注入 window.ipc.postMessage(见 wry webview2/mod.rs 注入脚本)
     sendCommand({ cmd: 'refresh' });
+  }, []);
+
+  const scanAgents = useCallback(() => {
+    setAgentsScanning(true);
+    sendCommand({ cmd: 'scanAgents' });
+  }, []);
+
+  const updateAgent = useCallback((id) => {
+    setAgentUpdating(id);
+    setAgentFeedback(null);
+    sendCommand({ cmd: 'runAgentUpdate', agent: id });
   }, []);
 
   const updatePreference = useCallback((key, value) => {
@@ -307,6 +330,12 @@ function App() {
       deepseekKeyFeedback={deepseekKeyFeedback}
       onSaveDeepSeekKey={(deepseekApiKey) => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'setDeepSeekApiKey', deepseekApiKey }); }}
       onDeleteDeepSeekKey={() => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'deleteDeepSeekApiKey' }); }}
+      agents={agents}
+      agentsScanning={agentsScanning}
+      agentUpdating={agentUpdating}
+      agentFeedback={agentFeedback}
+      onScanAgents={scanAgents}
+      onUpdateAgent={updateAgent}
       monthlyValue={data?.monthly_value}
       currency={{ code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError }}
     />

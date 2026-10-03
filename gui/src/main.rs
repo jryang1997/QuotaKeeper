@@ -7,6 +7,7 @@
 //! (window.external.invoke)。前端资源由 include_dir 编入,自定义协议
 //! `app://` 提供；GNU 构建另需同目录的 WebView2Loader.dll（build.rs 自动复制）。
 
+pub mod agents;
 pub mod cache;
 pub mod desktop;
 pub mod export;
@@ -71,6 +72,11 @@ enum UserEvent {
     GlobalShortcut,
     ShortcutStatus(bool),
     Export(String, export::ExportSelection),
+    AgentsScanned(String),
+    AgentUpdateFinished {
+        results: Vec<(String, bool, String)>,
+        payload: String,
+    },
 }
 
 fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f64)> {
@@ -284,6 +290,12 @@ fn main() -> anyhow::Result<()> {
                         let _ = ipc_proxy.send_event(UserEvent::Export(format, selection));
                     }
                 }
+                "scanAgents" => agents::scan(ipc_proxy.clone()),
+                "runAgentUpdate" => {
+                    if let Some(agent) = command.agent.as_deref().filter(|id| !id.is_empty()) {
+                        agents::update(ipc_proxy.clone(), agent.to_string());
+                    }
+                }
                 _ => {}
             }
         })
@@ -460,6 +472,21 @@ fn main() -> anyhow::Result<()> {
                 let _ = webview
                     .borrow()
                     .evaluate_script(&format!("window.__onExportResult?.({message})"));
+            }
+            Event::UserEvent(UserEvent::AgentsScanned(payload)) => {
+                let _ = webview
+                    .borrow()
+                    .evaluate_script(&format!("window.__onAgentsScanned?.({payload});"));
+            }
+            Event::UserEvent(UserEvent::AgentUpdateFinished {
+                results,
+                payload,
+                ..
+            }) => {
+                let report = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
+                let _ = webview.borrow().evaluate_script(&format!(
+                    "window.__onAgentUpdateResult?.({{results:{report}}});window.__onAgentsScanned?.({payload});"
+                ));
             }
             // 本地用量每 5 秒刷新,配额每 60 秒刷新。
             Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
