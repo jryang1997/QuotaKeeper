@@ -73,6 +73,47 @@
   .seg button.on { background: #f5f5f7; color: #000; }
   .empty { color: #636366; font-size: 14px; padding: 30px 0; text-align: center; }
   .brand { font-size: 11px; letter-spacing: 0.28em; color: #48484a; text-align: center; padding-bottom: 4px; }
+  .quota-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 2px 12px; }
+  .quota-head-row h3 { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+  .quota-head-row .seg { margin-bottom: 0; }
+  /* 横屏 focus:单套餐大卡,上下滑切换 */
+  .focus { flex: 1; min-height: 0; display: flex; flex-direction: column; touch-action: none; }
+  .focus-inner { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; min-height: 0; overflow: hidden; }
+  .focus-inner.snap-out { opacity: 0; transform: translateY(var(--focus-dir, 14px)); }
+  .focus-inner { transition: opacity 0.2s ease, transform 0.2s ease; }
+  .focus-ring-wrap { position: relative; display: grid; place-items: center; flex: none; }
+  .focus-ring-wrap svg { width: min(30vh, 240px); height: min(30vh, 240px); }
+  .focus-pct { position: absolute; text-align: center; }
+  .focus-pct b { font-size: clamp(28px, 8vh, 52px); font-weight: 700; letter-spacing: -0.03em; }
+  .focus-pct i { display: block; font-style: normal; font-size: 11px; letter-spacing: 0.14em; color: #98989f; margin-top: 2px; }
+  .focus-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; text-align: center; }
+  .focus-plan { font-size: 12px; color: #98989f; text-align: center; margin-top: 2px; }
+  .focus-wins { display: flex; gap: 9px; flex-wrap: wrap; justify-content: center; flex: none; }
+  .focus-wins .win {
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    background: rgba(120, 120, 128, 0.14); border-radius: 14px; padding: 8px 14px; min-width: 78px;
+  }
+  .focus-wins .win b { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .focus-wins .win span { font-size: 10px; color: #98989f; letter-spacing: 0.08em; }
+  .focus-wins .win small { font-size: 9px; color: #636366; }
+  .focus-dots { flex: none; display: flex; justify-content: center; gap: 7px; padding: 8px 0 2px; }
+  .focus-dots i { width: 6px; height: 6px; border-radius: 50%; background: #ffffff2e; }
+  .focus-dots i.on { background: #f5f5f7; }
+  /* 横屏时:配额视图切换为 focus 单卡;竖屏网格隐藏;矮屏隐藏 brand 收紧顶栏 */
+  @media (orientation: landscape) {
+    #viewQuota { overflow: hidden; display: flex; flex-direction: column; }
+    #viewQuota .quota-head-row { justify-content: center; }
+    #viewQuota .rings, #viewQuota #ringsEmpty { display: none !important; }
+    #focusPane { display: flex; }
+    .brand, .dots { display: none; }
+    .topbar { padding: 8px 22px 4px; }
+    .deck { height: 100vh; }
+    .focus-wins .win { padding: 7px 12px; min-width: 72px; border-radius: 12px; }
+    .focus-wins .win b { font-size: 17px; }
+    .focus-name { font-size: 15px; }
+    .focus-plan { font-size: 11px; }
+    .focus-inner { gap: 8px; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .dots i { transition: none; }
     .seg button { transition: none; }
@@ -87,9 +128,20 @@
   </div>
   <div class="track" id="track">
     <section class="view" id="viewQuota">
-      <h3 class="card" style="padding:14px 18px">订阅配额</h3>
+      <div class="quota-head-row">
+        <h3>订阅配额</h3>
+        <div class="seg" id="quotaSeg" role="tablist">
+          <button type="button" class="on" data-view="used">已用</button>
+          <button type="button" data-view="left">剩余</button>
+        </div>
+      </div>
       <div class="rings" id="rings"></div>
       <div class="empty" id="ringsEmpty" hidden>等待配额数据…</div>
+      <!-- 横屏单套餐 focus 模式:上下滑切换套餐 -->
+      <div class="focus" id="focusPane" hidden>
+        <div class="focus-inner" id="focusInner"></div>
+        <div class="focus-dots" id="focusDots"></div>
+      </div>
     </section>
     <section class="view" id="viewUsage">
       <div class="seg" id="seg" role="tablist">
@@ -156,6 +208,22 @@
   tickClock();
   setInterval(tickClock, 15000);
 
+  // 已用/剩余口径(与桌面端「已用/剩余」同语义:展示翻转,状态色按已用不动)
+  let usedView = true;
+  try { usedView = localStorage.getItem('tm-lan-used-view') !== 'left'; } catch { /* session only */ }
+  $('quotaSeg').addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-view]');
+    if (!button) return;
+    usedView = button.dataset.view !== 'left';
+    try { localStorage.setItem('tm-lan-used-view', usedView ? 'used' : 'left'); } catch { /* session only */ }
+    [...$('quotaSeg').children].forEach((b) => b.classList.toggle('on', b === button));
+    render(last);
+  });
+  const syncQuotaSeg = () => {
+    [...$('quotaSeg').children].forEach((b) => b.classList.toggle('on', (b.dataset.view === 'left') === !usedView));
+  };
+  syncQuotaSeg();
+
   // 轻扫页与圆点同步(scroll-snap 原生惯性,只做指示器联动)
   const track = $('track');
   const dots = [...$('dots').children];
@@ -196,26 +264,100 @@
   };
 
   let last = null;
+
+  // 横屏 focus 模式:单一套餐,上下滑切换
+  let isLandscape = matchMedia('(orientation: landscape)').matches;
+  let focusIndex = 0;
+  let groupedOf = () => {
+    const map = new Map();
+    ((last || {}).rings || []).forEach((ring) => {
+      const key = ring.title + '|' + ring.planType;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ring);
+    });
+    return [...map.entries()];
+  };
+  matchMedia('(orientation: landscape)').addEventListener('change', (event) => {
+    isLandscape = event.matches;
+    render(last);
+  });
+
+  function focusHtml() {
+    const groups = groupedOf();
+    if (!groups.length) return '<div class="empty">等待配额数据…</div>';
+    focusIndex = ((focusIndex % groups.length) + groups.length) % groups.length;
+    const [key, list] = groups[focusIndex];
+    const head = list[0];
+    const tightest = list.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+    const displayPct = (pct) => (usedView ? pct : 100 - pct);
+    const wins = list.map((ring) => `
+      <div class="win">
+        <b style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</b>
+        <span>${ring.label}</span>
+        ${ring.resetsInMs ? `<small>${fmtReset(ring.resetsInMs)} 后重置</small>` : ''}
+      </div>`).join('');
+    const dots = groups.map((_, i) => `<i class="${i === focusIndex ? 'on' : ''}"></i>`).join('');
+    return `
+      <div class="focus-ring-wrap">
+        ${ringSvg(displayPct(tightest.usedPct), tightest.level)}
+        <div class="focus-pct">
+          <b style="color:${LEVEL[Math.min(tightest.level, 2)]}">${Math.round(displayPct(tightest.usedPct))}%</b>
+          <i>${usedView ? '已用' : '剩余'} · ${tightest.label}</i>
+        </div>
+      </div>
+      <div>
+        <div class="focus-name">${head.title}</div>
+        <div class="focus-plan">${head.planType || ''}</div>
+      </div>
+      <div class="focus-wins">${wins}</div>
+      <div class="focus-dots">${dots}</div>`;
+  }
+
+  // 上下滑切换套餐:垂直位移主导(>|dx|)且越过阈值即翻页,1:1 跟手的半程留给 opacity 提示
+  (() => {
+    const pane = $('focusPane');
+    let startY = null;
+    let startX = null;
+    pane.addEventListener('touchstart', (event) => {
+      startY = event.touches[0].clientY;
+      startX = event.touches[0].clientX;
+    }, { passive: true });
+    pane.addEventListener('touchend', (event) => {
+      if (startY == null) return;
+      const dy = event.changedTouches[0].clientY - startY;
+      const dx = event.changedTouches[0].clientX - startX;
+      startY = startX = null;
+      if (Math.abs(dy) < 48 || Math.abs(dx) > Math.abs(dy)) return;
+      const groups = groupedOf();
+      if (groups.length < 2) return;
+      const direction = dy < 0 ? 1 : -1; // 上滑=下一个,下滑=上一个
+      const inner = $('focusInner');
+      inner.style.setProperty('--focus-dir', `${direction * 18}px`);
+      inner.classList.add('snap-out');
+      setTimeout(() => {
+        focusIndex += direction;
+        inner.innerHTML = focusHtml();
+        inner.classList.remove('snap-out');
+      }, 180);
+    }, { passive: true });
+  })();
+
   function render(data) {
     last = data;
-    // 配额环:同套餐多窗口聚合展示
+    // 配额环:同套餐多窗口聚合展示;口径(已用/剩余)只翻转展示,状态色按已用
     const rings = $('rings');
-    const grouped = new Map();
-    (data.rings || []).forEach((ring) => {
-      const key = ring.title + '|' + ring.planType;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(ring);
-    });
-    rings.innerHTML = [...grouped.entries()].map(([key, list]) => {
+    const grouped = groupedOf();
+    const displayPct = (pct) => (usedView ? pct : 100 - pct);
+    rings.innerHTML = grouped.map(([key, list]) => {
       const head = list[0];
       const tightest = list.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
       const chips = list.map((ring) => `
         <div class="ring-copy" style="margin-top:8px">
-          <span class="ring-num" style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(ring.usedPct)}%</span>
+          <span class="ring-num" style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</span>
           <span class="plan" style="margin-left:6px">${ring.label}${ring.resetsInMs ? ' · ' + fmtReset(ring.resetsInMs) + ' 后重置' : ''}</span>
         </div>`).join('');
       return `<div class="card ring-card">
-        ${ringSvg(tightest.usedPct, tightest.level)}
+        ${ringSvg(displayPct(tightest.usedPct), tightest.level)}
         <div class="ring-copy">
           <div class="name">${head.title}</div>
           <div class="plan">${head.planType || ''}</div>
@@ -224,6 +366,7 @@
       </div>`;
     }).join('');
     $('ringsEmpty').hidden = grouped.size > 0;
+    if (isLandscape) $('focusInner').innerHTML = focusHtml();
 
     // 用量(按所选时间段)
     const periodData = data[period] || {};
