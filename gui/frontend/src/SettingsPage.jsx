@@ -2,6 +2,7 @@ import { sendCommand } from './gui-bridge.js';
 import React, { useEffect, useState } from 'react';
 import { Text } from '@astryxdesign/core/Text';
 import { Spinner } from '@astryxdesign/core/Spinner';
+import qrcode from 'qrcode-generator';
 import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, STR, fmtCost } from './ui-data.js';
 import { CURRENCIES, formatCurrency } from './currency.js';
 import { SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
@@ -56,6 +57,7 @@ function SettingsRow({ title, hint, children, className = '' }) {
 function LanSection({ lang, lan, onToggle }) {
   const t = (key) => STR[key][lang];
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const copyUrl = () => {
     if (!lan.url) return;
     navigator.clipboard.writeText(lan.url).then(() => {
@@ -63,20 +65,29 @@ function LanSection({ lang, lan, onToggle }) {
       setTimeout(() => setCopied(false), 2000);
     });
   };
+  // 白底容器保证扫码对比度;scalable 让 SVG 自适应容器
+  const qrSvg = showQr && lan.url ? (() => {
+    const qr = qrcode(0, 'M');
+    qr.addData(lan.url);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 4, margin: 1, scalable: true });
+  })() : null;
   return (
     <SettingsRow title={t('lan_title')} hint={t('lan_hint')}>
       <div className="lan-control">
         <SettingsChoice
           label={t('lan_title')}
           value={lan.enabled}
-          onChange={(value) => onToggle(value === true)}
+          onChange={(value) => { onToggle(value === true); if (value !== true) setShowQr(false); }}
           options={[{ value: false, label: t('lan_off') }, { value: true, label: t('lan_on') }]}
         />
         {lan.enabled && <div className="lan-status" role="status">
           <span className={`lan-dot${lan.url ? ' is-on' : ''}`} />
           <code>{lan.url || t('lan_stopped')}</code>
+          {lan.url && <button type="button" onClick={() => setShowQr((open) => !open)} aria-expanded={showQr}>{t('lan_qr')}</button>}
           {lan.url && <button type="button" onClick={copyUrl}>{copied ? t('lan_copied') : t('lan_copy')}</button>}
         </div>}
+        {qrSvg && <div className="lan-qr" title={lan.url} dangerouslySetInnerHTML={{ __html: qrSvg }} />}
         {lan.enabled && <small className="lan-security">{t('lan_security')}</small>}
       </div>
     </SettingsRow>

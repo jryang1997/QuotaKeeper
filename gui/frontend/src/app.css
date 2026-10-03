@@ -1133,6 +1133,8 @@ html[data-theme='dark'] { color-scheme: dark; }
 .lan-status button { min-height: 28px; padding: 4px 10px; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-background-surface); color: var(--color-text-primary); font: inherit; font-size: var(--font-size-2xs); cursor: pointer; }
 .lan-status button:hover { background: var(--color-overlay-hover); }
 .lan-security { color: var(--color-text-secondary); font-size: var(--font-size-2xs); }
+.lan-qr { align-self: flex-end; width: 148px; padding: 9px; border-radius: 12px; background: #fff; }
+.lan-qr svg { display: block; width: 100%; height: auto; }
 .welcome-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 12px; box-sizing: border-box; background: color-mix(in srgb, #07101c 65%, transparent); }
 .welcome-panel { display: flex; flex-direction: column; gap: 12px; width: min(720px, 100%); max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-background-card); color: var(--color-text-primary); box-shadow: 0 24px 70px #0005; }
 .welcome-head { display: flex; justify-content: space-between; gap: 12px; }

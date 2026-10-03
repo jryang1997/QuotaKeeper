@@ -297,6 +297,7 @@ export const STR = {
   lan_stopped: ['已停用', 'Stopped'],
   lan_copy: ['复制地址', 'Copy URL'],
   lan_copied: ['已复制', 'Copied'],
+  lan_qr: ['二维码', 'QR code'],
   lan_security: ['仅限受信任局域网 · 数据只读、不含密钥', 'Trusted networks only · read-only, no secrets'],
   settings_goat_key: ['Command Code GOAT 直连', 'Command Code GOAT direct access'],
   settings_goat_key_hint: ['密钥存入 Windows 凭据管理器', 'Stored in Windows Credential Manager'],
