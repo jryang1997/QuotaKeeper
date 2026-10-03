@@ -12,6 +12,7 @@ pub mod cache;
 pub mod desktop;
 pub mod export;
 pub mod ipc;
+pub mod overlay;
 pub mod refresh;
 pub mod single_instance;
 
@@ -77,6 +78,10 @@ enum UserEvent {
         results: Vec<(String, bool, String)>,
         payload: String,
     },
+    OverlayToggle,
+    OverlayHide,
+    OverlayDrag,
+    OverlaySwitch(i32),
 }
 
 fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f64)> {
@@ -134,7 +139,7 @@ fn mime(name: &str) -> &'static str {
 }
 
 /// 从内嵌目录解析 `app://local/<path>`;目录命中则回 index.html(SPA 兜底)。
-fn resolve(path: &str) -> Option<(Vec<u8>, &'static str)> {
+pub(crate) fn resolve(path: &str) -> Option<(Vec<u8>, &'static str)> {
     let p = path.trim_start_matches('/');
     let f = FRONTEND
         .get_file(p)
@@ -142,7 +147,7 @@ fn resolve(path: &str) -> Option<(Vec<u8>, &'static str)> {
     Some((f.contents().to_vec(), mime(p)))
 }
 
-fn app_response(req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+pub(crate) fn app_response(req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = req.uri().path().to_string();
     match resolve(&path) {
         Some((body, m)) => Response::builder()
@@ -185,9 +190,10 @@ fn main() -> anyhow::Result<()> {
     let tray_menu = Menu::new();
     let show_item = MenuItem::new("显示 Token 监控", true, None);
     let refresh_item = MenuItem::new("刷新数据", true, None);
+    let overlay_item = MenuItem::new("悬浮窗（置顶三环）", true, None);
     let settings_item = MenuItem::new("设置", true, None);
     let quit_item = MenuItem::new("退出", true, None);
-    tray_menu.append_items(&[&show_item, &refresh_item, &settings_item, &quit_item])?;
+    tray_menu.append_items(&[&show_item, &refresh_item, &overlay_item, &settings_item, &quit_item])?;
 
     let icon = tao::window::Icon::from_rgba(load_icon_rgba(), 32, 32).ok();
 
@@ -202,6 +208,7 @@ fn main() -> anyhow::Result<()> {
 
     let ipc_tx = tx.clone();
     let ipc_proxy = el.create_proxy();
+    let overlay_proxy = ipc_proxy.clone();
     // devtools 常开:release 下 wry 默认禁用,关掉后 CDP 视觉验收无从下手
     let webview = WebViewBuilder::new()
         .with_devtools(true)
@@ -291,6 +298,9 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 "scanAgents" => agents::scan(ipc_proxy.clone()),
+                "toggleOverlay" => {
+                    let _ = ipc_proxy.send_event(UserEvent::OverlayToggle);
+                }
                 "runAgentUpdate" => {
                     if let Some(agent) = command.agent.as_deref().filter(|id| !id.is_empty()) {
                         agents::update(ipc_proxy.clone(), agent.to_string());
@@ -321,6 +331,9 @@ fn main() -> anyhow::Result<()> {
     let mut latest_goat_usage = None::<tui_token_monitor::goat::UsageSummary>;
     let mut latest_deepseek_balance = tui_token_monitor::deepseek_balance::BalanceState::MissingKey;
     let webview = std::cell::RefCell::new(webview);
+    let mut overlay: Option<(tao::window::Window, wry::WebView)> = None;
+    let mut overlay_index: usize = 0;
+    let mut overlay_last_save = std::time::Instant::now();
     let mut tray = None;
     let mut tray_level = None::<u8>;
     let mut last_tray_click = None::<std::time::Instant>;
@@ -328,7 +341,7 @@ fn main() -> anyhow::Result<()> {
     let mut cache_last_write = std::time::Instant::now() - std::time::Duration::from_secs(3600);
     let mut cache_saved_quota_at = 0_u64;
 
-    el.run(move |event, _target, control_flow| {
+    el.run(move |event, target, control_flow| {
         match event {
             Event::NewEvents(StartCause::Init) => {
                 if let Ok(icon) = tray_icon::Icon::from_rgba(load_icon_rgba(), 32, 32) {
@@ -363,6 +376,19 @@ fn main() -> anyhow::Result<()> {
             }
             Event::UserEvent(UserEvent::Menu(event)) if event.id == refresh_item.id() => {
                 refresh::spawn(tx.clone());
+            }
+            Event::UserEvent(UserEvent::Menu(event)) if event.id == overlay_item.id() => {
+                if let Some((window, _)) = overlay.as_ref() {
+                    let show = !window.is_visible();
+                    window.set_visible(show);
+                    if show {
+                        window.set_focus();
+                    }
+                } else if let Ok((window, view)) = overlay::create(target, overlay_proxy.clone()) {
+                    window.set_visible(true);
+                    overlay::push(&view, &latest_snapshot, overlay_index);
+                    overlay = Some((window, view));
+                }
             }
             Event::UserEvent(UserEvent::Menu(event)) if event.id == settings_item.id() => {
                 win.set_visible(true);
@@ -457,6 +483,41 @@ fn main() -> anyhow::Result<()> {
                 let stored = tui_token_monitor::credential::has_deepseek_key();
                 let _ = webview.borrow().evaluate_script(&format!("window.__onDeepSeekKeyResult?.({{success:{success},stored:{stored}}})"));
                 if success { refresh::spawn_quota(tx.clone()); }
+            }
+            Event::UserEvent(UserEvent::OverlayToggle) => {
+                if let Some((window, view)) = overlay.as_ref() {
+                    let show = !window.is_visible();
+                    window.set_visible(show);
+                    if show {
+                        window.set_focus();
+                        overlay::push(view, &latest_snapshot, overlay_index);
+                    }
+                } else if let Ok((window, view)) = overlay::create(target, overlay_proxy.clone()) {
+                    window.set_visible(true);
+                    overlay::push(&view, &latest_snapshot, overlay_index);
+                    overlay = Some((window, view));
+                }
+            }
+            Event::UserEvent(UserEvent::OverlayHide) => {
+                if let Some((window, _)) = overlay.as_ref() {
+                    window.set_visible(false);
+                }
+            }
+            Event::UserEvent(UserEvent::OverlayDrag) => {
+                if let Some((window, _)) = overlay.as_ref() {
+                    let _ = window.drag_window();
+                }
+            }
+            Event::UserEvent(UserEvent::OverlaySwitch(direction)) => {
+                let total = overlay::live_len(&latest_snapshot);
+                if total > 0 {
+                    overlay_index = ((overlay_index as i64 + direction as i64).rem_euclid(total as i64)) as usize;
+                }
+                if let Some((window, view)) = overlay.as_ref()
+                    && window.is_visible()
+                {
+                    overlay::push(view, &latest_snapshot, overlay_index);
+                }
             }
             Event::UserEvent(UserEvent::Export(format, selection)) => {
                 let status = if let Some(report) = latest_ledger.as_ref() {
@@ -618,14 +679,38 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+                // 悬浮窗在每次数据落定后重推(webview 刚建好时的首推可能丢失)
+                if let Some((window, view)) = overlay.as_ref()
+                    && window.is_visible()
+                {
+                    overlay::push(view, &latest_snapshot, overlay_index);
+                }
                 *control_flow =
                     ControlFlow::WaitUntil(std::cmp::min(next_ledger_refresh, next_quota_refresh));
             }
             Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Moved(position),
+                ..
+            } => {
+                // 悬浮窗拖动落点节流落盘
+                if overlay.as_ref().is_some_and(|(window, _)| window.id() == window_id)
+                    && overlay_last_save.elapsed() >= std::time::Duration::from_secs(1)
+                {
+                    overlay_last_save = std::time::Instant::now();
+                    overlay::save_position(position.x, position.y);
+                }
+            }
+            Event::WindowEvent {
+                window_id,
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                if tray.is_some() && close_behavior == "tray" {
+                if overlay.as_ref().is_some_and(|(window, _)| window.id() == window_id) {
+                    if let Some((window, _)) = overlay.as_ref() {
+                        window.set_visible(false);
+                    }
+                } else if tray.is_some() && close_behavior == "tray" {
                     win.set_visible(false);
                 } else {
                     *control_flow = ControlFlow::Exit;

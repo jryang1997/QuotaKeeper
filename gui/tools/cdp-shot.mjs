@@ -1,12 +1,12 @@
 // 最小 CDP 客户端:WebView2 只接受 Host 头为 [::1]:port 的直连,手写 WebSocket。
-// 用法: node cdp-shot.mjs <port> <out.png> [js]
+// 用法: node cdp-shot.mjs <port> <out.png> [js] [urlFilter]
 // 可选第三参为 Runtime.evaluate 的表达式(先求值再截图,等待 800ms)。
 import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [port, out, js] = [process.argv[2], process.argv[3], process.argv[4]];
+const [port, out, js, urlFilter] = [process.argv[2], process.argv[3], process.argv[4], process.argv[5]];
 
 function listTargets(port) {
   return new Promise((resolve, reject) => {
@@ -110,7 +110,9 @@ class Cdp {
 }
 
 const targets = await listTargets(port);
-const page = targets.find((target) => target.type === 'page' && target.url.includes('index.html')) || targets.find((target) => target.type === 'page');
+const page = urlFilter
+  ? targets.find((target) => target.type === 'page' && target.url.includes(urlFilter))
+  : targets.find((target) => target.type === 'page' && target.url.includes('index.html')) || targets.find((target) => target.type === 'page');
 if (!page) { console.error('no page target:', targets.map((target) => target.url)); process.exit(1); }
 const cdp = await Cdp.connect(page.webSocketDebuggerUrl);
 await cdp.call('Page.enable');

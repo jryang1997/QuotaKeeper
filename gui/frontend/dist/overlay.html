@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Token Monitor 悬浮窗</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  body { font-family: "Sarasa Term SC Nerd", "Sarasa Mono SC", "Cascadia Mono", Consolas, monospace; }
+  .card {
+    display: flex; flex-direction: column; width: 100%; height: 100%;
+    border: 1px solid #2a3142; border-radius: 16px; background: #10141cd9; backdrop-filter: blur(14px);
+    color: #e8ecf4; box-shadow: 0 10px 34px #0008; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 7px; padding: 9px 11px 5px;
+    font-size: 11px; letter-spacing: 0.02em; cursor: grab;
+  }
+  header .dot { width: 8px; height: 8px; border-radius: 3px; background: #4f7cf0; flex: none; }
+  header .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  header .plan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a94ab; font-size: 9px; }
+  header button {
+    flex: none; margin-left: auto; width: 20px; height: 20px; border: 0; border-radius: 6px;
+    background: transparent; color: #8a94ab; font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  header button:hover { background: #ffffff1c; color: #e8ecf4; }
+  .rings { position: relative; flex: 1; display: grid; place-items: center; min-height: 0; }
+  .rings svg { width: 150px; height: 150px; }
+  .center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+  .center b { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .center i { display: block; margin-top: 2px; font-size: 8px; font-style: normal; color: #8a94ab; letter-spacing: 0.14em; }
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #8a94ab; font-size: 11px; }
+  footer { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; gap: 6px; padding: 6px 11px 10px; }
+  footer .step { text-align: center; color: #8a94ab; font-size: 9px; font-variant-numeric: tabular-nums; letter-spacing: 0.1em; }
+  footer .reset { text-align: center; color: #b7c0d4; font-size: 9px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  footer button {
+    width: 34px; height: 26px; border: 1px solid #2a3142; border-radius: 9px; background: #ffffff10;
+    color: #e8ecf4; font-size: 11px; cursor: pointer;
+  }
+  footer button:hover { background: #ffffff22; }
+  footer button:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+<div class="card">
+  <header id="drag">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="title" id="title">Token Monitor</span>
+    <span class="plan" id="plan"></span>
+    <button id="close" title="关闭悬浮窗">×</button>
+  </header>
+  <div class="rings" id="rings"></div>
+  <footer>
+    <button id="prev" title="上一个套餐">▲</button>
+    <div>
+      <div class="step" id="step"></div>
+      <div class="reset" id="reset"></div>
+    </div>
+    <button id="next" title="下一个套餐">▼</button>
+  </footer>
+</div>
+<script>
+  const SEGMENTS = 24;
+  const COLORS = ['#1cb07a', '#f5ae34', '#e04a46'];
+  const LANE = [
+    { r: 66, width: 7 },
+    { r: 53, width: 7 },
+    { r: 40, width: 7 },
+  ];
+  const post = (message) => window.ipc?.postMessage?.(JSON.stringify(message));
+
+  function segmentPath(cx, cy, radius, index) {
+    // 每段 15°,段间留 2° 缝隙,起点正上方
+    const gap = 2;
+    const start = (index * 360) / SEGMENTS - 90 + gap / 2;
+    const end = ((index + 1) * 360) / SEGMENTS - 90 - gap / 2;
+    const rad = (deg) => (deg * Math.PI) / 180;
+    const x1 = cx + radius * Math.cos(rad(start));
+    const y1 = cy + radius * Math.sin(rad(start));
+    const x2 = cx + radius * Math.cos(rad(end));
+    const y2 = cy + radius * Math.sin(rad(end));
+    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+  }
+
+  function render(data) {
+    document.getElementById('title').textContent = data.total ? data.title : 'Token Monitor';
+    const plan = data.planType && data.planType !== data.title ? data.planType : '';
+    document.getElementById('plan').textContent = plan;
+    document.getElementById('step').textContent = data.total ? `${data.index + 1}/${data.total}` : '';
+    const rings = document.getElementById('rings');
+    rings.querySelectorAll('svg,.empty,.center').forEach((node) => node.remove());
+    if (!data.total || !data.rings.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = data.total ? '该套餐暂无周期配额' : '暂无套餐数据';
+      rings.appendChild(empty);
+      document.getElementById('reset').textContent = '';
+      return;
+    }
+    const cx = 75;
+    const cy = 75;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    let tightest = null;
+    data.rings.slice(0, 3).forEach((ring, lane) => {
+      const lit = Math.round((Math.min(ring.usedPct, 100) / 100) * SEGMENTS);
+      const color = COLORS[Math.min(ring.level, 2)];
+      for (let i = 0; i < SEGMENTS; i++) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', segmentPath(cx, cy, LANE[lane].r, i));
+        path.setAttribute('stroke', i < lit ? color : '#ffffff14');
+        path.setAttribute('stroke-width', LANE[lane].width);
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('fill', 'none');
+        svg.appendChild(path);
+      }
+      if (!tightest || ring.usedPct > tightest.usedPct) tightest = { ...ring, lane };
+    });
+    rings.appendChild(svg);
+    const center = document.createElement('div');
+    center.className = 'center';
+    center.innerHTML = `<div><b style="color:${COLORS[Math.min(tightest.level, 2)]}">${Math.round(tightest.usedPct)}%</b><i>${tightest.label}</i></div>`;
+    rings.appendChild(center);
+    // 只显示最紧一环的重置时间,避免一行放不下
+    const tight = data.rings.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+    document.getElementById('reset').textContent = tight.resetsInMs != null
+      ? `${tight.label} ${formatResets(tight.resetsInMs)} 后重置`
+      : '';
+  }
+
+  function formatResets(ms) {
+    const minutes = Math.max(1, Math.round(ms / 60000));
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h${minutes % 60 ? `${minutes % 60}m` : ''}`;
+    return `${Math.floor(hours / 24)}d${hours % 24 ? `${hours % 24}h` : ''}`;
+  }
+
+  window.__onOverlayData = render;
+  document.getElementById('close').addEventListener('pointerdown', (event) => event.stopPropagation());
+  document.getElementById('close').addEventListener('click', () => post({ cmd: 'overlayHide' }));
+  document.getElementById('drag').addEventListener('pointerdown', () => post({ cmd: 'overlayDrag' }));
+  document.getElementById('prev').addEventListener('click', () => post({ cmd: 'overlaySwitch', direction: -1 }));
+  document.getElementById('next').addEventListener('click', () => post({ cmd: 'overlaySwitch', direction: 1 }));
+</script>
+</body>
+</html>
