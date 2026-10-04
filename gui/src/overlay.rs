@@ -8,10 +8,7 @@ use tao::event_loop::{EventLoopProxy, EventLoopWindowTarget};
 use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use tao::window::{Window, WindowBuilder};
 use wry::WebViewBuilder;
-use windows_sys::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWMSBT_TRANSIENTWINDOW,
-};
+use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
 
 use crate::UserEvent;
 
@@ -131,19 +128,18 @@ pub fn save_position(x: i32, y: i32) {
     );
 }
 
-/// Win11 22H2+ 系统级 Acrylic 背板:桌面在窗口背后被真正模糊,webview 的
-/// backdrop-filter 看不到窗外,玻璃质感靠这里。老系统调用失败返回 false,
-/// 页面据 window.__overlayAcrylic 走自带上色兜底。
-fn apply_acrylic_backdrop(window: &Window) -> bool {
+/// 窗口圆角(DWMWCP_ROUND,约 8px):页面 CSS 半径与之对齐。
+/// 注:webview 的透明像素透出的是父窗表面而非桌面(WebView2 windowed 托管
+/// 不与 DWM 背板/Accent 合成,SystemBackdrop 与 Accent blur 在无边框窗上
+/// 实测都不渲染),所以"桌面真模糊"在此栈上不可达,玻璃质感全部由
+/// overlay.html 的自绘材质(烟熏玻璃:渐变 tint+rim+噪点)承担。
+fn apply_window_rounding(window: &Window) {
     let hwnd = window.hwnd() as windows_sys::Win32::Foundation::HWND;
-    let set = |attribute: u32, value: u32| -> bool {
-        let raw = value.to_ne_bytes();
-        let hr = unsafe { DwmSetWindowAttribute(hwnd, attribute, raw.as_ptr().cast(), 4) };
-        hr == 0
+    let corner = DWMWCP_ROUND as u32;
+    let corner_raw = corner.to_ne_bytes();
+    unsafe {
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, corner_raw.as_ptr().cast(), 4)
     };
-    set(DWMWA_USE_IMMERSIVE_DARK_MODE as u32, 1)
-        & set(DWMWA_SYSTEMBACKDROP_TYPE as u32, DWMSBT_TRANSIENTWINDOW as u32)
-        & set(DWMWA_WINDOW_CORNER_PREFERENCE as u32, DWMWCP_ROUND as u32)
 }
 
 /// 无边框置顶小窗;返回窗口与配套 webview,IPC 经 proxy 回主循环。
@@ -172,7 +168,7 @@ pub(crate) fn create(
         ));
     }
     let window = builder.build(target)?;
-    let acrylic = apply_acrylic_backdrop(&window);
+    apply_window_rounding(&window);
     let webview = WebViewBuilder::new()
         .with_url("app://local/overlay.html")
         .with_transparent(true)
@@ -197,8 +193,5 @@ pub(crate) fn create(
             }
         })
         .build(&window)?;
-    webview.evaluate_script(&format!(
-        "window.__overlayAcrylic = {acrylic};"
-    ))?;
     Ok((window, webview))
 }

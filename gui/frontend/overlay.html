@@ -9,15 +9,18 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font-family: "Sarasa Term SC Nerd", "Sarasa Mono SC", "Cascadia Mono", Consolas, monospace; }
-  /* 玻璃卡:真模糊来自 DWM Acrylic 背板(overlay.rs),页面只上 tint/rim/噪点;
-     半径 8px 对齐 DWMWCP_ROUND,避免角落露出生背板月牙。 */
+  /* 液态玻璃卡(自绘烟熏玻璃):webview 透明像素透出的是父窗表面而非桌面,
+     所以质感全部在页面里 —— 深色渐变 tint + 左上玻璃内透光 + rim 亮环 + 微噪点;
+     半径 8px 对齐 DWMWCP_ROUND(overlay.rs),角落不露月牙。 */
   .card {
     position: relative; isolation: isolate;
     display: flex; flex-direction: column; width: 100%; height: 100%;
-    border: 1px solid #ffffff17; border-radius: 8px; background: #0e14209c;
+    border: 1px solid #ffffff1f; border-radius: 8px;
+    background:
+      radial-gradient(130% 70% at 16% 0%, rgba(79, 124, 240, 0.15), transparent 52%),
+      linear-gradient(165deg, #1b2436f0, #121826ea 42%, #0c1119f2);
     color: #e8ecf4; overflow: hidden;
   }
-  body.no-acrylic .card { border-color: #2a3142; background: #10141cd9; box-shadow: inset 0 1px 0 #ffffff2b; }
   /* 镜面 rim:左上最亮,光打在材质上沿 */
   .card::before {
     content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px;
@@ -59,7 +62,6 @@
     width: 34px; height: 26px; border: 1px solid #ffffff14; border-radius: 9px; background: #ffffff10;
     color: #e8ecf4; font-size: 11px; cursor: pointer;
   }
-  body.no-acrylic footer button { border-color: #2a3142; }
   footer button:hover { background: #ffffff22; }
   footer button:active { transform: translateY(1px); }
 </style>
@@ -159,15 +161,6 @@
   }
 
   window.__onOverlayData = render;
-  // overlay.rs 注入 window.__overlayAcrylic;注入时序不定,轮询 1s 后按无 acrylic 兜底
-  (function acrylicWatch(tries) {
-    if (window.__overlayAcrylic !== undefined) {
-      document.body.classList.toggle('no-acrylic', !window.__overlayAcrylic);
-      return;
-    }
-    if (tries > 0) setTimeout(() => acrylicWatch(tries - 1), 100);
-    else document.body.classList.add('no-acrylic');
-  })(10);
   document.getElementById('close').addEventListener('pointerdown', (event) => event.stopPropagation());
   document.getElementById('close').addEventListener('click', () => post({ cmd: 'overlayHide' }));
   document.getElementById('drag').addEventListener('pointerdown', () => post({ cmd: 'overlayDrag' }));
