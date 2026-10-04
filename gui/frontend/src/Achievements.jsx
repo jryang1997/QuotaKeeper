@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { STR, fmtInt } from './ui-data.js';
-import { applyUnlocks, evaluateAchievements, readAchievementState, saveAchievementState } from './achievements.js';
+import { applyUnlocks, evaluateAchievements, readAchievementState, saveAchievementState, unlockedNonMetaCount } from './achievements.js';
+import { FUN_COUNTERS_EVENT, readFunCounters } from './fun-counters.js';
 import { CONTROL_SPRING, FADE, LAYOUT_SPRING } from './motion-tuning.js';
 import { useMotionPreference } from './ui-motion.jsx';
 
@@ -24,6 +25,25 @@ const GLYPHS = {
   rocket: <><path d="M12 2.6c3.1 2.6 4.7 6.1 4.7 9.7L12 16.9l-4.7-4.6c0-3.6 1.6-7.1 4.7-9.7Z" fill="currentColor" stroke="none" /><path d="M9.6 16.4 7.4 21l3.1-1.5L12 21l1.5-1.5L16.6 21l-2.2-4.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" /></>,
   wave: <path d="M3 7.6l3.6 4.4L3 16.4M9.4 7.6l3.6 4.4-3.6 4.4M15.8 7.6l3.6 4.4-3.6 4.4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   crown: <path d="M3.4 18.6h17.2l1.6-9.8-5.4 3.6L12 5.6 7.2 12.4 1.8 8.8Z" fill="currentColor" stroke="none" />,
+  trident: <><path d="M12 2.8v18.4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d="M6.4 4.6v3.6a5.6 5.6 0 0 0 4.5 5.5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d="M17.6 4.6v3.6a5.6 5.6 0 0 1-4.5 5.5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /></>,
+  heart: <path d="M12 20.6C6.8 16.8 3.6 13.6 3.6 9.9c0-2.8 2.1-4.9 4.8-4.9 1.5 0 2.8.7 3.6 1.9.8-1.2 2.1-1.9 3.6-1.9 2.7 0 4.8 2.1 4.8 4.9 0 3.7-3.2 6.9-8.4 10.7Z" fill="currentColor" stroke="none" />,
+  chat: <><path d="M4.6 4.4h10.2a2.4 2.4 0 0 1 2.4 2.4v4.6a2.4 2.4 0 0 1-2.4 2.4H9.6l-3.6 3v-3H4.6a2.4 2.4 0 0 1-2.4-2.4V6.8a2.4 2.4 0 0 1 2.4-2.4Z" fill="currentColor" stroke="none" /><path d="M17.8 16.6h.2a2.2 2.2 0 0 0 2.2-2.2V9.6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" opacity="0.55" /></>,
+  hex: <><path d="M12 2.4 20.2 7.2v9.6L12 21.6 3.8 16.8V7.2Z" fill="currentColor" stroke="none" opacity="0.9" /><circle cx="12" cy="12" r="3" fill="var(--ach-glyph-cut, rgba(0,0,0,0.35))" stroke="none" /></>,
+  clock: <><circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.8" fill="none" /><path d="M12 7.2V12l3.2 2" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></>,
+  noodle: <><path d="M3.8 12.4h16.4a8.2 8.2 0 0 1-5.4 7.7v1.3a1 1 0 0 1-1 1h-3.6a1 1 0 0 1-1-1v-1.3a8.2 8.2 0 0 1-5.4-7.7Z" fill="currentColor" stroke="none" /><path d="M8.6 3.4v5M12 3.4v5M15.4 3.4v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></>,
+  sundown: <><path d="M6.8 16.2a5.2 5.2 0 0 1 10.4 0Z" fill="currentColor" stroke="none" /><path d="M3 19.6h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M12 2.8v6.2M9.3 6.3 12 9l2.7-2.7" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></>,
+  thought: <><path d="M7.2 15.9a4 4 0 0 1-.6-7.96 5.4 5.4 0 0 1 10.5-1.1 3.3 3.3 0 0 1-.5 9.06Z" fill="currentColor" stroke="none" /><circle cx="8.6" cy="19" r="1.4" fill="currentColor" stroke="none" /><circle cx="5.2" cy="21.4" r="1" fill="currentColor" stroke="none" opacity="0.7" /></>,
+  quill: <><path d="M12 2.6c3.9 2.4 6.5 5.4 6.5 9.1 0 4.6-3.1 7.5-6.5 9.7-3.4-2.2-6.5-5.1-6.5-9.7 0-3.7 2.6-6.7 6.5-9.1Z" fill="currentColor" stroke="none" /><path d="M12 8.6v3.9" stroke="var(--ach-glyph-cut, rgba(0,0,0,0.35))" strokeWidth="1.4" strokeLinecap="round" /><circle cx="12" cy="14.8" r="1.8" fill="var(--ach-glyph-cut, rgba(0,0,0,0.35))" stroke="none" /></>,
+  comet: <><circle cx="16.8" cy="7.2" r="3.6" fill="currentColor" stroke="none" /><path d="M11.9 10.6 4.2 18.3M13.6 13.4l-6 6M9 8.8l-4.8 4.8" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /></>,
+  balance: <><path d="M12 4.6v15.8M8.4 20.6h7.2M4 6.8h16" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /><circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none" /><path d="M4 6.8 1.9 11.9M4 6.8l2.1 5.1M20 6.8l-2.1 5.1M20 6.8l2.1 5.1" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" /><path d="M1.7 11.9a2.3 2.3 0 0 0 4.6 0ZM17.7 11.9a2.3 2.3 0 0 0 4.6 0Z" fill="currentColor" stroke="none" /></>,
+  coins: <><ellipse cx="12" cy="5.6" rx="6.4" ry="2.5" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M5.6 5.6v6.2c0 1.4 2.9 2.5 6.4 2.5s6.4-1.1 6.4-2.5V5.6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M5.6 11.8V18c0 1.4 2.9 2.5 6.4 2.5s6.4-1.1 6.4-2.5v-6.2" stroke="currentColor" strokeWidth="1.6" fill="none" /></>,
+  keys: <><rect x="2.6" y="6" width="18.8" height="12" rx="2.4" stroke="currentColor" strokeWidth="1.6" fill="none" /><circle cx="7" cy="10.2" r="1" fill="currentColor" stroke="none" /><circle cx="10.3" cy="10.2" r="1" fill="currentColor" stroke="none" /><circle cx="13.7" cy="10.2" r="1" fill="currentColor" stroke="none" /><circle cx="17" cy="10.2" r="1" fill="currentColor" stroke="none" /><path d="M8.6 14.6h6.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></>,
+  photo: <><rect x="3" y="4.6" width="18" height="14.8" rx="2.6" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="m6.6 16.4 4-4.8 3 3.4 2.1-2.3 2.9 3.7" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /><circle cx="15.6" cy="9.2" r="1.5" fill="currentColor" stroke="none" /></>,
+  globe: <><circle cx="12" cy="12" r="8.6" stroke="currentColor" strokeWidth="1.6" fill="none" /><ellipse cx="12" cy="12" rx="3.9" ry="8.6" stroke="currentColor" strokeWidth="1.4" fill="none" opacity="0.75" /><path d="M3.4 12h17.2" stroke="currentColor" strokeWidth="1.6" /></>,
+  pin: <><path d="M12 17.2v3.6" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.3v.7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.7a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1Z" fill="currentColor" stroke="none" /></>,
+  medal: <><circle cx="12" cy="14.8" r="5.2" stroke="currentColor" strokeWidth="1.8" fill="none" /><circle cx="12" cy="14.8" r="1.6" fill="currentColor" stroke="none" /><path d="M8.4 3 11 10M15.6 3 13 10" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /></>,
+  book: <><path d="M12 6.2C10.1 4.7 7.7 4 4.3 4c-.6 0-1.1.5-1.1 1.1v12c0 .6.5 1.1 1.1 1.1 3.4 0 5.8.7 7.7 2.2 1.9-1.5 4.3-2.2 7.7-2.2.6 0 1.1-.5 1.1-1.1v-12C20.8 4.5 20.3 4 19.7 4c-3.4 0-5.8.7-7.7 2.2Z" fill="currentColor" stroke="none" /><path d="M12 6.2v13.9" stroke="var(--ach-glyph-cut, rgba(0,0,0,0.35))" strokeWidth="1.4" /></>,
+  trophy: <><path d="M6.8 3.6h10.4v5.6a5.2 5.2 0 0 1-10.4 0Z" fill="currentColor" stroke="none" /><path d="M6.8 5H4a3.2 3.2 0 0 0 3.2 3.2M17.2 5H20a3.2 3.2 0 0 1-3.2 3.2" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" /><path d="M12 14.4v2.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M9.6 20.4h4.8l-.6-3.2h-3.6Z" fill="currentColor" stroke="none" /></>,
 };
 
 export function AchievementGlyph({ glyph, className = '' }) {
@@ -34,9 +54,10 @@ function progressText(item, lang) {
   return item.value >= item.target ? '' : `${fmtInt(Math.round(item.value))} / ${fmtInt(item.target)}`;
 }
 
-export function AchievementsPanel({ ledger, lang, onOpen }) {
+export function AchievementsPanel({ items: itemsProp, ledger, lang, onOpen }) {
   const t = (key) => STR[key][lang];
-  const items = useMemo(() => evaluateAchievements(ledger), [ledger]);
+  // 壳层已带 extras 评估;独立挂载(测试)时退回纯账本评估。
+  const items = useMemo(() => itemsProp || evaluateAchievements(ledger), [itemsProp, ledger]);
   const unlocked = items.filter((item) => item.unlocked);
   const next = items.filter((item) => !item.unlocked).sort((a, b) => b.pct - a.pct).slice(0, Math.max(0, 6 - unlocked.length));
   const wall = [...unlocked, ...next].slice(0, 12);
@@ -62,9 +83,8 @@ export function AchievementsPanel({ ledger, lang, onOpen }) {
   );
 }
 
-export function AchievementsModal({ ledger, lang, state, onClose }) {
+export function AchievementsModal({ items, lang, state, onClose }) {
   const t = (key) => STR[key][lang];
-  const items = useMemo(() => evaluateAchievements(ledger), [ledger]);
   const unlocked = items.filter((item) => item.unlocked).length;
   const dateText = (id) => {
     const at = state?.unlocked?.[id];
@@ -147,12 +167,22 @@ export function AchievementToasts({ items, lang, onDismiss }) {
   </div>;
 }
 
-// 壳层 hook:评估账本 → 与存档比对 → 新解锁进队列(>3 个合并成一条,避免首跑刷屏)。
-export function useAchievements(ledger, lang = 0) {
+// 壳层 hook:评估账本(extras 携带钱/计数/解锁数)→ 与存档比对 → 新解锁进队列(>3 个合并成一条,避免首跑刷屏)。
+export function useAchievements(ledger, lang = 0, extrasInput = {}) {
   const [state, setState] = useState(readAchievementState);
+  const [counters, setCounters] = useState(readFunCounters);
   const [toasts, setToasts] = useState([]);
   const counter = useRef(0);
-  const items = useMemo(() => evaluateAchievements(ledger), [ledger]);
+  useEffect(() => {
+    const onBump = () => setCounters(readFunCounters());
+    window.addEventListener(FUN_COUNTERS_EVENT, onBump);
+    return () => window.removeEventListener(FUN_COUNTERS_EVENT, onBump);
+  }, []);
+  const extras = useMemo(
+    () => ({ monthlyValue: extrasInput.monthlyValue, counters, unlockedCount: unlockedNonMetaCount(state) }),
+    [extrasInput.monthlyValue, counters, state],
+  );
+  const items = useMemo(() => evaluateAchievements(ledger, extras), [ledger, extras]);
   useEffect(() => {
     if (!ledger) return;
     setState((current) => {

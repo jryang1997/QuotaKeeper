@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import ModuleBoard from './ModuleBoard.jsx';
 import { STR, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
 import { sendCommand } from './gui-bridge.js';
+import { bumpFunCounter } from './fun-counters.js';
 import { snapdom } from '@zumer/snapdom';
 import qrcode from 'qrcode-generator';
 
@@ -259,6 +260,7 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus, lan
       const image = await snapdom.toPng(canvas, { scale: 1 });
       // 诊断钩子:留存最近一次导出的 dataURL(内存即弃),验证与排障用
       window.__lastShareDataUrl = image.src;
+      bumpFunCounter('share');
       sendCommand({ cmd: 'saveShareImage', image: image.src });
     } catch (error) {
       // 诊断钩子:CDP 验证与用户排障都靠它定位 snapdom 失败原因

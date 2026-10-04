@@ -1,6 +1,7 @@
 // 设置页:五组(外观 / 数据源与凭据 / 桌面与通知 / 基准与货币 / 关于与维护)。
 // 规则:颜色与全局偏好归设置,布局与显隐归所在页面;每个概念只有这一处编辑面。
 import { sendCommand } from './gui-bridge.js';
+import { bumpFunCounter } from './fun-counters.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, QUOTA_REPAIR, SOURCE_PATHS, SOURCE_REPAIR, STR, fmtCost, fmtInt } from './ui-data.js';
@@ -474,7 +475,7 @@ export default function SettingsPage({
               <SettingsChoice label={t('settings_close_behavior')} value={preferences.closeBehavior} onChange={(value) => onPreferenceChange('closeBehavior', value)} options={[{ value: 'tray', label: t('settings_close_tray') }, { value: 'exit', label: t('settings_close_exit') }]} />
             </SettingsRow>
             <SettingsRow title={t('settings_overlay')} hint={t('settings_overlay_hint')}>
-              <button type="button" className="settings-inline-action" onClick={() => sendCommand({ cmd: 'toggleOverlay' })}>{t('settings_overlay_toggle')}</button>
+              <button type="button" className="settings-inline-action" onClick={() => { bumpFunCounter('overlay'); sendCommand({ cmd: 'toggleOverlay' }); }}>{t('settings_overlay_toggle')}</button>
             </SettingsRow>
             <SettingsRow title={t('settings_shortcut')} hint={t('settings_shortcut_hint')}>
               <SettingsChoice label={t('settings_shortcut')} value={preferences.globalShortcut} onChange={(value) => onPreferenceChange('globalShortcut', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />

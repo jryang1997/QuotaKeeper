@@ -23,6 +23,7 @@ import { Button } from '@astryxdesign/core/Button';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Toast } from '@astryxdesign/core/Toast';
 import { AchievementToasts, AchievementsModal, useAchievements } from './Achievements.jsx';
+import { bumpFunCounter } from './fun-counters.js';
 import CommandPalette from './CommandPalette.jsx';
 import { makeCommand } from './command-palette.js';
 
@@ -165,7 +166,7 @@ function App() {
   const refreshRequestedAt = useRef(0);
   const mainRef = useRef(null);
   const scrollByPage = useRef({});
-  const achievements = useAchievements(data?.ledger, lang);
+  const achievements = useAchievements(data?.ledger, lang, { monthlyValue: data?.monthly_value });
   useLayoutEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollByPage.current[page] || 0;
   }, [page]);
@@ -284,6 +285,7 @@ function App() {
 
   const updatePreference = useCallback((key, value) => {
     if (key === 'autostart') sendCommand({ cmd: 'setAutostart', autostart: value });
+    if (key === 'lang') bumpFunCounter('lang');
     setPreferences((current) => {
       const next = { ...current, [key]: value };
       saveGuiPreferences(next);
@@ -349,6 +351,7 @@ function App() {
       const target = event.target;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        bumpFunCounter('palette');
         setJumpOpen((value) => !value);
         return;
       }
@@ -391,7 +394,7 @@ function App() {
     if (data?.deepseek_balance) list.push(makeCommand({ id: 'provider-deepseek', group: 'provider', label: 'DeepSeek API', hint: t('nav_quota'), keywords: 'deepseek', run: () => jumpTo('quota', '[data-provider="deepseek"]') }));
     list.push(makeCommand({ id: 'action-refresh', group: 'action', label: t('action_refresh'), keywords: 'refresh r', run: refresh }));
     list.push(makeCommand({ id: 'action-theme', group: 'action', label: t('action_theme'), keywords: 'theme p', run: cycleTheme }));
-    list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => sendCommand({ cmd: 'toggleOverlay' }) }));
+    list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => { bumpFunCounter('overlay'); sendCommand({ cmd: 'toggleOverlay' }); } }));
     list.push(makeCommand({ id: 'action-achievements', group: 'action', label: t('action_achievements'), keywords: 'achievements', run: () => setAchOpen(true) }));
     if (EDITABLE_PAGES[page]) list.push(makeCommand({ id: 'action-edit', group: 'action', label: t('action_edit'), hint: t(`nav_${page}`), keywords: 'edit layout', run: () => setPageEditing(page, !editing[page]) }));
     return list;
@@ -460,6 +463,7 @@ function App() {
       {page === 'usage' && <UsageDashboard
         ledger={data.ledger}
         monthlyValue={data.monthly_value}
+        achItems={achievements.items}
         lang={lang}
         currency={{ code: preferences.currency, rate: exchangeRate?.rate }}
         onOpenSettings={() => setPage('settings')}
@@ -543,7 +547,7 @@ function App() {
       </main>
       <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="mobile" />
       <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
-      <AnimatePresence>{achOpen && <AchievementsModal key="achievements" ledger={data?.ledger} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
+      <AnimatePresence>{achOpen && <AchievementsModal key="achievements" items={achievements.items} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
       <AchievementToasts items={achievements.toasts} lang={lang} onDismiss={achievements.dismiss} />
       <CommandPalette open={jumpOpen} onClose={() => setJumpOpen(false)} commands={commands} lang={lang} />
     </div>

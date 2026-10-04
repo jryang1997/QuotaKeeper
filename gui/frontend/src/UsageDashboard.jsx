@@ -169,7 +169,7 @@ export const USAGE_MODULE_LABELS = [
   ['streak', 'panel_streak'], ['records', 'panel_records'],
 ];
 
-export default function UsageDashboard({ ledger, monthlyValue, lang, currency, onOpenSettings, onOpenAchievements, editing, onToggleEditing }) {
+export default function UsageDashboard({ ledger, monthlyValue, achItems, lang, currency, onOpenSettings, onOpenAchievements, editing, onToggleEditing }) {
   const zh = lang === 0;
   const t = (key) => STR[key][lang];
   const [selectedModel, setSelectedModel] = useState('');
@@ -205,7 +205,7 @@ export default function UsageDashboard({ ledger, monthlyValue, lang, currency, o
 
   const panelBodies = (id) => {
     const Body = PANEL_BODIES[id];
-    if (id === 'achievements') return <AchievementsPanel ledger={ledger} lang={lang} onOpen={onOpenAchievements} />;
+    if (id === 'achievements') return <AchievementsPanel items={achItems} lang={lang} onOpen={onOpenAchievements} />;
     return <PanelErrorBoundary>{Body ? <Body ledger={ledger} lang={lang} currency={currency} /> : null}</PanelErrorBoundary>;
   };
 
