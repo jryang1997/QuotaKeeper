@@ -485,7 +485,8 @@ html[data-theme='dark'] { color-scheme: dark; }
 
 @media (max-width: 1050px) {
   .sidebar { width: 168px; padding: 16px 10px; }
-  .main { padding: 16px; }
+  .main { padding: 0 16px 16px; }
+  .main-toolbar { margin: 0 -16px; padding: 14px 16px 10px; }
   .quota-grid { gap: 10px; }
 }
 
