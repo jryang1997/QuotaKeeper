@@ -131,7 +131,12 @@ export function AchievementToasts({ items, lang, onDismiss }) {
           transition={reduced ? FADE : { ...CONTROL_SPRING, bounce: 0.22 }}
           onClick={() => onDismiss(toast.key)}
         >
-          <span className="ach-toast-glyph"><AchievementGlyph glyph={toast.glyph} /></span>
+          <motion.span
+            className="ach-toast-glyph"
+            initial={{ transform: reduced ? 'none' : 'scale(0.55)', opacity: 0 }}
+            animate={{ transform: 'scale(1)', opacity: 1 }}
+            transition={reduced ? FADE : { type: 'spring', bounce: 0.34, duration: 0.6 }}
+          ><AchievementGlyph glyph={toast.glyph} /></motion.span>
           <span className="ach-toast-copy">
             <em>{toast.multi ? STR.ach_multi[lang] : STR.ach_new[lang]}</em>
             <b>{toast.label}</b>

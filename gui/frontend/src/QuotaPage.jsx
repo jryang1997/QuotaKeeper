@@ -3,7 +3,7 @@
 import ModuleBoard from './ModuleBoard.jsx';
 import React, { useMemo, useState } from 'react';
 import { Text } from '@astryxdesign/core/Text';
-import { PLAN_MODELS, PROVIDER_LOGOS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, STR, fmtInt, fmtTokens, fmtCountdown } from './ui-data.js';
+import { PLAN_MODELS, PROVIDER_LOGOS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, STR, fill, fmtInt, fmtTokens, fmtCountdown } from './ui-data.js';
 import BlockBar from './BlockBar.jsx';
 import CardDetails from './CardDetails.jsx';
 import { AnimatePresence } from 'motion/react';
@@ -41,6 +41,14 @@ function paceChipText(pace, lang) {
     : `${d}pt ${pace.delta >= 0 ? 'ahead' : 'behind'} · ${eta} to empty`;
 }
 
+// 关注态的行动建议:最紧张的额度吃紧(≥80%/耗尽)时,推荐当前最闲的一家(同为真实配额卡)。
+export function pickQuotaAdvice(rows) {
+  const worst = rows?.[0];
+  if (!worst || worst.kind !== 'quota' || worst.status === 'ok') return null;
+  const calmest = rows.filter((row) => row.kind === 'quota' && row !== worst).sort((a, b) => a.used - b.used)[0];
+  return calmest ? { name: calmest.name, pct: Math.round(calmest.used) } : null;
+}
+
 function statusLabel(status, lang) {
   if (status === 'exhausted') return STR.status_exhausted[lang];
   if (status === 'warning') return STR.status_warning[lang];
@@ -76,6 +84,7 @@ function QuotaStrip({ cards, lang, hiddenCards, pinnedCards, now, onJump, onMana
       return {
         provider: card.provider,
         title: card.title,
+        name: card.title.split(' ·')[0],
         kind: card.method === 'activity_vs_average' ? 'activity' : 'quota',
         used: tightest ? tightest.used_pct : 0,
         label: tightest?.label || (lang === 0 ? '暂无窗口' : 'no windows'),
@@ -90,11 +99,16 @@ function QuotaStrip({ cards, lang, hiddenCards, pinnedCards, now, onJump, onMana
   const hiddenCount = hiddenCards.length;
   if (rows.length === 0) {
     return <section className="quota-strip" aria-label={t('quota_overview')}>
-      <div className="quota-strip-empty"><Text type="supporting">{t('empty_quota')}</Text></div>
-      {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{t('quota_hidden_link').replace('{n}', hiddenCount)}</button>}
+      <div className="quota-strip-empty">
+        <Text type="supporting">{t('empty_quota')}</Text>
+        <button type="button" className="quota-strip-connect" onClick={onManage}>{t('quota_connect')}</button>
+      </div>
+      {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{fill(t('quota_hidden_link'), { n: hiddenCount })}</button>}
     </section>;
   }
   const worst = rows[0];
+  const suggestion = pickQuotaAdvice(rows);
+  const advice = suggestion ? fill(t('quota_advice'), suggestion) : '';
   return (
     <section className="quota-strip" aria-label={t('quota_overview')}>
       <header className="quota-strip-head">
@@ -104,7 +118,8 @@ function QuotaStrip({ cards, lang, hiddenCards, pinnedCards, now, onJump, onMana
             ? `${rows.reduce((sum, row) => sum + row.attention, 0)} ${t('quota_attention')}`
             : t('quota_all_clear')}
         </span>
-        {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{t('quota_hidden_link').replace('{n}', hiddenCount)}</button>}
+        {advice && <span className="quota-strip-advice">{advice}</span>}
+        {hiddenCount > 0 && <button type="button" className="quota-strip-manage" onClick={onManage}>{fill(t('quota_hidden_link'), { n: hiddenCount })}</button>}
       </header>
       <div className="quota-strip-list">
         {rows.map((row) => (

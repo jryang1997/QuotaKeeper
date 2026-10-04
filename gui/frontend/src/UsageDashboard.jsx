@@ -158,6 +158,17 @@ function SpeedBoard({ ledger, zh, lang }) {
   </div>;
 }
 
+// 模块清单(id → 文案键):跳转面板按清单生成条目,与看板模块一一对应。
+export const USAGE_MODULE_LABELS = [
+  ['trend', 'usage_trend_title'], ['tokens', 'usage_panel_tokens'], ['requests', 'usage_panel_requests'],
+  ['cost', 'usage_panel_cost'], ['value', 'usage_panel_value'], ['achievements', 'panel_achievements'],
+  ['cache', 'panel_cache'], ['speed', 'usage_speed_title'], ['models', 'usage_models_title'],
+  ['modelMix', 'usage_model_mix_title'], ['heat', 'panel_heat'], ['punch', 'panel_punch'],
+  ['clock', 'panel_clock'], ['week', 'panel_week'], ['sources', 'panel_sources'],
+  ['projects', 'panel_projects'], ['sessions', 'panel_sessions'], ['alltime', 'panel_alltime'],
+  ['streak', 'panel_streak'], ['records', 'panel_records'],
+];
+
 export default function UsageDashboard({ ledger, monthlyValue, lang, currency, onOpenSettings, onOpenAchievements, editing, onToggleEditing }) {
   const zh = lang === 0;
   const t = (key) => STR[key][lang];

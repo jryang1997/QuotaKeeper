@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
@@ -8,7 +8,7 @@ import './usage-dashboard.css';
 import './ia.css';
 import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
-import UsageDashboard from './UsageDashboard.jsx';
+import UsageDashboard, { USAGE_MODULE_LABELS } from './UsageDashboard.jsx';
 import SettingsPage from './SettingsPage.jsx';
 import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPreferences } from './gui-preferences.js';
 import { fetchExchangeRate, readExchangeRates } from './currency.js';
@@ -23,10 +23,13 @@ import { Button } from '@astryxdesign/core/Button';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Toast } from '@astryxdesign/core/Toast';
 import { AchievementToasts, AchievementsModal, useAchievements } from './Achievements.jsx';
+import CommandPalette from './CommandPalette.jsx';
+import { makeCommand } from './command-palette.js';
 
 const PageTransition = lazy(() => import('./PageTransition.jsx'));
 
 const NAV_ITEMS = ['quota', 'usage', 'share', 'settings'];
+const GROUP_LABELS = [['appearance', 'settings_group_appearance'], ['sources', 'settings_group_sources'], ['desktop', 'settings_group_desktop'], ['benchmark', 'settings_group_benchmark'], ['about', 'settings_group_about']];
 const EDITABLE_PAGES = { quota: true, usage: true };
 
 function NavIcon({ page }) {
@@ -148,6 +151,7 @@ function App() {
   const [shareStatus, setShareStatus] = useState(null);
   const [lan, setLan] = useState({ enabled: false, port: null, url: null });
   const [achOpen, setAchOpen] = useState(false);
+  const [jumpOpen, setJumpOpen] = useState(false);
   const [editing, setEditing] = useState({ quota: false, usage: false });
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
@@ -343,6 +347,11 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event) => {
       const target = event.target;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setJumpOpen((value) => !value);
+        return;
+      }
       if (event.altKey || event.ctrlKey || event.metaKey || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
@@ -358,6 +367,35 @@ function App() {
   }, [refresh, refreshing, cycleTheme]);
 
   const t = useCallback((k) => STR[k][lang], [lang]);
+
+  // 跳转目标先切页,等页面挂载后再滚动/高亮;卡片用与额度带相同的高亮动画。
+  const jumpTo = useCallback((pageKey, selector) => {
+    setPage(pageKey);
+    window.setTimeout(() => {
+      const node = document.querySelector(selector);
+      if (!node) return;
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (selector.startsWith('[data-provider')) {
+        node.classList.add('is-flash');
+        window.setTimeout(() => node.classList.remove('is-flash'), 1200);
+      }
+    }, 280);
+  }, []);
+
+  const commands = useMemo(() => {
+    const list = [];
+    for (const key of NAV_ITEMS) list.push(makeCommand({ id: `page-${key}`, group: 'page', label: t(`nav_${key}`), hint: `${NAV_ITEMS.indexOf(key) + 1}`, keywords: key, run: () => setPage(key) }));
+    for (const [id, key] of GROUP_LABELS) list.push(makeCommand({ id: `settings-${id}`, group: 'settings', label: t(key), run: () => jumpTo('settings', `#${id}`) }));
+    for (const [id, key] of USAGE_MODULE_LABELS) list.push(makeCommand({ id: `module-${id}`, group: 'module', label: t(key), hint: t('nav_usage'), keywords: id, run: () => jumpTo('usage', `[data-panel-id="${id}"]`) }));
+    for (const card of (data?.cards || [])) list.push(makeCommand({ id: `provider-${card.provider}`, group: 'provider', label: card.title.split(' ·')[0], hint: t('nav_quota'), keywords: card.provider, run: () => jumpTo('quota', `[data-provider="${card.provider}"]`) }));
+    if (data?.deepseek_balance) list.push(makeCommand({ id: 'provider-deepseek', group: 'provider', label: 'DeepSeek API', hint: t('nav_quota'), keywords: 'deepseek', run: () => jumpTo('quota', '[data-provider="deepseek"]') }));
+    list.push(makeCommand({ id: 'action-refresh', group: 'action', label: t('action_refresh'), keywords: 'refresh r', run: refresh }));
+    list.push(makeCommand({ id: 'action-theme', group: 'action', label: t('action_theme'), keywords: 'theme p', run: cycleTheme }));
+    list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => sendCommand({ cmd: 'toggleOverlay' }) }));
+    list.push(makeCommand({ id: 'action-achievements', group: 'action', label: t('action_achievements'), keywords: 'achievements', run: () => setAchOpen(true) }));
+    if (EDITABLE_PAGES[page]) list.push(makeCommand({ id: 'action-edit', group: 'action', label: t('action_edit'), hint: t(`nav_${page}`), keywords: 'edit layout', run: () => setPageEditing(page, !editing[page]) }));
+    return list;
+  }, [t, data, page, editing, jumpTo, refresh, cycleTheme]);
 
   const age = data ? Math.floor((now - data.fetched_at_ms) / 1000) : null;
   const quotaAge = data?.quota_fetched_at_ms ? now - data.quota_fetched_at_ms : null;
@@ -471,6 +509,10 @@ function App() {
               </div>
             </SelectionGroup>
           </div>}
+          <button type="button" className="toolbar-jump" onClick={() => setJumpOpen(true)} title={t('jump_open')} aria-label={t('jump_open')}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+            <kbd>Ctrl K</kbd>
+          </button>
           {EDITABLE_PAGES[page] && <button type="button" className={`toolbar-edit${editing[page] ? ' is-on' : ''}`} aria-pressed={editing[page]} title={t('edit_layout_hint')} onClick={() => setPageEditing(page, !editing[page])}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>
             <span>{editing[page] ? t('edit_layout_done') : t('edit_layout')}</span>
@@ -503,6 +545,7 @@ function App() {
       <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
       <AnimatePresence>{achOpen && <AchievementsModal key="achievements" ledger={data?.ledger} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
       <AchievementToasts items={achievements.toasts} lang={lang} onDismiss={achievements.dismiss} />
+      <CommandPalette open={jumpOpen} onClose={() => setJumpOpen(false)} commands={commands} lang={lang} />
     </div>
     </MotionProvider>
   );

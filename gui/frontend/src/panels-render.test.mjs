@@ -49,6 +49,24 @@ test('usage board renders every default module with ledger data', async () => {
   }
 });
 
+test('quota advice points at the calmest provider only when the tightest is strained', async () => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
+  try {
+    const { pickQuotaAdvice } = await server.ssrLoadModule('/src/QuotaPage.jsx');
+    const rows = [
+      { provider: 'codex', name: 'Codex', kind: 'quota', used: 96, status: 'exhausted' },
+      { provider: 'goat', name: 'Command Code GOAT', kind: 'quota', used: 9, status: 'ok' },
+      { provider: 'opencode-go', name: 'OpenCode Go', kind: 'quota', used: 44, status: 'ok' },
+      { provider: 'antigravity', name: 'Antigravity', kind: 'activity', used: 13, status: 'ok' },
+    ];
+    assert.deepEqual(pickQuotaAdvice(rows), { name: 'Command Code GOAT', pct: 9 });
+    assert.equal(pickQuotaAdvice(rows.map((row) => ({ ...row, status: 'ok', used: 20 }))), null);
+    assert.equal(pickQuotaAdvice([{ provider: 'x', name: 'X', kind: 'activity', used: 99, status: 'exhausted' }]), null);
+  } finally {
+    await server.close();
+  }
+});
+
 test('quota page keeps the quota strip and mutes expired pace warnings', async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
   const originalNow = Date.now;

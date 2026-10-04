@@ -351,6 +351,8 @@ export const STR = {
   quota_official_period: ['官方账期', 'Official period'],
   quota_requests: ['请求', 'requests'],
   quota_hidden_link: ['已隐藏 {n} 张卡片 · 管理', '{n} hidden cards · manage'],
+  quota_advice: ['可先用 {name}（当前 {pct}%）', 'Try {name} meanwhile ({pct}% used)'],
+  quota_connect: ['还没有可用的额度数据 · 去连接', 'No live quota yet · connect sources'],
   card_menu: ['卡片操作', 'Card actions'],
   card_details_hide: ['收起详情', 'Hide details'],
 
@@ -437,6 +439,24 @@ export const STR = {
   settings_source_other: ['其他服务商（登录态 / 环境变量）', 'Other providers (login or env var)'],
   settings_provider_live: ['额度可读', 'Quota readable'],
   settings_provider_unreadable: ['额度不可读', 'Quota unreadable'],
+
+  // ---- 快速跳转 ----
+  jump_title: ['快速跳转', 'Quick jump'],
+  jump_placeholder: ['跳转到页面、模块、服务商…', 'Jump to a page, module or provider…'],
+  jump_group_page: ['页面', 'Pages'],
+  jump_group_settings: ['设置分组', 'Settings'],
+  jump_group_module: ['用量模块', 'Modules'],
+  jump_group_provider: ['服务商卡片', 'Providers'],
+  jump_group_action: ['动作', 'Actions'],
+  jump_move: ['选择', 'move'],
+  jump_run: ['执行', 'run'],
+  jump_empty: ['没有匹配项', 'No matches'],
+  jump_open: ['快速跳转 (Ctrl+K)', 'Quick jump (Ctrl+K)'],
+  action_refresh: ['刷新数据', 'Refresh data'],
+  action_theme: ['切换主题', 'Cycle theme'],
+  action_edit: ['编辑布局', 'Toggle edit layout'],
+  action_overlay: ['显示 / 隐藏悬浮窗', 'Show or hide the overlay'],
+  action_achievements: ['打开成就墙', 'Open achievements'],
 
   // ---- 数据状态条 ----
   freshness_title: ['数据状态', 'Data status'],
