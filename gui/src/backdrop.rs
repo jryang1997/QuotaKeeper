@@ -117,8 +117,9 @@ pub fn capture_region_data_uri(left: i32, top: i32, width: u32, height: u32) -> 
     encode_png_data_uri(&rgba, width, height)
 }
 
-/// 毛玻璃模糊半径(像素):桌面内容要糊到读不出字,但保留大色块与光感。
-const BLUR_RADIUS: usize = 14;
+/// 毛玻璃模糊半径(像素):18 约等于 Apple 桌面 Liquid Glass 的糊度 ——
+/// 桌面文字完全读不出,但保留大色块、光带与明暗,玻璃感最强。
+const BLUR_RADIUS: usize = 18;
 
 /// 可分离盒式模糊:横竖各一遍滑动窗口均值。半径 14 在胶囊尺寸下够快
 /// (400ms 一帧绰绰有余),质量比单遍高斯略低但肉眼看不出。

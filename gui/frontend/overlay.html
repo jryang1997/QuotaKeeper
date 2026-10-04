@@ -5,16 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Token Monitor 悬浮窗</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    /* 玻璃调参位:--glass-tint 是背景图之上的暗色覆膜(真毛玻璃的可读性靠它),
+       0 = 全透(浅色壁纸上文字发虚),0.6+ = 发闷。0.52 是浅/深桌面都稳的平衡点。 */
+    --glass-tint: rgba(10, 13, 20, 0.52);
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font-family: "Sarasa Term SC Nerd", "Sarasa Mono SC", "Cascadia Mono", Consolas, monospace; }
 
-  /* 胶囊玻璃:backdrop 层是被 Rust 抓来的真实桌面像素(backdrop.rs),
-     backdrop-filter 在这里做真模糊 —— 不是自绘假象。系统排除捕获保证
-     背景图里不含窗口自己。 */
-  /* 缩放手柄让位:tao 的 WM_NCHITTEST 按系统 SM_CXFRAME 宽度在窗口边缘生成,
-     这几像素留白不铺玻璃,否则 webview 吃掉边缘命中 */
+  /* 胶囊玻璃:--backdrop 是 Rust 抓来的真实桌面像素(backdrop.rs 已做模糊),
+     这层只叠一层暗 tint 保证文字可读;玻璃边缘留 4px 不铺,让 tao 的
+     WM_NCHITTEST 拿到缩放命中。 */
   .glass {
     position: relative; isolation: isolate;
     display: flex; align-items: center;
@@ -28,7 +31,7 @@
   .glass::before {
     content: ''; position: absolute; inset: 0; z-index: 0;
     border-radius: inherit;
-    background-color: rgba(10, 13, 20, 0.52);
+    background-color: var(--glass-tint);
     /* --backdrop 由 Rust 推来的真实桌面像素(已在 Rust 端做过盒式模糊);
        这层自己不再 backdrop-filter —— 对伪元素做模糊只会糊掉它自己。 */
     background-image: var(--backdrop, none);
