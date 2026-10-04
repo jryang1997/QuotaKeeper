@@ -3026,6 +3026,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "include_dir",
+ "png",
  "rfd",
  "serde",
  "serde_json",
