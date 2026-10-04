@@ -426,7 +426,7 @@ export default function SettingsPage({
                   <div className="settings-source-row" key={provider}>
                     <span className={`source-indicator source-indicator-${live ? 'ready' : 'idle'}`} />
                     <strong>{provider}</strong>
-                    <span className="settings-source-state">{live ? (zh ? '额度可读' : 'readable') : (QUOTA_HINT[provider]?.[lang] || (zh ? '未接入 · 走登录态或环境变量' : 'Not connected · login or env var'))}</span>
+                    <span className="settings-source-state">{live ? t('settings_provider_live') : (QUOTA_HINT[provider]?.[lang] || t('settings_provider_missing'))}</span>
                     {!live && <details><summary>{t('welcome_repair')}</summary><p>{QUOTA_REPAIR[provider]?.[lang]}</p></details>}
                   </div>
                 );

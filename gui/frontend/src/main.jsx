@@ -226,7 +226,7 @@ function App() {
       },
       __onAutostartResult: (success) => {
         if (!success) {
-          setNativeError('Windows 启动项写入失败 / Failed to update Windows startup');
+          setNativeError(STR.startup_write_failed[readGuiPreferences().lang]);
           sendCommand({ cmd: 'queryNativePreferences' });
         } else setNativeError('');
       },
@@ -244,7 +244,7 @@ function App() {
       },
       __onShortcutStatus: (available) => {
         if (!available) {
-          setNativeError('Ctrl+Alt+U 已被其他应用占用 / Ctrl+Alt+U is already in use');
+          setNativeError(STR.shortcut_conflict[readGuiPreferences().lang]);
           setPreferences((current) => {
             const next = { ...current, globalShortcut: false };
             saveGuiPreferences(next);

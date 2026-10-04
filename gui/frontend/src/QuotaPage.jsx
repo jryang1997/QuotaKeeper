@@ -87,7 +87,7 @@ function QuotaStrip({ cards, lang, hiddenCards, pinnedCards, now, onJump, onMana
         name: card.title.split(' ·')[0],
         kind: card.method === 'activity_vs_average' ? 'activity' : 'quota',
         used: tightest ? tightest.used_pct : 0,
-        label: tightest?.label || (lang === 0 ? '暂无窗口' : 'no windows'),
+        label: tightest?.label || (lang === 0 ? '暂无窗口' : 'No windows'),
         status: tightest?.status || 'ok',
         resetMs: nextReset ? Math.max(0, nextReset.resets_in_ms - elapsed) : null,
         pace,
