@@ -21,6 +21,7 @@ export const DEFAULT_GUI_PREFERENCES = {
   hiddenCards: [],
   providerColors: {},
   clipboardClear: true,
+  sidebarHidden: false,
 };
 
 export function readGuiPreferences(storage = globalThis.localStorage) {
@@ -44,6 +45,7 @@ export function readGuiPreferences(storage = globalThis.localStorage) {
       hiddenCards: Array.isArray(stored.hiddenCards) ? stored.hiddenCards.filter((item) => PROVIDERS.includes(item)) : [],
       providerColors: Object.fromEntries(Object.entries(stored.providerColors || {}).filter(([key, value]) => PROVIDERS.includes(key) && /^#[0-9a-fA-F]{6}$/.test(value))),
       clipboardClear: stored.clipboardClear !== false,
+      sidebarHidden: stored.sidebarHidden === true,
     };
   } catch {
     return DEFAULT_GUI_PREFERENCES;

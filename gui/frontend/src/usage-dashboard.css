@@ -84,7 +84,7 @@
 .usage-day:hover .usage-day-bar, .usage-day.is-active .usage-day-bar { filter: saturate(1.18) brightness(1.04); }
 .usage-day:active .usage-day-bar { transform: scaleX(.94); }
 .usage-guide { position: absolute; z-index: 1; top: 0; bottom: 0; border-left: 1px dashed var(--usage-muted); pointer-events: none; }
-.usage-popover { position: absolute; z-index: 4; top: 12%; width: min(300px, 58vw); box-sizing: border-box; padding: 15px 17px; border: 1px solid var(--usage-line); border-radius: 18px; background: var(--color-background-surface); color: var(--usage-text); box-shadow: var(--usage-shadow); pointer-events: none; transform: translateX(-50%); }
+.usage-popover { position: absolute; z-index: 4; top: 12%; width: min(300px, 58vw); box-sizing: border-box; padding: 15px 17px; border: 1px solid var(--usage-line); border-radius: 18px; background: var(--glass-tint-strong); -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%); color: var(--usage-text); box-shadow: var(--usage-shadow); pointer-events: none; transform: translateX(-50%); }
 .usage-popover-head { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 11px; font-size: 14px; }
 .usage-popover-head strong:last-child { white-space: nowrap; }
 .usage-popover-line { display: flex; align-items: center; gap: 7px; margin: 6px 0; font-size: 12px; }

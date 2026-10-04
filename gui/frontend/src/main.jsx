@@ -6,6 +6,7 @@ import '@astryxdesign/theme-neutral/theme.css';
 import './app.css';
 import './usage-dashboard.css';
 import './ia.css';
+import './glass.css';
 import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
 import UsageDashboard, { USAGE_MODULE_LABELS } from './UsageDashboard.jsx';
@@ -26,6 +27,7 @@ import { AchievementToasts, AchievementsModal, useAchievements } from './Achieve
 import { bumpFunCounter } from './fun-counters.js';
 import CommandPalette from './CommandPalette.jsx';
 import { makeCommand } from './command-palette.js';
+import { LiquidGlassFilter } from './GlassLens.jsx';
 
 const PageTransition = lazy(() => import('./PageTransition.jsx'));
 
@@ -75,21 +77,27 @@ function PrimaryNav({ lang, page, onNavigate, variant }) {
   );
 }
 
-// 数据状态:正常时收进侧栏一枚极小的状态点,点开才看明细;异常才在页内提示。
-function DataStatus({ lang, data, refreshing, age, quotaStale, ledgerStale, quotaAge, ledgerAge }) {
+// 数据状态:Dock 左端一枚极小的点,点开才看明细;异常才在页内提示。
+function DataStatus({ lang, data, refreshing, quotaStale, ledgerStale, quotaAge, ledgerAge }) {
   const t = (key) => STR[key][lang];
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
   const stale = quotaStale || ledgerStale;
+  useEffect(() => {
+    if (!open) return undefined;
+    // Apple popover 规矩:点外部即收起
+    const onPointerDown = (event) => {
+      if (!wrapRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
   return (
-    <div className="sidebar-status-wrap">
-      <button type="button" className={`sidebar-status${stale ? ' is-stale' : ''}`} aria-expanded={open} onClick={() => setOpen((value) => !value)} title={t('freshness_open')}>
-        {refreshing ? (
-          <><Spinner size="sm" /> <span>{t('refreshing')}</span></>
-        ) : (
-          <><i className={`status-dot${stale ? ' is-stale' : ''}`} aria-hidden="true" /><span className="sidebar-age">{t('updated')} {age != null ? fmtRel(age * 1000) : '—'}</span></>
-        )}
+    <div ref={wrapRef} className="dock-status-wrap">
+      <button type="button" className="dock-status-btn" aria-expanded={open} onClick={() => setOpen((value) => !value)} title={t('freshness_open')} aria-label={t('freshness_open')}>
+        {refreshing ? <Spinner size="sm" /> : <i className={`status-dot${stale ? ' is-stale' : ''}`} aria-hidden="true" />}
       </button>
-      <AnimatePresence>{open && <PopoverSurface className="status-popover" role="status">
+      <AnimatePresence>{open && <PopoverSurface className="status-popover glass-panel" role="status">
         <span className="status-popover-title">{t('freshness_title')}</span>
         <div className={`status-row${quotaStale ? ' is-stale' : ''}`}>
           <i /><span>{t('freshness_quota')}</span>
@@ -102,6 +110,44 @@ function DataStatus({ lang, data, refreshing, age, quotaStale, ledgerStale, quot
         {data?.quotaError && <p className="status-popover-error">{data.quotaError}</p>}
       </PopoverSurface>}</AnimatePresence>
     </div>
+  );
+}
+
+// 底部液态玻璃 Dock:主因导航,桌面与窄窗同一套;折射滤镜只挂这一枚。
+function DockNav({ lang, page, onNavigate, status }) {
+  const reduced = useMotionPreference();
+  const dockRef = useRef(null);
+  const [lens, setLens] = useState('');
+  return (
+    <>
+      <LiquidGlassFilter targetRef={dockRef} onValue={setLens} />
+      <LayoutGroup id="navigation-dock">
+        <nav
+          ref={dockRef}
+          className="dock"
+          aria-label={lang === 0 ? '主导航' : 'Main navigation'}
+          style={lens ? { backdropFilter: `url(#${lens}) blur(22px) saturate(140%)`, WebkitBackdropFilter: `url(#${lens}) blur(22px) saturate(140%)` } : undefined}
+        >
+          {status && <DataStatus lang={lang} {...status} />}
+          <i className="dock-status-divider" aria-hidden="true" />
+          {NAV_ITEMS.map((key) => {
+            const active = page === key;
+            return (
+              <button
+                key={key}
+                className={`dock-item${active ? ' dock-item-active' : ''}`}
+                onClick={() => onNavigate(key)}
+                aria-current={active ? 'page' : undefined}
+              >
+                {active && <motion.span layoutId={reduced ? undefined : 'dock-active'} className="dock-active-pill" aria-hidden="true" transition={reduced ? { duration: 0 } : CONTROL_SPRING} />}
+                <NavIcon page={key} />
+                <span className="dock-label">{STR[`nav_${key}`][lang]}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </LayoutGroup>
+    </>
   );
 }
 
@@ -295,7 +341,7 @@ function App() {
 
   const resetAppearance = useCallback(() => {
     setPreferences((current) => {
-      const next = { ...DEFAULT_GUI_PREFERENCES, notifications: current.notifications, paceAlerts: current.paceAlerts, quietHours: current.quietHours, closeBehavior: current.closeBehavior, globalShortcut: current.globalShortcut, autostart: current.autostart, pinnedCards: current.pinnedCards, hiddenCards: current.hiddenCards, providerColors: current.providerColors };
+      const next = { ...DEFAULT_GUI_PREFERENCES, notifications: current.notifications, paceAlerts: current.paceAlerts, quietHours: current.quietHours, closeBehavior: current.closeBehavior, globalShortcut: current.globalShortcut, autostart: current.autostart, pinnedCards: current.pinnedCards, hiddenCards: current.hiddenCards, providerColors: current.providerColors, sidebarHidden: current.sidebarHidden };
       saveGuiPreferences(next);
       return next;
     });
@@ -355,6 +401,15 @@ function App() {
         setJumpOpen((value) => !value);
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        setPreferences((current) => {
+          const next = { ...current, sidebarHidden: !current.sidebarHidden };
+          saveGuiPreferences(next);
+          return next;
+        });
+        return;
+      }
       if (event.altKey || event.ctrlKey || event.metaKey || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
@@ -393,16 +448,15 @@ function App() {
     for (const card of (data?.cards || [])) list.push(makeCommand({ id: `provider-${card.provider}`, group: 'provider', label: card.title.split(' ·')[0], hint: t('nav_quota'), keywords: card.provider, run: () => jumpTo('quota', `[data-provider="${card.provider}"]`) }));
     if (data?.deepseek_balance) list.push(makeCommand({ id: 'provider-deepseek', group: 'provider', label: 'DeepSeek API', hint: t('nav_quota'), keywords: 'deepseek', run: () => jumpTo('quota', '[data-provider="deepseek"]') }));
     list.push(makeCommand({ id: 'action-refresh', group: 'action', label: t('action_refresh'), keywords: 'refresh r', run: refresh }));
+    list.push(makeCommand({ id: 'action-sidebar', group: 'action', label: preferences.sidebarHidden ? t('sidebar_show') : t('sidebar_hide'), keywords: 'sidebar toggle b', run: () => updatePreference('sidebarHidden', !preferences.sidebarHidden) }));
     list.push(makeCommand({ id: 'action-theme', group: 'action', label: t('action_theme'), keywords: 'theme p', run: cycleTheme }));
     list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => { bumpFunCounter('overlay'); sendCommand({ cmd: 'toggleOverlay' }); } }));
     list.push(makeCommand({ id: 'action-achievements', group: 'action', label: t('action_achievements'), keywords: 'achievements', run: () => setAchOpen(true) }));
     if (EDITABLE_PAGES[page]) list.push(makeCommand({ id: 'action-edit', group: 'action', label: t('action_edit'), hint: t(`nav_${page}`), keywords: 'edit layout', run: () => setPageEditing(page, !editing[page]) }));
     return list;
-  }, [t, data, page, editing, jumpTo, refresh, cycleTheme]);
+  }, [t, data, page, editing, jumpTo, refresh, cycleTheme, preferences.sidebarHidden, updatePreference]);
 
-  const age = data ? Math.floor((now - data.fetched_at_ms) / 1000) : null;
-  const quotaAge = data?.quota_fetched_at_ms ? now - data.quota_fetched_at_ms : null;
-  const ledgerAge = data?.fetched_at_ms ? now - data.fetched_at_ms : null;
+  const quotaAge = data?.quota_fetched_at_ms ? now - data.quota_fetched_at_ms : null;  const ledgerAge = data?.fetched_at_ms ? now - data.fetched_at_ms : null;
   const quotaStale = data && (data.quotaError || quotaAge == null || quotaAge > 120_000);
   const ledgerStale = data && (ledgerAge == null || ledgerAge > 20_000);
   const currency = { code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError };
@@ -485,20 +539,23 @@ function App() {
       data-palette={preferences.theme}
       data-density={preferences.density}
       data-motion={reducedMotion ? 'reduced' : 'system'}
+      data-sidebar={preferences.sidebarHidden ? 'hidden' : 'shown'}
     >
-      <aside className="sidebar">
-        <div className="sidebar-title">
-          <span className="logo-block" />
-          <Text weight="medium">{t('title')}</Text>
-        </div>
-        <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="desktop" />
-        <div className="sidebar-foot">
-          <DataStatus lang={lang} data={data} refreshing={refreshing} age={age} quotaStale={quotaStale} ledgerStale={ledgerStale} quotaAge={quotaAge} ledgerAge={ledgerAge} />
+      <aside className="sidebar" inert={preferences.sidebarHidden || undefined}>
+        <div className="sidebar-content">
+          <div className="sidebar-title">
+            <span className="logo-block" />
+            <Text weight="medium">{t('title')}</Text>
+          </div>
+          <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="desktop" />
         </div>
       </aside>
 
       <main ref={mainRef} className="main" onScroll={(event) => { scrollByPage.current[page] = event.currentTarget.scrollTop; }}>
         <div className="main-toolbar">
+          <button type="button" className="toolbar-sidebar" aria-pressed={!preferences.sidebarHidden} title={preferences.sidebarHidden ? t('sidebar_show') : t('sidebar_hide')} aria-label={preferences.sidebarHidden ? t('sidebar_show') : t('sidebar_hide')} onClick={() => updatePreference('sidebarHidden', !preferences.sidebarHidden)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18" /></svg>
+          </button>
           <Text weight="medium" className="page-title">{t(`nav_${page}`)}</Text>
           <div className="main-toolbar-spacer" />
           {page === 'quota' && <div className="quota-mode-seg">
@@ -545,7 +602,12 @@ function App() {
           </Suspense>
         )}
       </main>
-      <PrimaryNav lang={lang} page={page} onNavigate={setPage} variant="mobile" />
+      <DockNav
+        lang={lang}
+        page={page}
+        onNavigate={setPage}
+        status={{ data, refreshing, quotaStale, ledgerStale, quotaAge, ledgerAge }}
+      />
       <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
       <AnimatePresence>{achOpen && <AchievementsModal key="achievements" items={achievements.items} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
       <AchievementToasts items={achievements.toasts} lang={lang} onDismiss={achievements.dismiss} />

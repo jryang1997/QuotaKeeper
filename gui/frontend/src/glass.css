@@ -1,0 +1,242 @@
+/* Liquid Glass 材质系统(2026-10):底部 Dock / 侧栏收放 / 弹层统一玻璃。
+   折射走 backdrop-filter url(#svg) —— 仅 Chromium(WebView2) 生效;
+   每处都先声明纯毛玻璃兜底,不认 url() 的引擎保留上一条声明。
+   材质分层遵守 Apple 规则:折射只给 Dock 一枚,轻玻璃不叠轻玻璃。 */
+
+:root {
+  --glass-blur: 18px;
+  --glass-saturate: 165%;
+  /* 浮层 tint:表面色掺透明,明暗靠 backdrop 提供 */
+  --glass-tint: color-mix(in srgb, var(--color-background-surface) 64%, transparent);
+  --glass-tint-strong: color-mix(in srgb, var(--color-background-surface) 84%, transparent);
+  /* 镜面 rim:亮边强度,暗色调低 */
+  --glass-highlight: light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.28));
+  --glass-highlight-soft: light-dark(rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.1));
+  --glass-shade: light-dark(rgba(28, 36, 50, 0.16), rgba(4, 8, 16, 0.32));
+  --glass-drop: light-dark(0 18px 44px rgba(16, 24, 40, 0.2), 0 18px 44px rgba(2, 6, 14, 0.46));
+  /* 侧栏宽:aside 与内层同源,收起动画裁切内层不重排 */
+  --sidebar-w: 218px;
+}
+@media (max-width: 1050px) { :root { --sidebar-w: 184px; } }
+@media (max-width: 900px) { :root { --sidebar-w: 152px; } }
+
+.app[data-palette='ink'] {
+  --glass-highlight: rgba(255, 255, 255, 0.22);
+  --glass-highlight-soft: rgba(255, 255, 255, 0.09);
+}
+.app[data-palette='sand'] {
+  --glass-highlight: rgba(255, 253, 246, 0.66);
+  --glass-highlight-soft: rgba(255, 253, 246, 0.28);
+}
+
+/* ---------- Dock:底部液态玻璃胶囊,全应用唯一折射位 ---------- */
+
+.svg-defs { position: absolute; width: 0; height: 0; }
+
+.dock {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 8px;
+  border-radius: 999px;
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  /* 折射在前、霜化在后:边缘先掰弯背景,再整体磨砂,弯折不被硬切 */
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-drop), inset 0 1px 1px var(--glass-highlight), inset 0 -1px 1px var(--glass-shade);
+}
+/* 镜面 rim:1px 渐变亮环,左上最亮(光打在材质上沿) */
+.dock::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(155deg, var(--glass-highlight), var(--glass-highlight-soft) 34%, transparent 55%, var(--glass-highlight-soft) 82%, var(--glass-highlight));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  pointer-events: none;
+}
+/* 微噪点:压住大面积磨砂的色带 */
+.dock::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+.dock-item {
+  position: relative;
+  isolation: isolate;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 76px;
+  min-height: 52px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 160ms var(--spring);
+}
+.dock-item:hover { color: var(--color-text-primary); }
+.dock-item:active .nav-icon { transform: scale(0.86); transition-duration: 60ms; }
+.dock-item-active { color: var(--color-text-primary); font-weight: 600; }
+.dock-item:focus-visible { outline: 2px solid var(--color-text-blue); outline-offset: 2px; }
+.dock-item .nav-icon { width: 20px; height: 20px; transition: transform 160ms var(--spring); }
+/* active 滑块:实底色块,不做第二层玻璃 */
+.dock-active-pill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-text-blue) 12%, var(--color-background-card));
+  border: 1px solid color-mix(in srgb, var(--color-text-blue) 20%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-highlight-soft), 0 2px 8px rgba(4, 10, 20, 0.12);
+}
+
+/* Dock 左端:数据状态一枚点 */
+.dock-status-wrap { position: relative; flex: 0 0 auto; }
+.status-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--color-success); }
+.status-dot.is-stale { background: var(--color-warning); }
+.dock-status-btn {
+  width: 36px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 140ms var(--spring);
+}
+.dock-status-btn:hover { background: var(--color-overlay-hover); }
+.dock-status-btn:focus-visible { outline: 2px solid var(--color-text-blue); outline-offset: 2px; }
+.dock-status-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 9px 3px 9px 1px;
+  background: linear-gradient(transparent, var(--color-border), transparent);
+}
+
+@media (max-width: 720px) {
+  .dock {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    justify-content: space-around;
+  }
+  .dock-item { flex: 1 1 0; min-width: 0; padding: 6px 4px; }
+  .dock-status-divider { display: none; }
+}
+
+/* 主区给悬浮 Dock 留出净空 */
+.main { padding-bottom: 96px; }
+@media (max-width: 720px) {
+  .main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---------- 侧栏收放:宽度弹簧收合,内容裁切不重排 ---------- */
+
+.sidebar {
+  width: var(--sidebar-w);
+  padding: 0;
+  overflow: hidden;
+  transition: width 480ms var(--spring), border-color 300ms var(--spring), visibility 0s;
+}
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  box-sizing: border-box;
+  padding: 26px 16px;
+  transition: opacity 220ms var(--spring) 60ms, transform 480ms var(--spring);
+}
+.app[data-sidebar='hidden'] .sidebar {
+  width: 0;
+  border-right-color: transparent;
+  visibility: hidden;
+  transition: width 480ms var(--spring), border-color 300ms var(--spring), visibility 0s linear 480ms;
+}
+.app[data-sidebar='hidden'] .sidebar-content {
+  opacity: 0;
+  transform: translateX(-16px);
+  transition-delay: 0s;
+}
+
+/* 工具栏左端:侧栏开关 */
+.toolbar-sidebar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--dashboard-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 140ms var(--spring), color 140ms var(--spring), transform 120ms ease-out;
+}
+.toolbar-sidebar:hover { border-color: var(--color-border-emphasized); color: var(--color-text-primary); }
+.toolbar-sidebar:active { transform: scale(0.96); }
+.toolbar-sidebar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.app[data-sidebar='hidden'] .toolbar-sidebar { color: var(--color-text-blue); border-color: color-mix(in srgb, var(--color-text-blue) 45%, var(--color-border)); }
+
+/* ---------- 弹层家族:统一玻璃令牌(厚度按体量分级) ---------- */
+
+.glass-panel {
+  background: var(--glass-tint-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+          backdrop-filter: blur(28px) saturate(170%);
+}
+.glass-panel-thick {
+  background: var(--glass-tint-strong);
+  -webkit-backdrop-filter: blur(34px) saturate(175%);
+          backdrop-filter: blur(34px) saturate(175%);
+}
+
+/* ---------- 降级与可及性 ---------- */
+
+@media (prefers-reduced-transparency: reduce) {
+  .dock {
+    background: var(--color-background-surface);
+    -webkit-backdrop-filter: none;
+            backdrop-filter: none;
+  }
+  .dock::before, .dock::after { display: none; }
+  .glass-panel, .glass-panel-thick {
+    background: var(--color-background-surface);
+    -webkit-backdrop-filter: none;
+            backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .dock { box-shadow: none; border: 1px solid var(--color-text-secondary); }
+}

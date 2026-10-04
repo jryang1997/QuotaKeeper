@@ -460,6 +460,8 @@ export const STR = {
   action_edit: ['编辑布局', 'Toggle edit layout'],
   action_overlay: ['显示 / 隐藏悬浮窗', 'Show or hide the overlay'],
   action_achievements: ['打开成就墙', 'Open achievements'],
+  sidebar_hide: ['隐藏侧边栏', 'Hide sidebar'],
+  sidebar_show: ['显示侧边栏', 'Show sidebar'],
 
   // ---- 数据状态条 ----
   freshness_title: ['数据状态', 'Data status'],
