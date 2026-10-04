@@ -116,30 +116,67 @@ fn load_position() -> Option<(i32, i32)> {
 }
 
 pub fn save_position(x: i32, y: i32) {
+    save_geometry(x, y, None);
+}
+
+/// 位置 + 尺寸一起记:胶囊形态下用户拖过边角,下次要按原样回来。
+pub fn save_geometry(x: i32, y: i32, size: Option<(u32, u32)>) {
     let Some(path) = position_path() else {
         return;
     };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(
-        &path,
-        serde_json::to_string(&serde_json::json!({ "x": x, "y": y })).unwrap_or_default(),
-    );
+    let mut value = serde_json::json!({ "x": x, "y": y });
+    if let Some((w, h)) = size {
+        value["w"] = serde_json::json!(w);
+        value["h"] = serde_json::json!(h);
+    }
+    let _ = std::fs::write(&path, serde_json::to_string(&value).unwrap_or_default());
 }
 
-/// 窗口圆角(DWMWCP_ROUND,约 8px):页面 CSS 半径与之对齐。
-/// 注:webview 的透明像素透出的是父窗表面而非桌面(WebView2 windowed 托管
-/// 不与 DWM 背板/Accent 合成,SystemBackdrop 与 Accent blur 在无边框窗上
-/// 实测都不渲染),所以"桌面真模糊"在此栈上不可达,玻璃质感全部由
-/// overlay.html 的自绘材质(烟熏玻璃:渐变 tint+rim+噪点)承担。
-fn apply_window_rounding(window: &Window) {
+fn load_size() -> Option<(u32, u32)> {
+    let text = std::fs::read_to_string(position_path()?).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let w = value["w"].as_u64()? as u32;
+    let h = value["h"].as_u64()? as u32;
+    (MIN_SIZE.0 <= w && w <= MAX_SIZE.0 && MIN_SIZE.1 <= h && h <= MAX_SIZE.1).then_some((w, h))
+}
+
+/// 胶囊默认态(逻辑像素):小小一颗,环居中,信息收成一行。
+pub const DEFAULT_SIZE: (f64, f64) = (188.0, 96.0);
+/// 缩放下限:还能握住、再小就看不见了。
+pub const MIN_SIZE: (u32, u32) = (96, 64);
+/// 放大到当小组件用。
+pub const MAX_SIZE: (u32, u32) = (720, 560);
+
+/// 系统圆角 + 排除屏幕捕获(抓桌面像素的前提)。
+/// 玻璃质感说明:webview 的透明像素透出的是父窗表面而非桌面,DWM 背板在无边框
+/// 窗上也不渲染,所以"毛玻璃"由 backdrop.rs 抓来的真实桌面像素在页面内做
+/// backdrop-filter ——模糊和透视都发生在 CSS 里,不是自绘假象。
+fn prepare_window(window: &Window) -> bool {
     let hwnd = window.hwnd() as windows_sys::Win32::Foundation::HWND;
     let corner = DWMWCP_ROUND as u32;
     let corner_raw = corner.to_ne_bytes();
     unsafe {
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, corner_raw.as_ptr().cast(), 4)
     };
+    crate::backdrop::exclude_from_capture(hwnd)
+}
+
+/// 抓当前窗口矩形的桌面像素并推给页面。webview 不是 Send,只能主线程调用;
+/// 抓取本身很快(胶囊尺寸下 1~3ms),静止 500ms 一帧、拖动 120ms 跟手。
+pub fn push_backdrop(window: &Window, view: &wry::WebView, seq: u64) {
+    let Ok(position) = window.outer_position() else {
+        return;
+    };
+    let size = window.inner_size();
+    let Some(uri) =
+        crate::backdrop::capture_region_data_uri(position.x, position.y, size.width, size.height)
+    else {
+        return;
+    };
+    let _ = view.evaluate_script(&format!("window.__onBackdrop?.({seq}, {uri:?})"));
 }
 
 /// 无边框置顶小窗;返回窗口与配套 webview,IPC 经 proxy 回主循环。
@@ -147,11 +184,14 @@ pub(crate) fn create(
     target: &EventLoopWindowTarget<UserEvent>,
     proxy: EventLoopProxy<UserEvent>,
 ) -> anyhow::Result<(Window, wry::WebView)> {
+    let saved = load_size();
     let mut builder = WindowBuilder::new()
         .with_title("Token Monitor 悬浮窗")
-        .with_inner_size(LogicalSize::new(232.0, 268.0))
+        .with_inner_size(LogicalSize::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1))
+        .with_min_inner_size(LogicalSize::new(MIN_SIZE.0 as f64, MIN_SIZE.1 as f64))
+        .with_max_inner_size(LogicalSize::new(MAX_SIZE.0 as f64, MAX_SIZE.1 as f64))
         .with_decorations(false)
-        .with_resizable(false)
+        .with_resizable(true)
         .with_always_on_top(true)
         .with_skip_taskbar(true)
         .with_visible(false);
@@ -161,14 +201,19 @@ pub(crate) fn create(
         // 默认落在主屏右下角,避开托盘与主窗口
         let bounds = monitor.size();
         let scale = monitor.scale_factor();
-        let (w, h) = (232.0 * scale, 268.0 * scale);
+        let (w, h) = (DEFAULT_SIZE.0 * scale, DEFAULT_SIZE.1 * scale);
         builder = builder.with_position(PhysicalPosition::new(
             bounds.width as i32 - w as i32 - 24,
             bounds.height as i32 - h as i32 - 72,
         ));
     }
     let window = builder.build(target)?;
-    apply_window_rounding(&window);
+    let backdrop_ok = prepare_window(&window);
+if let Some((w, h)) = saved {
+        // 物理像素回写(tao 用逻辑尺寸建窗,按当前 scale 折算)
+        let scale = window.scale_factor().max(1.0);
+        window.set_inner_size(LogicalSize::new(w as f64 / scale, h as f64 / scale));
+    }
     let webview = WebViewBuilder::new()
         .with_url("app://local/overlay.html")
         .with_transparent(true)
@@ -193,5 +238,6 @@ pub(crate) fn create(
             }
         })
         .build(&window)?;
+    let _ = webview.evaluate_script(&format!("window.__backdropSupported = {backdrop_ok}"));
     Ok((window, webview))
 }

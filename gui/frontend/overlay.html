@@ -9,150 +9,146 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font-family: "Sarasa Term SC Nerd", "Sarasa Mono SC", "Cascadia Mono", Consolas, monospace; }
-  /* 液态玻璃卡(自绘烟熏玻璃):webview 透明像素透出的是父窗表面而非桌面,
-     所以质感全部在页面里 —— 深色渐变 tint + 左上玻璃内透光 + rim 亮环 + 微噪点;
-     半径 8px 对齐 DWMWCP_ROUND(overlay.rs),角落不露月牙。 */
-  .card {
+
+  /* 胶囊玻璃:backdrop 层是被 Rust 抓来的真实桌面像素(backdrop.rs),
+     backdrop-filter 在这里做真模糊 —— 不是自绘假象。系统排除捕获保证
+     背景图里不含窗口自己。 */
+  /* 缩放手柄让位:tao 的 WM_NCHITTEST 按系统 SM_CXFRAME 宽度在窗口边缘生成,
+     这几像素留白不铺玻璃,否则 webview 吃掉边缘命中 */
+  .glass {
     position: relative; isolation: isolate;
-    display: flex; flex-direction: column; width: 100%; height: 100%;
-    border: 1px solid #ffffff1f; border-radius: 8px;
-    background:
-      radial-gradient(130% 70% at 16% 0%, rgba(79, 124, 240, 0.17), transparent 52%),
-      linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.045) 50%, transparent 60%),
-      linear-gradient(165deg, #1c2537f2, #131a29ec 42%, #0b1018f5);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -22px 34px -24px rgba(2, 6, 14, 0.55);
-    color: #e8ecf4; overflow: hidden;
+    display: flex; align-items: center;
+    width: calc(100% - 8px); height: calc(100% - 8px);
+    margin: 4px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    color: #eef2fa;
+    overflow: hidden;
   }
-  /* 镜面 rim:左上最亮,光打在材质上沿 */
-  .card::before {
-    content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px;
-    background: linear-gradient(155deg, #ffffff59, #ffffff12 34%, transparent 55%, #ffffff12 82%, #ffffff40);
+  .glass::before {
+    content: ''; position: absolute; inset: 0; z-index: 0;
+    border-radius: inherit;
+    background-color: rgba(10, 13, 20, 0.52);
+    /* --backdrop 由 Rust 推来的真实桌面像素(已在 Rust 端做过盒式模糊);
+       这层自己不再 backdrop-filter —— 对伪元素做模糊只会糊掉它自己。 */
+    background-image: var(--backdrop, none);
+    background-size: calc(100% + 8px) calc(100% + 8px);
+    background-position: center;
+  }
+  /* 抓不到桌面像素时(老系统/无权限):退化为自绘烟熏玻璃 */
+  body.no-backdrop .glass::before {
+    background: linear-gradient(165deg, #1c2537f2, #131a29ec 42%, #0b1018f5);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  /* 镜面 rim:左上最亮 */
+  .glass::after {
+    content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; padding: 1px;
+    background: linear-gradient(155deg, #ffffff6b, #ffffff1a 32%, transparent 55%, #ffffff14 80%, #ffffff47);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
             mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask-composite: exclude;
     pointer-events: none;
   }
-  /* 微噪点压色带 */
-  .card::after {
-    content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-size: 160px 160px; opacity: 0.045; mix-blend-mode: overlay; pointer-events: none;
+  .inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; }
+
+  /* 环:默认态收成一枚,环外百分比 */
+  .gauge { position: relative; flex: 0 0 auto; width: 58px; height: 58px; display: grid; place-items: center; }
+  .gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge circle { fill: none; stroke-width: 6; stroke-linecap: round; }
+  .gauge .track { stroke: rgba(255, 255, 255, 0.16); }
+  .gauge b { position: absolute; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff;
+    text-shadow: 0 1px 4px rgba(4, 8, 16, 0.95), 0 0 12px rgba(4, 8, 16, 0.7); }
+
+  /* 文字层要独立于背景图保持可读:玻璃再透,字也要看得清 */
+.copy { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto;
+    text-shadow: 0 1px 3px rgba(4, 8, 16, 0.9), 0 0 10px rgba(4, 8, 16, 0.55); }
+  .copy .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .copy .dot { width: 7px; height: 7px; flex: none; border-radius: 2px; background: #4f7cf0; }
+  .copy strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+  .copy .plan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(238, 242, 250, 0.7); font-size: 9px; text-shadow: 0 1px 3px rgba(2, 6, 14, 0.5); }
+  .copy .reset { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(238, 242, 250, 0.86); font-size: 10px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(2, 6, 14, 0.55); }
+  .copy strong { text-shadow: 0 1px 4px rgba(2, 6, 14, 0.6); }
+  .empty { position: relative; z-index: 2; width: 100%; text-align: center; color: rgba(238, 242, 250, 0.6); font-size: 11px; }
+
+  .nav { position: relative; z-index: 2; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+  .nav button {
+    width: 22px; height: 30px; border: 1px solid transparent; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07); color: rgba(238, 242, 250, 0.86);
+    font: inherit; font-size: 10px; line-height: 1; cursor: pointer;
+    transition: background 120ms ease-out, transform 90ms ease-out;
   }
-  header {
-    display: flex; align-items: center; gap: 7px; padding: 9px 11px 5px;
-    font-size: 11px; letter-spacing: 0.02em; cursor: grab;
+  .nav button:hover { background: rgba(255, 255, 255, 0.16); }
+  .nav button:active { transform: scale(0.9); }
+  .nav .close { width: 22px; height: 22px; font-size: 13px; }
+
+  /* 放大后:环与信息铺开,胶囊过渡成小面板 */
+  body[data-size='wide'] .glass { padding: 16px 18px; border-radius: 26px; align-items: stretch; }
+  body[data-size='wide'] .gauge { width: 132px; height: 132px; }
+  body[data-size='wide'] .gauge circle { stroke-width: 9; }
+  body[data-size='wide'] .gauge b { font-size: 26px; }
+  body[data-size='wide'] .copy strong { font-size: 15px; }
+  body[data-size='wide'] .copy .plan { font-size: 10px; }
+  body[data-size='wide'] .copy .reset { font-size: 12px; }
+  body[data-size='wide'] .nav { flex-direction: column; justify-content: center; }
+  body[data-size='wide'] .nav button { width: 34px; height: 34px; font-size: 12px; }
+  body[data-size='wide'] .nav .close { width: 34px; height: 34px; font-size: 16px; }
+
+  /* 拖边角缩放的手感区(右下角) */
+  .grip {
+    position: absolute; z-index: 3; right: 2px; bottom: 2px;
+    width: 18px; height: 18px; cursor: nwse-resize;
   }
-  header .dot { width: 8px; height: 8px; border-radius: 3px; background: #4f7cf0; flex: none; }
-  header .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  header .plan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a94ab; font-size: 9px; }
-  header button {
-    flex: none; margin-left: auto; width: 20px; height: 20px; border: 0; border-radius: 6px;
-    background: transparent; color: #8a94ab; font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
-  }
-  header button:hover { background: #ffffff1c; color: #e8ecf4; }
-  .rings { position: relative; flex: 1; display: grid; place-items: center; min-height: 0; }
-  .rings svg { width: 150px; height: 150px; }
-  .center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
-  .center b { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .center i { display: block; margin-top: 2px; font-size: 8px; font-style: normal; color: #8a94ab; letter-spacing: 0.14em; }
-  .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #8a94ab; font-size: 11px; }
-  footer { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; gap: 6px; padding: 6px 11px 10px; }
-  footer .step { text-align: center; color: #8a94ab; font-size: 9px; font-variant-numeric: tabular-nums; letter-spacing: 0.1em; }
-  footer .reset { text-align: center; color: #b7c0d4; font-size: 9px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  footer button {
-    width: 34px; height: 26px; border: 1px solid #ffffff14; border-radius: 9px; background: #ffffff10;
-    color: #e8ecf4; font-size: 11px; cursor: pointer;
-  }
-  footer button:hover { background: #ffffff22; }
-  footer button:active { transform: translateY(1px); }
 </style>
 </head>
 <body>
-<div class="card">
-  <header id="drag">
-    <span class="dot" aria-hidden="true"></span>
-    <span class="title" id="title">Token Monitor</span>
-    <span class="plan" id="plan"></span>
-    <button id="close" title="关闭悬浮窗">×</button>
-  </header>
-  <div class="rings" id="rings"></div>
-  <footer>
-    <button id="prev" title="上一个套餐">▲</button>
-    <div>
-      <div class="step" id="step"></div>
-      <div class="reset" id="reset"></div>
+<div class="glass">
+  <div class="inner" id="inner">
+    <div class="gauge" id="gauge"></div>
+    <div class="copy" id="copy">
+      <span class="title"><span class="dot" aria-hidden="true"></span><strong id="title">Token Monitor</strong></span>
+      <span class="plan" id="plan"></span>
+      <span class="reset" id="reset"></span>
     </div>
-    <button id="next" title="下一个套餐">▼</button>
-  </footer>
+    <div class="nav">
+      <button id="prev" title="上一个套餐">▲</button>
+      <button id="next" title="下一个套餐">▼</button>
+      <button id="close" class="close" title="关闭悬浮窗">×</button>
+    </div>
+  </div>
+  <div class="empty" id="empty" hidden>暂无套餐数据</div>
+  <div class="grip" id="grip"></div>
 </div>
 <script>
-  const SEGMENTS = 24;
   const COLORS = ['#1cb07a', '#f5ae34', '#e04a46'];
-  const LANE = [
-    { r: 66, width: 7 },
-    { r: 53, width: 7 },
-    { r: 40, width: 7 },
-  ];
   const post = (message) => window.ipc?.postMessage?.(JSON.stringify(message));
 
-  function segmentPath(cx, cy, radius, index) {
-    // 每段 15°,段间留 2° 缝隙,起点正上方
-    const gap = 2;
-    const start = (index * 360) / SEGMENTS - 90 + gap / 2;
-    const end = ((index + 1) * 360) / SEGMENTS - 90 - gap / 2;
-    const rad = (deg) => (deg * Math.PI) / 180;
-    const x1 = cx + radius * Math.cos(rad(start));
-    const y1 = cy + radius * Math.sin(rad(start));
-    const x2 = cx + radius * Math.cos(rad(end));
-    const y2 = cy + radius * Math.sin(rad(end));
-    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+  // 布局档位:按窗口宽度切胶囊/宽版,跟手
+  function applySize() {
+    document.body.dataset.size = window.innerWidth >= 300 ? 'wide' : 'capsule';
   }
+  window.addEventListener('resize', applySize);
+  applySize();
 
-  function render(data) {
-    document.getElementById('title').textContent = data.total ? data.title : 'Token Monitor';
-    const plan = data.planType && data.planType !== data.title ? data.planType : '';
-    document.getElementById('plan').textContent = plan;
-    document.getElementById('step').textContent = data.total ? `${data.index + 1}/${data.total}` : '';
-    const rings = document.getElementById('rings');
-    rings.querySelectorAll('svg,.empty,.center').forEach((node) => node.remove());
-    if (!data.total || !data.rings.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = data.total ? '该套餐暂无周期配额' : '暂无套餐数据';
-      rings.appendChild(empty);
-      document.getElementById('reset').textContent = '';
+  // Rust 每 500ms 推一帧真实桌面像素(拖动时 60ms 跟手)。
+  // 抓帧在后台线程,到达顺序可能乱,只认帧号更大的,旧帧直接丢。
+  window.__onBackdrop = (seq, uri) => {
+    if (!uri) return;
+    const layer = document.querySelector('.glass');
+    if (seq !== undefined && Number(layer.dataset.seq || 0) > seq) return;
+    layer.dataset.seq = String(seq ?? 0);
+    layer.style.setProperty('--backdrop', `url("${uri}")`);
+    document.body.classList.remove('no-backdrop');
+  };
+  // overlay.rs 注入 __backdropSupported;抓不到像素时保持自绘玻璃
+  (function watch(tries) {
+    if (window.__backdropSupported !== undefined) {
+      if (!window.__backdropSupported) document.body.classList.add('no-backdrop');
       return;
     }
-    const cx = 75;
-    const cy = 75;
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    let tightest = null;
-    data.rings.slice(0, 3).forEach((ring, lane) => {
-      const lit = Math.round((Math.min(ring.usedPct, 100) / 100) * SEGMENTS);
-      const color = COLORS[Math.min(ring.level, 2)];
-      for (let i = 0; i < SEGMENTS; i++) {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', segmentPath(cx, cy, LANE[lane].r, i));
-        path.setAttribute('stroke', i < lit ? color : '#ffffff14');
-        path.setAttribute('stroke-width', LANE[lane].width);
-        path.setAttribute('stroke-linecap', 'round');
-        path.setAttribute('fill', 'none');
-        svg.appendChild(path);
-      }
-      if (!tightest || ring.usedPct > tightest.usedPct) tightest = { ...ring, lane };
-    });
-    rings.appendChild(svg);
-    const center = document.createElement('div');
-    center.className = 'center';
-    center.innerHTML = `<div><b style="color:${COLORS[Math.min(tightest.level, 2)]}">${Math.round(tightest.usedPct)}%</b><i>${tightest.label}</i></div>`;
-    rings.appendChild(center);
-    // 只显示最紧一环的重置时间,避免一行放不下
-    const tight = data.rings.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
-    document.getElementById('reset').textContent = tight.resetsInMs != null
-      ? `${tight.label} ${formatResets(tight.resetsInMs)} 后重置`
-      : '';
-  }
+    if (tries > 0) setTimeout(() => watch(tries - 1), 100);
+    else document.body.classList.add('no-backdrop');
+  })(10);
 
   function formatResets(ms) {
     const minutes = Math.max(1, Math.round(ms / 60000));
@@ -162,12 +158,54 @@
     return `${Math.floor(hours / 24)}d${hours % 24 ? `${hours % 24}h` : ''}`;
   }
 
+  function render(data) {
+    const gauge = document.getElementById('gauge');
+    const copy = document.getElementById('copy');
+    const empty = document.getElementById('empty');
+    const inner = document.getElementById('inner');
+    gauge.querySelectorAll('svg,b').forEach((node) => node.remove());
+    const has = data.total && data.rings.length;
+    empty.hidden = !!has;
+    if (!has) {
+      gauge.hidden = true;
+      copy.querySelector('.plan').textContent = '';
+      copy.querySelector('.reset').textContent = '';
+      document.getElementById('title').textContent = data.total ? 'Token Monitor' : '暂无数据';
+      return;
+    }
+    gauge.hidden = false;
+    // 只画最紧的一环:胶囊里一枚环读得清,三环挤在一起反而糊
+    const tightest = data.rings.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+    const color = COLORS[Math.min(tightest.level, 2)];
+    const R = 24;
+    const CIRC = 2 * Math.PI * R;
+    const pct = Math.min(Math.max(tightest.usedPct, 0), 100);
+    gauge.innerHTML =
+      `<svg viewBox="0 0 58 58" aria-hidden="true">` +
+      `<circle class="track" cx="29" cy="29" r="${R}"></circle>` +
+      `<circle cx="29" cy="29" r="${R}" stroke="${color}" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC * (1 - pct / 100)}"></circle>` +
+      `</svg><b style="color:${color}">${Math.round(pct)}</b>`;
+
+    document.getElementById('title').textContent = data.title;
+    const plan = data.planType && data.planType !== data.title ? data.planType : '';
+    copy.querySelector('.plan').textContent = plan ? `${plan} · ${tightest.label}` : tightest.label;
+    copy.querySelector('.reset').textContent = tightest.resetsInMs != null
+      ? `${formatResets(tightest.resetsInMs)} 后重置`
+      : '';
+    document.querySelector('.dot').style.background = color;
+  }
+
   window.__onOverlayData = render;
   document.getElementById('close').addEventListener('pointerdown', (event) => event.stopPropagation());
   document.getElementById('close').addEventListener('click', () => post({ cmd: 'overlayHide' }));
-  document.getElementById('drag').addEventListener('pointerdown', () => post({ cmd: 'overlayDrag' }));
+  document.getElementById('drag').addEventListener?.('pointerdown', () => post({ cmd: 'overlayDrag' }));
+  // 胶囊本体空白处拖动
+  document.querySelector('.copy').addEventListener('pointerdown', () => post({ cmd: 'overlayDrag' }));
+  document.getElementById('gauge').addEventListener('pointerdown', () => post({ cmd: 'overlayDrag' }));
   document.getElementById('prev').addEventListener('click', () => post({ cmd: 'overlaySwitch', direction: -1 }));
   document.getElementById('next').addEventListener('click', () => post({ cmd: 'overlaySwitch', direction: 1 }));
+  // 边角提示:实际 resize 由 Rust 的 WM_NCHITTEST 处理(无边框窗系统默认不给手柄)
+  document.getElementById('grip').addEventListener('pointerdown', (event) => event.stopPropagation());
 </script>
 </body>
 </html>

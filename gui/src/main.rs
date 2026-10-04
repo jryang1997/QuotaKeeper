@@ -13,6 +13,7 @@ pub mod desktop;
 pub mod export;
 pub mod ipc;
 pub mod lan;
+pub mod backdrop;
 pub mod overlay;
 pub mod refresh;
 pub mod single_instance;
@@ -383,6 +384,9 @@ fn main() -> anyhow::Result<()> {
     refresh::spawn_ledger(tx.clone());
     let mut next_ledger_refresh = std::time::Instant::now() + refresh::LEDGER_PERIOD;
     let mut next_quota_refresh = std::time::Instant::now() + refresh::QUOTA_PERIOD;
+    let mut next_backdrop = std::time::Instant::now();
+    let mut backdrop_seq = 0u64;
+    let mut overlay_dirty = true;
     let mut latest_snapshot = fallback_snapshot();
     let mut quota_error = None;
     let mut alert_tracker = tui_token_monitor::ui::notify::AlertTracker::default();
@@ -584,6 +588,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             Event::UserEvent(UserEvent::OverlaySwitch(direction)) => {
+                overlay_dirty = true;
                 let total = overlay::live_len(&latest_snapshot);
                 if total > 0 {
                     overlay_index = ((overlay_index as i64 + direction as i64).rem_euclid(total as i64)) as usize;
@@ -673,6 +678,19 @@ fn main() -> anyhow::Result<()> {
                 if refresh::is_due(next_quota_refresh) {
                     refresh::spawn_quota(tx.clone());
                     next_quota_refresh = now + refresh::QUOTA_PERIOD;
+                }
+                // 悬浮窗毛玻璃:静止时 500ms 一帧,刚动过就按 60ms 快速跟上,
+                // 否则拖动时背景图会明显滞后于窗口位置
+                if overlay.as_ref().is_some_and(|(window, _)| window.is_visible())
+                    && (refresh::is_due(next_backdrop) || overlay_dirty)
+                {
+                    next_backdrop = now
+                        + std::time::Duration::from_millis(if overlay_dirty { 120 } else { 500 });
+                    overlay_dirty = false;
+                    backdrop_seq += 1;
+                    if let Some((window, view)) = overlay.as_ref() {
+                        overlay::push_backdrop(window, view, backdrop_seq);
+                    }
                 }
             }
             Event::MainEventsCleared => {
@@ -807,8 +825,10 @@ fn main() -> anyhow::Result<()> {
                 {
                     overlay::push(view, &latest_snapshot, overlay_index);
                 }
-                *control_flow =
-                    ControlFlow::WaitUntil(std::cmp::min(next_ledger_refresh, next_quota_refresh));
+                *control_flow = ControlFlow::WaitUntil(std::cmp::min(
+                    std::cmp::min(next_ledger_refresh, next_quota_refresh),
+                    next_backdrop,
+                ));
             }
             Event::WindowEvent {
                 window_id,
@@ -816,11 +836,32 @@ fn main() -> anyhow::Result<()> {
                 ..
             } => {
                 // 悬浮窗拖动落点节流落盘
-                if overlay.as_ref().is_some_and(|(window, _)| window.id() == window_id)
-                    && overlay_last_save.elapsed() >= std::time::Duration::from_secs(1)
+                if overlay.as_ref().is_some_and(|(window, _)| window.id() == window_id) {
+                    overlay_dirty = true;
+                    if overlay_last_save.elapsed() >= std::time::Duration::from_secs(1) {
+                        overlay_last_save = std::time::Instant::now();
+                        overlay::save_position(position.x, position.y);
+                    }
+                }
+            }
+            // 悬浮窗缩放:尺寸与几何一起记,背景立即重抓(尺寸变了旧图不对)
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Resized(_),
+                ..
+            } => {
+                if let Some((window, _)) = overlay.as_ref()
+                    && window.id() == window_id
                 {
-                    overlay_last_save = std::time::Instant::now();
-                    overlay::save_position(position.x, position.y);
+                    overlay_dirty = true;
+                    let size = window.inner_size();
+                    if let Ok(position) = window.outer_position() {
+                        overlay::save_geometry(
+                            position.x,
+                            position.y,
+                            Some((size.width, size.height)),
+                        );
+                    }
                 }
             }
             Event::WindowEvent {
