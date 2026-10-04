@@ -4,7 +4,9 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import ModuleBoard from './ModuleBoard.jsx';
 import { STR, fmtInt, fmtTokens, fmtCost } from './ui-data.js';
 import { sendCommand } from './gui-bridge.js';
-import { bumpFunCounter } from './fun-counters.js';
+import { bumpFunCounter, readFunCounters } from './fun-counters.js';
+import { AchievementGlyph } from './Achievements.jsx';
+import { evaluateAchievements, readAchievementState, unlockedNonMetaCount, TIER_ORDER } from './achievements.js';
 import { snapdom } from '@zumer/snapdom';
 import qrcode from 'qrcode-generator';
 
@@ -115,6 +117,18 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus, lan
     return { L, hourly, models, agents, days, peakHour };
   }, [ledger]);
 
+  // 勋章行:稀有度优先(档位高在前),同级取最近解锁,最多 3 枚;与壳层成就同一套评估。
+  const badges = useMemo(() => {
+    if (!ledger) return [];
+    const state = readAchievementState();
+    const extras = { monthlyValue, counters: readFunCounters(), unlockedCount: unlockedNonMetaCount(state) };
+    const tierRank = (tier) => TIER_ORDER.indexOf(tier);
+    return evaluateAchievements(ledger, extras)
+      .filter((item) => item.unlocked)
+      .sort((a, b) => tierRank(b.tier) - tierRank(a.tier) || (state.unlocked[b.id] || 0) - (state.unlocked[a.id] || 0))
+      .slice(0, 3);
+  }, [ledger, monthlyValue]);
+
   if (!data) return null;
   const { L, hourly, models, agents, days, peakHour } = data;
   const hourMax = Math.max(1, ...hourly);
@@ -222,12 +236,29 @@ export default function SharePage({ ledger, monthlyValue, lang, shareStatus, lan
         </div>
       ),
     },
+    {
+      id: 'achievements', title: t('share_mod_achievements'), w: 12, h: 2, minW: 6, minH: 2,
+      content: (
+        <div className="share-block">
+          <span className="share-eyebrow">// {zh ? '成就' : 'ACHIEVEMENTS'}</span>
+          <div className="share-ach-row">
+            {badges.map((item) => (
+              <span className={`share-ach is-${item.tier}`} key={item.id}>
+                <span className="share-ach-glyph"><AchievementGlyph glyph={item.glyph} /></span>
+                <b>{item.title[lang]}</b>
+              </span>
+            ))}
+          </div>
+        </div>
+      ),
+    },
   ];
   const withData = catalog.filter((module) => {
     if (module.id === 'hero') return hasToday;
     if (module.id === 'models') return models.length > 0;
     if (module.id === 'agents') return agents.length > 0;
     if (module.id === 'days') return days.length > 1;
+    if (module.id === 'achievements') return badges.length > 0;
     return true;
   });
   let row = 0;

@@ -1125,6 +1125,29 @@ html[data-theme='dark'] { color-scheme: dark; }
 .share-day-bars i { flex: 1; min-height: 3px; border-radius: 3px 3px 0 0; background: #5b7cfa; opacity: 0.8; }
 .share-summary { display: flex; flex-wrap: wrap; gap: 8px; align-content: center; flex: 1; }
 .share-summary span { padding: 7px 13px; border-radius: 999px; border: 1px solid currentColor; font-size: 14px; opacity: 0.85; }
+/* 勋章行:legend/platinum 的主题混合色跨画布色板对比度不稳,按色板钉死 */
+.share-ach-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1; align-items: stretch; }
+.share-ach { --st: currentColor; display: inline-flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--st) 13%, transparent); }
+.share-ach.is-bronze { --st: var(--tier-bronze); }
+.share-ach.is-silver { --st: var(--tier-silver); }
+.share-ach.is-gold { --st: var(--tier-gold); }
+.is-deep .share-ach.is-legend { --st: #b6b5ff; }
+.is-deep .share-ach.is-platinum { --st: #9fe9f7; }
+.is-paper .share-ach.is-legend { --st: #6b53d6; }
+.is-paper .share-ach.is-platinum { --st: #0e7f9b; }
+.share-ach-glyph { flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; color: var(--st); background: color-mix(in srgb, var(--st) 18%, transparent); }
+.share-ach-glyph .ach-glyph { width: 18px; height: 18px; }
+.share-ach b { font-size: 14px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-ach.is-legend .share-ach-glyph {
+  background:
+    radial-gradient(circle, transparent 0 40%, color-mix(in srgb, var(--st) 32%, transparent) 40% 46%, transparent 46% 64%, color-mix(in srgb, var(--st) 24%, transparent) 64% 70%, transparent 70%),
+    color-mix(in srgb, var(--st) 14%, transparent);
+}
+.share-ach.is-platinum .share-ach-glyph {
+  background:
+    radial-gradient(circle, transparent 0 30%, color-mix(in srgb, var(--st) 28%, transparent) 30% 35%, transparent 35% 50%, color-mix(in srgb, var(--st) 26%, transparent) 50% 55%, transparent 55% 66%, color-mix(in srgb, var(--st) 22%, transparent) 66% 71%, transparent 71%),
+    color-mix(in srgb, var(--st) 14%, transparent);
+}
 .lan-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .lan-status { display: flex; align-items: center; gap: 8px; max-width: 100%; }
 .lan-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-secondary); flex: none; }

@@ -288,6 +288,7 @@ export const STR = {
   share_mod_days: ['近 14 天', 'Last 14 days'],
   share_mod_value: ['本月价值', 'Monthly value'],
   share_mod_summary: ['今日之最', 'Highlights'],
+  share_mod_achievements: ['成就', 'Achievements'],
   lan_title: ['局域网看板', 'LAN dashboard'],
   lan_hint: ['手机/平板浏览器访问，Standby 式只读看板', 'Read-only Standby-style board for phones and tablets'],
   lan_on: ['开启', 'On'],
