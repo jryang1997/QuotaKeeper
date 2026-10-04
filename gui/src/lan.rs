@@ -71,7 +71,7 @@ pub struct LanRing {
     pub level: u8,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 pub struct LanPeriod {
     pub tokens: i64,
@@ -87,7 +87,10 @@ pub struct LanSummary {
     /// 24 小时桶(本地时),今日视图的时段柱
     pub hourly: Vec<i64>,
     pub today: LanPeriod,
-    pub week: LanPeriod,
+    /// 近 7 天(today-6 → today),与主窗用量页「近 7 天」同口径
+    pub d7: LanPeriod,
+    /// 近 30 天(today-29 → today),与主窗用量页「近 30 天」同口径
+    pub d30: LanPeriod,
     pub month: LanPeriod,
     pub burn_rate: Option<f64>,
     pub monthly_api_value_usd: Option<f64>,
@@ -103,22 +106,33 @@ fn period_of(agg: &tui_token_monitor::ledger::Agg) -> LanPeriod {
     }
 }
 
+/// 末尾 N 天聚合(daily_totals 旧→新、空日也保留,故 rev().take(N) 即「含今天的近 N 天」)。
+fn period_of_last_days(days: &[tui_token_monitor::ledger::DailyTotal], count: usize) -> LanPeriod {
+    let mut agg = tui_token_monitor::ledger::Agg::default();
+    for day in days.iter().rev().take(count) {
+        agg.merge(&day.agg);
+    }
+    period_of(&agg)
+}
+
 pub fn summary() -> LanSummary {
     let state = STATE.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let empty_hourly = Vec::new();
-    let (hourly, today, week, month) = if let Some(ledger) = state.ledger.as_ref() {
+    let zero = LanPeriod { tokens: 0, messages: 0, cost: 0.0 };
+    let (hourly, today, d7, d30, month) = if let Some(ledger) = state.ledger.as_ref() {
         (
             ledger.hourly.to_vec(),
             period_of(&ledger.today),
-            period_of(&ledger.week),
+            period_of_last_days(&ledger.daily_totals, 7),
+            period_of_last_days(&ledger.daily_totals, 30),
             period_of(&ledger.month),
         )
     } else {
         (
-            empty_hourly,
-            LanPeriod { tokens: 0, messages: 0, cost: 0.0 },
-            LanPeriod { tokens: 0, messages: 0, cost: 0.0 },
-            LanPeriod { tokens: 0, messages: 0, cost: 0.0 },
+            Vec::new(),
+            zero,
+            zero,
+            zero,
+            zero,
         )
     };
     let mut rings = Vec::new();
@@ -146,7 +160,8 @@ pub fn summary() -> LanSummary {
         generated_at_ms: state.generated_at_ms,
         hourly,
         today,
-        week,
+        d7,
+        d30,
         month,
         burn_rate: state.ledger.as_ref().and_then(|ledger| ledger.burn_rate),
         monthly_api_value_usd: state.monthly_api_value_usd,
@@ -376,7 +391,29 @@ mod tests {
         assert!(summary.ok);
         assert!(summary.rings.is_empty());
         assert_eq!(summary.today.tokens, 0);
+        assert_eq!(summary.d7.tokens, 0);
+        assert_eq!(summary.d30.tokens, 0);
         assert!(summary.hourly.is_empty());
+    }
+
+    #[test]
+    fn period_of_last_days_sums_recent_window() {
+        use tui_token_monitor::ledger::{Agg, DailyTotal};
+        let days: Vec<DailyTotal> = (0..10)
+            .map(|i| DailyTotal {
+                date: format!("2026-10-{i:02}"),
+                tokens: (i + 1) * 100,
+                cost: (i + 1) as f64,
+                messages: 1,
+                agg: Agg { input: (i + 1) * 100, messages: 1, cost_reported: (i + 1) as f64, ..Agg::default() },
+            })
+            .collect();
+        // 末尾 7 天:400..1000 → 4900
+        assert_eq!(period_of_last_days(&days, 7).tokens, 4_900);
+        assert_eq!(period_of_last_days(&days, 7).messages, 7);
+        assert_eq!(period_of_last_days(&days, 7).cost, 49.0);
+        // 30 天窗口超出范围 = 全部
+        assert_eq!(period_of_last_days(&days, 30).tokens, 5_500);
     }
 
     #[test]

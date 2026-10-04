@@ -87,6 +87,8 @@
     transition: color 0.25s;
   }
   .seg button.on { color: #000; }
+  /* 四段分段:收窄内距保证 375px 宽度不换行 */
+  .seg.compact button { padding: 6px 11px; font-size: 12px; }
   /* ── 环卡网格 ── */
   .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
   .ring-card { display: flex; align-items: center; gap: 16px; }
@@ -183,10 +185,11 @@
       </div>
     </section>
     <section class="view" id="viewUsage">
-      <div class="seg" id="seg" role="tablist">
+      <div class="seg compact" id="seg" role="tablist">
         <span class="thumb"></span>
         <button type="button" class="on" data-period="today">今日</button>
-        <button type="button" data-period="week">本周</button>
+        <button type="button" data-period="d7">近 7 天</button>
+        <button type="button" data-period="d30">近 30 天</button>
         <button type="button" data-period="month">本月</button>
       </div>
       <div class="card">
@@ -202,22 +205,20 @@
         <h3>当前燃烧率</h3>
         <div class="big" id="burn" style="font-size:clamp(30px,8vw,46px)">—</div>
       </div>
-    </section>
-    <section class="view" id="viewHours">
+      <div class="card" id="valueCard" hidden>
+        <h3>本月 API 等价价值</h3>
+        <div class="big" id="value">$—</div>
+        <div class="sub" id="valueSub"></div>
+      </div>
       <div class="card">
         <h3>30 天活跃时段 · 24H</h3>
         <div class="bars" id="bars"></div>
         <div class="scale"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
         <div class="sub" id="peakLine"></div>
       </div>
-      <div class="card" id="valueCard" hidden>
-        <h3>本月 API 等价价值</h3>
-        <div class="big" id="value">$—</div>
-        <div class="sub" id="valueSub"></div>
-      </div>
     </section>
   </div>
-  <div class="dots" id="dots"><i class="on"></i><i></i><i></i></div>
+  <div class="dots" id="dots"><i class="on"></i><i></i></div>
   <div class="brand">TOKEN MONITOR</div>
 </div>
 <script>
@@ -310,11 +311,23 @@
   });
   syncQuotaSeg();
 
+  // 用量时间段口径与主窗用量页对齐(今日/近 7 天/近 30 天/本月);选择记在本地
   let period = 'today';
+  try {
+    const saved = localStorage.getItem('tm-lan-period');
+    if (saved && ['today', 'd7', 'd30', 'month'].includes(saved)) period = saved;
+  } catch { /* session only */ }
+  const syncPeriodSeg = () => {
+    [...$('seg').children].forEach((b) => {
+      if (b.tagName === 'BUTTON') b.classList.toggle('on', b.dataset.period === period);
+    });
+  };
   bindSeg($('seg'), (button) => {
     period = button.dataset.period;
+    try { localStorage.setItem('tm-lan-period', period); } catch { /* session only */ }
     render(last);
   });
+  syncPeriodSeg();
 
   // 分块环:24 段,亮段按序波浪点亮(每段 transitionDelay 递增)
   const SEGMENTS = 24;
