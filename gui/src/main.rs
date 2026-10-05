@@ -405,6 +405,8 @@ fn main() -> anyhow::Result<()> {
     let mut overlay: Option<(tao::window::Window, wry::WebView)> = None;
     let mut overlay_index: usize = 0;
     let mut overlay_last_save = std::time::Instant::now();
+    // 拖动/缩放期间 ResumeTimeReached 不会到(模态移动循环),背景帧必须在这里直推
+    let mut overlay_last_push = std::time::Instant::now();
     let mut lan_server = if tui_token_monitor::settings::lan_dashboard_enabled() {
         lan::LanServer::start()
     } else {
@@ -583,8 +585,12 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             Event::UserEvent(UserEvent::OverlayDrag) => {
-                if let Some((window, _)) = overlay.as_ref() {
+                if let Some((window, view)) = overlay.as_ref() {
                     let _ = window.drag_window();
+                    // 模态拖动循环结束后补一帧,落点即所见
+                    backdrop_seq += 1;
+                    overlay::push_backdrop(window, view, backdrop_seq);
+                    overlay_last_push = std::time::Instant::now();
                 }
             }
             Event::UserEvent(UserEvent::OverlaySwitch(direction)) => {
@@ -835,9 +841,16 @@ fn main() -> anyhow::Result<()> {
                 event: WindowEvent::Moved(position),
                 ..
             } => {
-                // 悬浮窗拖动落点节流落盘
+                // 悬浮窗拖动落点节流落盘;拖动中背景帧按 60ms 直推跟手
                 if overlay.as_ref().is_some_and(|(window, _)| window.id() == window_id) {
                     overlay_dirty = true;
+                    if overlay_last_push.elapsed() >= std::time::Duration::from_millis(60) {
+                        overlay_last_push = std::time::Instant::now();
+                        backdrop_seq += 1;
+                        if let Some((window, view)) = overlay.as_ref() {
+                            overlay::push_backdrop(window, view, backdrop_seq);
+                        }
+                    }
                     if overlay_last_save.elapsed() >= std::time::Duration::from_secs(1) {
                         overlay_last_save = std::time::Instant::now();
                         overlay::save_position(position.x, position.y);
@@ -854,6 +867,13 @@ fn main() -> anyhow::Result<()> {
                     && window.id() == window_id
                 {
                     overlay_dirty = true;
+                    if overlay_last_push.elapsed() >= std::time::Duration::from_millis(60) {
+                        overlay_last_push = std::time::Instant::now();
+                        backdrop_seq += 1;
+                        if let Some((window, view)) = overlay.as_ref() {
+                            overlay::push_backdrop(window, view, backdrop_seq);
+                        }
+                    }
                     let size = window.inner_size();
                     if let Ok(position) = window.outer_position() {
                         overlay::save_geometry(
