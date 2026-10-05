@@ -1,0 +1,610 @@
+/* ==========================================================================
+   CASSETTE FUTURISM // ARC RAIDERS // MATRIX CRT RETRO-THEME
+   Scoped entirely to .app[data-palette='cassette'] for 100% non-destructive theme switching.
+   ========================================================================== */
+
+.app[data-palette='cassette'] {
+  /* ---------- 1. 工控与磷光配色体系 (Color Palette) ---------- */
+  --color-background-body: #050b07;
+  --color-background-card: #0a160e;
+  --color-background-surface: #0f2216;
+  --color-background-muted: #07130a;
+
+  --color-text-primary: #e6ffed;
+  --color-text-secondary: #5a946b;
+  --color-text-blue: #00ff66;       /* 经典黑客帝国磷光终端绿 */
+  --color-text-green: #00ff66;
+  --color-text-purple: #2ee695;
+  --color-text-orange: #ffb800;      /* Arc Raiders 工业警报琥珀橙 */
+  --color-success: #00ff66;
+  --color-warning: #ffb800;
+  --color-error: #ff3344;          /* 像素警报红 */
+  --color-border: #163b23;
+  --color-border-emphasized: #00ff66;
+  --color-overlay-hover: rgba(0, 255, 102, 0.09);
+  --color-overlay-pressed: rgba(0, 255, 102, 0.18);
+
+  /* 看板与 Bento 变量同步 */
+  --dashboard-bg: #050b07;
+  --dashboard-card: #0a160e;
+  --dashboard-card-hover: #0e2014;
+  --dashboard-card-border: #163b23;
+  --dashboard-subtle: #07130a;
+  --dashboard-line: #184227;
+  --usage-card: #0a160e;
+  --usage-card-border: #163b23;
+  --usage-text-dim: #5a946b;
+
+  /* 热力图五级：磷光绿阶梯 */
+  --heat-1: #0d2617;
+  --heat-2: #144426;
+  --heat-3: #1a6f3b;
+  --heat-4: #00ff66;
+
+  /* 强制全局等宽与终端点阵字体 */
+  --font-family-body: 'Sarasa Term SC', 'IBM Plex Mono', monospace !important;
+  --font-family-heading: 'Sarasa Term SC', 'IBM Plex Mono', monospace !important;
+  --font-family-code: 'Sarasa Term SC', 'IBM Plex Mono', monospace !important;
+
+  /* 材质与阴影：硬核工业装甲金属感 */
+  --glass-blur: 0px;
+  --glass-saturate: 100%;
+  --glass-tint: rgba(10, 22, 14, 0.94);
+  --glass-tint-strong: rgba(15, 34, 22, 0.98);
+  --glass-highlight: rgba(0, 255, 102, 0.5);
+  --glass-highlight-soft: rgba(0, 255, 102, 0.18);
+  --glass-shade: rgba(0, 0, 0, 0.9);
+  --glass-drop: 0 10px 30px rgba(0, 0, 0, 0.8);
+}
+
+/* ---------- 2. CRT 扫描线与暗角微光 (CRT Scanlines & Phosphor Vignette) ---------- */
+
+.app[data-palette='cassette']::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0px, rgba(0, 0, 0, 0.22) 1px, transparent 1px, transparent 3px),
+    radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(2, 6, 3, 0.65) 100%);
+  opacity: 0.85;
+}
+
+/* 核心标题与大数字磷光微光 */
+.app[data-palette='cassette'] :is(.page-title, .quota-head h2, .usage-stat-value, .share-kpi, .ach-title, .eyebrow) {
+  text-shadow: 0 0 7px rgba(0, 255, 102, 0.42);
+  letter-spacing: 0.03em;
+}
+
+/* ---------- 3. 像素切角与边框系统 (Stepped Pixel Borders) ---------- */
+
+/* 消除所有圆角，统一为硬朗像素与 4px 阶梯切角 (排除 .panel-card 避免破坏绝对定位网格) */
+.app[data-palette='cassette'] :is(
+  .quota-card,
+  .usage-surface,
+  .settings-card,
+  .quota-strip,
+  .quota-overview,
+  .glass-panel,
+  .share-block,
+  .lan-board,
+  .ach-card,
+  .ach-tile,
+  .welcome-panel,
+  .command-palette-modal
+) {
+  border-radius: 0 !important;
+  clip-path: polygon(
+    0 6px, 6px 0,
+    calc(100% - 6px) 0, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 6px) 100%,
+    6px 100%, 0 calc(100% - 6px)
+  ) !important;
+  border: 1px solid #1a4227 !important;
+  background: var(--color-background-card) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 255, 102, 0.16),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.7),
+    0 4px 16px rgba(0, 0, 0, 0.6) !important;
+  position: relative;
+}
+
+/* Bento 看板卡片：必须保持 position: absolute 锁死网格坐标，绝不能受 relative 污染造成阶梯散落 */
+.app[data-palette='cassette'] .panel-card {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  border-radius: 0 !important;
+  clip-path: polygon(
+    0 6px, 6px 0,
+    calc(100% - 6px) 0, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 6px) 100%,
+    6px 100%, 0 calc(100% - 6px)
+  ) !important;
+  border: 1px solid #1a4227 !important;
+  background: var(--color-background-card) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 255, 102, 0.16),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.7),
+    0 4px 16px rgba(0, 0, 0, 0.6) !important;
+}
+
+.app[data-palette='cassette'] .module-board.is-narrow .panel-card {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+}
+
+/* 拖拽与缩放中的高能反馈 */
+.app[data-palette='cassette'] .panel-card.is-dragging {
+  z-index: 50 !important;
+  cursor: grabbing !important;
+  will-change: transform !important;
+  border-color: #00ff66 !important;
+  box-shadow:
+    0 0 24px rgba(0, 255, 102, 0.45),
+    0 16px 40px rgba(0, 0, 0, 0.95),
+    inset 1px 1px 0 #00ff66 !important;
+}
+
+.app[data-palette='cassette'] .panel-card.is-resizing {
+  z-index: 50 !important;
+  border-color: #ffb800 !important;
+  box-shadow:
+    0 0 20px rgba(255, 184, 0, 0.4),
+    0 16px 40px rgba(0, 0, 0, 0.95),
+    inset 1px 1px 0 #ffb800 !important;
+}
+
+/* 拖拽落点幽灵框与对齐吸附线 */
+.app[data-palette='cassette'] .panel-ghost {
+  border-radius: 0 !important;
+  border: 2px dashed #00ff66 !important;
+  background: rgba(0, 255, 102, 0.09) !important;
+  box-shadow: 0 0 16px rgba(0, 255, 102, 0.25), inset 0 0 10px rgba(0, 255, 102, 0.12) !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 20 !important;
+}
+
+.app[data-palette='cassette'] .panel-align-v,
+.app[data-palette='cassette'] .panel-align-h {
+  border-color: #00ff66 !important;
+  opacity: 0.9 !important;
+  box-shadow: 0 0 8px #00ff66 !important;
+}
+
+/* 缩放手柄：卡带机硬朗斜纹指示格 */
+.app[data-palette='cassette'] .panel-resize {
+  border-radius: 0 !important;
+  width: 28px !important;
+  height: 28px !important;
+  cursor: nwse-resize !important;
+  touch-action: none !important;
+}
+
+.app[data-palette='cassette'] .panel-resize::after {
+  opacity: 0.75 !important;
+  background: repeating-linear-gradient(135deg, #00ff66 0px, #00ff66 2px, transparent 2px, transparent 4px) !important;
+  width: 10px !important;
+  height: 10px !important;
+  right: 5px !important;
+  bottom: 5px !important;
+}
+
+.app[data-palette='cassette'] .panel-card:hover .panel-resize::after,
+.app[data-palette='cassette'] .panel-resize:focus-visible::after {
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 4px #00ff66) !important;
+}
+
+/* 卡片悬浮：磷光激活 */
+.app[data-palette='cassette'] :is(
+  .quota-card,
+  .panel-card,
+  .usage-surface,
+  .settings-card,
+  .ach-card
+):hover {
+  border-color: #00ff66 !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 255, 102, 0.35),
+    0 0 14px rgba(0, 255, 102, 0.16),
+    0 6px 20px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* 战术 HUD 角标 (Arc Raiders 风格瞄准角标与十字微标) */
+.app[data-palette='cassette'] .quota-card::after,
+.app[data-palette='cassette'] .usage-chart-card::after,
+.app[data-palette='cassette'] .settings-card::after {
+  content: '+';
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-family: var(--font-family-code);
+  font-size: 11px;
+  color: #1f6437;
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* ---------- 4. 磁带机机械触感琴键按键 (Tactile Cassette Deck Keys) ---------- */
+
+.app[data-palette='cassette'] :is(
+  .btn,
+  .panel-tool,
+  .panel-btn,
+  .toolbar-edit,
+  .toolbar-theme,
+  .toolbar-refresh,
+  .toolbar-sidebar,
+  .toolbar-jump,
+  .settings-save,
+  .settings-reset,
+  .settings-choice-option,
+  .nav-item,
+  .dock-item,
+  .usage-segment button,
+  .quota-strip-row,
+  .settings-agent-upgrade,
+  .settings-agents-toolbar button,
+  .share-tabs button,
+  .share-palettes button,
+  .lan-board-switch button
+) {
+  border-radius: 0 !important;
+  border: 1px solid #1e4a2b !important;
+  background: #0b1a10 !important;
+  color: var(--color-text-secondary) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 255, 102, 0.18),
+    inset -1px -1px 0 #000,
+    2px 2px 0 #030805 !important;
+  transition: transform 60ms ease, background 80ms ease, border-color 80ms ease, color 80ms ease;
+}
+
+/* 按钮悬停 */
+.app[data-palette='cassette'] :is(
+  .btn,
+  .panel-tool,
+  .panel-btn,
+  .toolbar-edit,
+  .toolbar-theme,
+  .toolbar-refresh,
+  .toolbar-sidebar,
+  .toolbar-jump,
+  .settings-choice-option,
+  .nav-item,
+  .dock-item,
+  .usage-segment button,
+  .quota-strip-row
+):hover {
+  background: #112818 !important;
+  border-color: #00ff66 !important;
+  color: #e6ffed !important;
+}
+
+/* 激活按键状态 (Active / Selected) */
+.app[data-palette='cassette'] :is(
+  .nav-item-active,
+  .dock-item-active,
+  .settings-choice-option.is-selected,
+  .usage-segment button.is-selected,
+  .share-tabs button.is-selected,
+  .share-palettes button.is-selected,
+  .lan-board-switch button.is-selected,
+  .panel-btn.is-on,
+  .toolbar-edit.is-on
+) {
+  background: #153820 !important;
+  border-color: #00ff66 !important;
+  color: #00ff66 !important;
+  box-shadow:
+    inset 0 0 8px rgba(0, 255, 102, 0.28),
+    inset 1px 1px 0 #00ff66,
+    1px 1px 0 #000 !important;
+}
+
+/* 琴键物理压感下沉 (Active Press) */
+.app[data-palette='cassette'] :is(
+  .btn,
+  .panel-tool,
+  .panel-btn,
+  .toolbar-edit,
+  .toolbar-theme,
+  .toolbar-refresh,
+  .toolbar-sidebar,
+  .toolbar-jump,
+  .settings-save,
+  .settings-reset,
+  .settings-choice-option,
+  .nav-item,
+  .dock-item,
+  .usage-segment button,
+  .quota-strip-row
+):active:not(:disabled) {
+  transform: translate(2px, 2px) !important;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 rgba(0, 255, 102, 0.1) !important;
+}
+
+/* 去除平滑滑动指示胶囊，改用机械发光边 */
+.app[data-palette='cassette'] .nav-active-indicator,
+.app[data-palette='cassette'] .choice-highlight,
+.app[data-palette='cassette'] .dock-active-pill {
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: 1px solid #00ff66 !important;
+  box-shadow: 0 0 8px rgba(0, 255, 102, 0.4) !important;
+}
+
+/* ---------- 5. 像素分段条与 LED 电平表 (Pixel VU Meter) ---------- */
+
+.app[data-palette='cassette'] .block-bar {
+  height: 12px;
+  gap: 3px;
+  background: #040905;
+  padding: 2px 3px;
+  border: 1px solid #163b23;
+  box-sizing: border-box;
+}
+
+.app[data-palette='cassette'] .block-bar-cell {
+  border-radius: 0 !important;
+  background: #0d2617 !important;
+  border: 1px solid #143520 !important;
+  opacity: 1 !important;
+}
+
+.app[data-palette='cassette'] .block-bar-cell.is-filled {
+  background: var(--bar-tone, #00ff66) !important;
+  border-color: #e6ffed !important;
+  box-shadow:
+    inset 0 0 2px #fff,
+    0 0 6px color-mix(in srgb, var(--bar-tone, #00ff66) 80%, transparent) !important;
+}
+
+/* Quota Strip 中的微型条 */
+.app[data-palette='cassette'] .quota-strip-bar .block-bar {
+  height: 9px;
+  gap: 2px;
+  padding: 1px 2px;
+}
+
+/* Quota Strip 整体增强为卡带插槽架 (Cassette Rack) */
+.app[data-palette='cassette'] .quota-strip {
+  border-left: 3px solid #00ff66 !important;
+}
+
+.app[data-palette='cassette'] .quota-strip-row {
+  margin-bottom: 2px;
+  border-left: 2px solid transparent !important;
+}
+
+.app[data-palette='cassette'] .quota-strip-row:hover {
+  border-left-color: #00ff66 !important;
+}
+
+/* ---------- 6. 状态指示灯与角标 (Status LED Matrix) ---------- */
+
+.app[data-palette='cassette'] :is(
+  .status-dot,
+  .freshness-badge i,
+  .source-indicator,
+  .lan-dot,
+  .panel-menu-dot,
+  .usage-activity > i,
+  .settings-plan-note-dot,
+  .settings-toc button i
+) {
+  border-radius: 0 !important;
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* 徽章与标签硬化 */
+.app[data-palette='cassette'] :is(
+  .quota-plan-type,
+  .quota-expiry,
+  .freshness-badge,
+  .settings-agent-badge,
+  .settings-provider-badge,
+  .model-chips code,
+  .share-chip,
+  .share-ach,
+  .jump-tag
+) {
+  border-radius: 0 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--font-family-code);
+  border: 1px solid #1f5030 !important;
+  background: #09170e !important;
+}
+
+/* ---------- 7. 侧栏与 Logo：卡带舱与 REC 录音指示灯 ---------- */
+
+.app[data-palette='cassette'] .sidebar {
+  border-right: 1px solid #163b23 !important;
+  background: #060e08 !important;
+}
+
+/* 磁带卷轴外形 Logo */
+.app[data-palette='cassette'] .logo-block {
+  border-radius: 0 !important;
+  width: 18px;
+  height: 18px;
+  background: #00ff66 !important;
+  box-shadow: 0 0 8px rgba(0, 255, 102, 0.6) !important;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app[data-palette='cassette'] .logo-block::before {
+  content: '●';
+  font-size: 8px;
+  color: #050b07;
+}
+
+/* 侧栏标题后增加卡带编号 */
+.app[data-palette='cassette'] .sidebar-title::after {
+  content: 'REC [●] // SIDE-A';
+  margin-left: auto;
+  font-size: 9px;
+  font-family: var(--font-family-code);
+  color: #ff3344;
+  letter-spacing: 0.08em;
+  animation: cassette-rec-blink 1.4s infinite steps(2, start);
+}
+
+@keyframes cassette-rec-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* ---------- 8. 底部 Dock：磁带机机械控制面板 ---------- */
+
+.app[data-palette='cassette'] .dock {
+  border-radius: 0 !important;
+  clip-path: polygon(
+    0 8px, 8px 0,
+    calc(100% - 8px) 0, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 8px) 100%,
+    8px 100%, 0 calc(100% - 8px)
+  ) !important;
+  border: 1px solid #1f5030 !important;
+  background: #08140c !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(0, 255, 102, 0.3),
+    inset -1px -1px 0 #000,
+    0 12px 36px rgba(0, 0, 0, 0.9) !important;
+  padding: 6px 10px;
+}
+
+.app[data-palette='cassette'] .dock::before {
+  display: none !important;
+}
+
+/* ---------- 9. 黑客帝国终端式 Command Palette 与弹窗 ---------- */
+
+.app[data-palette='cassette'] .command-palette-backdrop,
+.app[data-palette='cassette'] .ach-backdrop {
+  background: rgba(3, 8, 4, 0.78) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+.app[data-palette='cassette'] .command-palette-modal {
+  border: 2px solid #00ff66 !important;
+  box-shadow:
+    0 0 24px rgba(0, 255, 102, 0.35),
+    inset 0 0 16px rgba(0, 255, 102, 0.12),
+    0 16px 48px rgba(0, 0, 0, 0.95) !important;
+}
+
+.app[data-palette='cassette'] .command-palette-item.is-active {
+  background: #00ff66 !important;
+  color: #050b07 !important;
+  border-radius: 0 !important;
+}
+
+.app[data-palette='cassette'] .command-palette-item.is-active :is(span, code) {
+  color: #050b07 !important;
+}
+
+/* 终端输入框指示符 */
+.app[data-palette='cassette'] .command-palette-input {
+  font-family: var(--font-family-code) !important;
+  color: #00ff66 !important;
+  caret-color: #00ff66;
+}
+
+/* ---------- 10. 设置页与用量图表深度工业化 ---------- */
+
+.app[data-palette='cassette'] .settings-shell {
+  font-family: var(--font-family-code);
+}
+
+.app[data-palette='cassette'] input,
+.app[data-palette='cassette'] select,
+.app[data-palette='cassette'] textarea {
+  border-radius: 0 !important;
+  border: 1px solid #1e4a2b !important;
+  background: #07130a !important;
+  color: #00ff66 !important;
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.8) !important;
+}
+
+.app[data-palette='cassette'] input:focus,
+.app[data-palette='cassette'] select:focus {
+  border-color: #00ff66 !important;
+  outline: 1px solid #00ff66 !important;
+  box-shadow: 0 0 8px rgba(0, 255, 102, 0.35) !important;
+}
+
+/* 用量看板图表柱：频段示波器像素切纹 */
+.app[data-palette='cassette'] .usage-day-bar {
+  background: repeating-linear-gradient(
+    0deg,
+    #00ff66 0px,
+    #00ff66 3px,
+    #06150b 3px,
+    #06150b 4px
+  ) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 0 6px rgba(0, 255, 102, 0.3);
+}
+
+/* 热力图单元格硬化与磷光发光 */
+.app[data-palette='cassette'] .usage-heat-cell {
+  border-radius: 0 !important;
+  border: 1px solid #061108;
+}
+
+.app[data-palette='cassette'] .usage-heat-cell.is-active,
+.app[data-palette='cassette'] .usage-heat-cell:hover {
+  box-shadow: 0 0 8px #00ff66 !important;
+  z-index: 2;
+}
+
+/* 钥匙凭证打码显示框 (Masked Key) */
+.app[data-palette='cassette'] .key-value {
+  border-radius: 0 !important;
+  border: 1px dashed #1f5030 !important;
+  background: #061108 !important;
+  color: #00ff66 !important;
+}
+
+/* ---------- 11. 像素滚动条与琴键 kbd 样式 ---------- */
+
+.app[data-palette='cassette'] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.app[data-palette='cassette'] ::-webkit-scrollbar-track {
+  background: #050b07;
+  border-left: 1px solid #143520;
+}
+
+.app[data-palette='cassette'] ::-webkit-scrollbar-thumb {
+  background: #153e24;
+  border: 1px solid #1e5a34;
+}
+
+.app[data-palette='cassette'] ::-webkit-scrollbar-thumb:hover {
+  background: #00ff66;
+  box-shadow: 0 0 8px rgba(0, 255, 102, 0.5);
+}
+
+.app[data-palette='cassette'] kbd {
+  border-radius: 0 !important;
+  border: 1px solid #1f5030 !important;
+  background: #09170e !important;
+  color: #00ff66 !important;
+  box-shadow: 1px 1px 0 #000 !important;
+  padding: 1px 4px !important;
+}

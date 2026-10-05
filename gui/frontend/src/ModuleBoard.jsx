@@ -67,7 +67,7 @@ function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, mod
   const removeTitle = lang === 0 ? '移除面板' : 'Remove panel';
   return <motion.div data-panel-id={panel.id} className={`panel-card${active ? ` is-${active === 'move' ? 'dragging' : 'resizing'}` : ''}${panel.locked ? ' is-locked' : ''}${editing ? '' : ' is-static'}${bare && !editing ? ' is-bare' : ''}`}
     style={{ x, y, width, height }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE}>
-    {(!bare || editing) && <div className="panel-head" onPointerDown={(event) => editing && !narrow && onStart(event, panel.id, 'move', values)}>
+    {(!bare || editing) && <div className="panel-head" onPointerDown={(event) => !narrow && !panel.locked && onStart(event, panel.id, 'move', values)}>
       {!bare && <span className="panel-title" title={title}>{title}</span>}
       {!bare && <span className="panel-meta">{meta?.(panel.id)}</span>}
       {editing && <span className="panel-head-btns" onPointerDown={(event) => event.stopPropagation()}>
@@ -79,7 +79,7 @@ function FluidPanel({ panel, gridWidth, active, catalog, renderModule, meta, mod
       </span>}
     </div>}
     <ModuleContent id={panel.id} renderModule={renderModule} modular={modular} />
-    {editing && !panel.locked && !narrow && <div className="panel-resize" role="slider" tabIndex={0} aria-label={`${title} ${lang === 0 ? '调整大小，方向键调整' : 'resize, use arrow keys'}`} aria-valuemin={1} aria-valuemax={12} aria-valuenow={panel.w} aria-valuetext={`${panel.w} × ${panel.h}`}
+    {!panel.locked && !narrow && <div className="panel-resize" role="slider" tabIndex={0} aria-label={`${title} ${lang === 0 ? '调整大小，方向键调整' : 'resize, use arrow keys'}`} aria-valuemin={1} aria-valuemax={12} aria-valuenow={panel.w} aria-valuetext={`${panel.w} × ${panel.h}`}
       onPointerDown={(event) => onStart(event, panel.id, 'resize', values)} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault();
@@ -223,7 +223,6 @@ export default function ModuleBoard({ catalog, defaults, storageKey, renderModul
   }, [reduced, modular]);
 
   const startDrag = (event, id, mode, values) => {
-    if (!editing) return;
     const panel = panelsRef.current.find((item) => item.id === id);
     if (!panel || panel.locked || gesture.current || (event && (event.button !== 0 || !event.isPrimary))) return;
     const cat = catalog.find((item) => item.id === id);

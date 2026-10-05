@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#000000" />
-<title>Token Monitor</title>
+<title>Token Monitor Standby</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -33,6 +33,21 @@
   .clock .sec { font-size: 15px; color: #636366; font-weight: 300; margin-left: 3px; }
   .clock .colons { animation: breathe 2s ease-in-out infinite; }
   .date { font-size: 12px; font-weight: 500; color: #98989f; letter-spacing: 0.04em; margin-top: 2px; }
+  .topbar-actions { display: flex; align-items: center; gap: 8px; }
+  .theme-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 11px; border-radius: 999px;
+    background: rgba(120, 120, 128, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #c7c7cc; font: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .theme-btn:active { transform: scale(0.94); }
+  .theme-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: linear-gradient(135deg, #00ff66 50%, #253349 50%);
+  }
   .fresh {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 7px 13px; border-radius: 999px;
@@ -134,6 +149,222 @@
   .focus-dots { flex: none; display: flex; justify-content: center; gap: 7px; padding: 10px 0 2px; }
   .focus-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.18); transition: background 0.25s; }
   .focus-dots i.on { background: #f5f5f7; }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     CASSETTE FUTURISM // ARC RAIDERS // MATRIX CRT RETRO-THEME OVERLAY
+     ═════════════════════════════════════════════════════════════════════ */
+  body[data-theme='cassette'] {
+    font-family: 'Sarasa Term SC', 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace !important;
+    background: #050b07 !important;
+    color: #e6ffed !important;
+  }
+  body[data-theme='cassette']::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99;
+    background:
+      repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0px, rgba(0, 0, 0, 0.22) 1px, transparent 1px, transparent 3px),
+      radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(2, 6, 3, 0.75) 100%) !important;
+  }
+
+  /* 顶栏与点阵大时钟 */
+  body[data-theme='cassette'] .clock {
+    font-family: inherit !important;
+    font-weight: 700 !important;
+    color: #00ff66 !important;
+    text-shadow: 0 0 10px rgba(0, 255, 102, 0.5) !important;
+    letter-spacing: 0.05em;
+  }
+  body[data-theme='cassette'] .clock .sec { color: #3fa160 !important; font-weight: 600; }
+  body[data-theme='cassette'] .date {
+    color: #5a946b !important;
+    font-family: inherit;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  body[data-theme='cassette'] .clockbox::after {
+    content: 'REC [●] // SIDE-A';
+    display: block;
+    font-size: 10px;
+    font-family: inherit;
+    color: #ff3344;
+    letter-spacing: 0.1em;
+    margin-top: 3px;
+    animation: cassette-rec-blink 1.4s infinite steps(2, start);
+  }
+  @keyframes cassette-rec-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  /* 顶栏按键与状态 */
+  body[data-theme='cassette'] .theme-btn {
+    border-radius: 0 !important;
+    background: #0d1e13 !important;
+    border: 1px solid #00ff66 !important;
+    color: #00ff66 !important;
+    box-shadow: 0 0 8px rgba(0, 255, 102, 0.35), 1px 1px 0 #000 !important;
+    font-family: inherit !important;
+    letter-spacing: 0.06em;
+  }
+  body[data-theme='cassette'] .theme-dot {
+    border-radius: 0 !important;
+    background: #00ff66 !important;
+    box-shadow: 0 0 6px #00ff66;
+  }
+  body[data-theme='cassette'] .fresh {
+    border-radius: 0 !important;
+    background: #08140c !important;
+    border: 1px solid #163b23 !important;
+    color: #5a946b !important;
+    font-family: inherit !important;
+  }
+  body[data-theme='cassette'] .fresh i {
+    border-radius: 0 !important;
+    box-shadow: 0 0 6px currentColor;
+  }
+
+  /* 4px 像素阶梯切角卡片 */
+  body[data-theme='cassette'] :is(.card, .focus-wins .win) {
+    border-radius: 0 !important;
+    clip-path: polygon(
+      0 6px, 6px 0,
+      calc(100% - 6px) 0, 100% 6px,
+      100% calc(100% - 6px), calc(100% - 6px) 100%,
+      6px 100%, 0 calc(100% - 6px)
+    ) !important;
+    border: 1px solid #1a4227 !important;
+    background: #0a160e !important;
+    box-shadow:
+      inset 1px 1px 0 rgba(0, 255, 102, 0.16),
+      inset -1px -1px 0 rgba(0, 0, 0, 0.7),
+      0 6px 22px rgba(0, 0, 0, 0.75) !important;
+  }
+  body[data-theme='cassette'] .card::after {
+    content: '+';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-family: inherit;
+    font-size: 11px;
+    color: #1f6437;
+    pointer-events: none;
+  }
+  body[data-theme='cassette'] .card h3 {
+    color: #5a946b !important;
+    font-family: inherit !important;
+    letter-spacing: 0.14em !important;
+  }
+  body[data-theme='cassette'] .big {
+    color: #00ff66 !important;
+    text-shadow: 0 0 8px rgba(0, 255, 102, 0.45) !important;
+    font-family: inherit !important;
+  }
+  body[data-theme='cassette'] .big small { color: #5a946b !important; }
+  body[data-theme='cassette'] .sub { color: #5a946b !important; font-family: inherit; }
+  body[data-theme='cassette'] .sub b { color: #00ff66 !important; }
+
+  /* 机械琴键式滑动分段控件 */
+  body[data-theme='cassette'] .seg {
+    border-radius: 0 !important;
+    background: #07130a !important;
+    border: 1px solid #163b23 !important;
+    padding: 2px !important;
+  }
+  body[data-theme='cassette'] .seg .thumb {
+    border-radius: 0 !important;
+    background: #143820 !important;
+    border: 1px solid #00ff66 !important;
+    box-shadow: 0 0 8px rgba(0, 255, 102, 0.35) !important;
+  }
+  body[data-theme='cassette'] .seg button {
+    border-radius: 0 !important;
+    font-family: inherit !important;
+    color: #5a946b !important;
+  }
+  body[data-theme='cassette'] .seg button.on {
+    color: #00ff66 !important;
+  }
+
+  /* 示波器时段柱 */
+  body[data-theme='cassette'] .bars i {
+    border-radius: 0 !important;
+    background: repeating-linear-gradient(0deg, #00ff66 0px, #00ff66 3px, #06150b 3px, #06150b 4px) !important;
+    box-shadow: 0 0 6px rgba(0, 255, 102, 0.3) !important;
+  }
+  body[data-theme='cassette'] .bars i.peak {
+    background: repeating-linear-gradient(0deg, #ffb800 0px, #ffb800 3px, #1a1005 3px, #1a1005 4px) !important;
+    box-shadow: 0 0 10px rgba(255, 184, 0, 0.5) !important;
+  }
+
+  /* 环卡与铭牌 */
+  body[data-theme='cassette'] .ring-name {
+    font-family: inherit !important;
+    color: #e6ffed !important;
+    letter-spacing: 0.04em;
+  }
+  body[data-theme='cassette'] .ring-name i {
+    border-radius: 0 !important;
+    background: #00ff66 !important;
+    box-shadow: 0 0 6px #00ff66;
+  }
+  body[data-theme='cassette'] .ring-copy .plan {
+    color: #5a946b !important;
+    font-family: inherit;
+    text-transform: uppercase;
+  }
+  body[data-theme='cassette'] .ring-num {
+    font-family: inherit !important;
+    text-shadow: 0 0 6px currentColor;
+  }
+
+  /* 横屏 focus 模式 */
+  body[data-theme='cassette'] .focus-pct b {
+    font-family: inherit !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 10px currentColor;
+  }
+  body[data-theme='cassette'] .focus-pct i {
+    color: #5a946b !important;
+    font-family: inherit;
+  }
+  body[data-theme='cassette'] .focus-name {
+    font-family: inherit !important;
+    color: #00ff66 !important;
+    letter-spacing: 0.05em;
+  }
+  body[data-theme='cassette'] .focus-name i {
+    border-radius: 0 !important;
+    background: #00ff66 !important;
+    box-shadow: 0 0 6px #00ff66;
+  }
+  body[data-theme='cassette'] .focus-plan {
+    color: #5a946b !important;
+    font-family: inherit;
+    text-transform: uppercase;
+  }
+  body[data-theme='cassette'] .focus-wins .win b {
+    font-family: inherit !important;
+  }
+  body[data-theme='cassette'] .focus-wins .win span {
+    color: #5a946b !important;
+    font-family: inherit;
+  }
+
+  /* 底部圆点与品牌尾标 */
+  body[data-theme='cassette'] .dots i,
+  body[data-theme='cassette'] .focus-dots i {
+    border-radius: 0 !important;
+    background: #143520 !important;
+  }
+  body[data-theme='cassette'] .dots i.on,
+  body[data-theme='cassette'] .focus-dots i.on {
+    background: #00ff66 !important;
+    box-shadow: 0 0 6px #00ff66;
+  }
+  body[data-theme='cassette'] .brand {
+    font-family: inherit !important;
+    color: #1a4e2a !important;
+    letter-spacing: 0.35em;
+  }
+
   /* 横屏:配额视图切 focus;隐藏 brand 与三视图圆点,顶栏收紧 */
   @media (orientation: landscape) {
     #viewQuota { overflow: hidden; display: flex; flex-direction: column; }
@@ -165,7 +396,12 @@
       <div class="clock" id="clock">--<span class="colons">:</span>--<span class="sec"></span></div>
       <div class="date" id="date"></div>
     </div>
-    <span class="fresh" id="fresh"><i></i><span id="freshText">连接中</span></span>
+    <div class="topbar-actions">
+      <button type="button" class="theme-btn" id="themeBtn" aria-label="切换主题">
+        <i class="theme-dot"></i><span id="themeBtnText">TAPE</span>
+      </button>
+      <span class="fresh" id="fresh"><i></i><span id="freshText">连接中</span></span>
+    </div>
   </div>
   <div class="track" id="track">
     <section class="view" id="viewQuota">
@@ -240,12 +476,36 @@
     return Math.floor(h / 24) + 'd' + (h % 24 ? (h % 24) + 'h' : '');
   };
   const LEVEL = ['#30d158', '#ffd60a', '#ff453a'];
+  const CASSETTE_LEVEL = ['#00ff66', '#ffb800', '#ff3344'];
   // 套餐主色(iOS 系统色系),标题色条与 focus 环光晕用
   const ACCENT = {
     'opencode-go': '#5e5ce6', codex: '#0a84ff', goat: '#ff9f0a', 'antigravity': '#64d2ff',
     'claude': '#bf5af2', cursor: '#ffffff', glm: '#30d158', kimi: '#ff453a',
   };
   const accentOf = (title) => ACCENT[title.toLowerCase().split(' ')[0]] || '#0a84ff';
+
+  // ── 主题系统 (iOS Standby ↔ Cassette Futurism) ──
+  let lanTheme = 'default';
+  try {
+    const saved = localStorage.getItem('tm-lan-theme');
+    if (saved === 'cassette') lanTheme = 'cassette';
+  } catch { /* session only */ }
+
+  const syncThemeUi = () => {
+    const isCassette = lanTheme === 'cassette';
+    if (isCassette) document.body.dataset.theme = 'cassette';
+    else delete document.body.dataset.theme;
+    $('themeBtnText').textContent = isCassette ? 'CRT' : 'TAPE';
+    $('themeBtn').title = isCassette ? '切回经典 Standby' : '切换到卡带未来主题';
+  };
+
+  $('themeBtn').addEventListener('click', () => {
+    lanTheme = lanTheme === 'cassette' ? 'default' : 'cassette';
+    try { localStorage.setItem('tm-lan-theme', lanTheme); } catch { /* session only */ }
+    syncThemeUi();
+    if (last) render(last);
+  });
+  syncThemeUi();
 
   // 文本更新:变了才写并触发 rise 微动效
   const setText = (el, html) => {
@@ -256,7 +516,7 @@
     el.classList.add('tick');
   };
 
-  // iOS 分段滑块:thumb 跟随选中项(transform+width 弹性过渡)
+  // 分段滑块:thumb 跟随选中项(transform+width 弹性过渡)
   function bindSeg(container, onPick) {
     const thumb = container.querySelector('.thumb');
     const buttons = [...container.querySelectorAll('button')];
@@ -277,7 +537,7 @@
     return { place, selected };
   }
 
-  // 时钟:HH:MM 细体 + 呼吸冒号 + 秒;日期一行
+  // 时钟:HH:MM + 秒;日期一行
   function tickClock() {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
@@ -329,11 +589,12 @@
   });
   syncPeriodSeg();
 
-  // 分块环:24 段,亮段按序波浪点亮(每段 transitionDelay 递增)
+  // 分块环:24 段,亮段按序点亮
   const SEGMENTS = 24;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const segPath = (cx, cy, r, index) => {
-    const gap = 2;
+    const isCassette = lanTheme === 'cassette';
+    const gap = isCassette ? 3.5 : 2;
     const start = (index * 360) / SEGMENTS - 90 + gap / 2;
     const end = ((index + 1) * 360) / SEGMENTS - 90 - gap / 2;
     const rad = (deg) => (deg * Math.PI) / 180;
@@ -342,12 +603,18 @@
     return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
   };
   const ringSvg = (pct, level, accent) => {
+    const isCassette = lanTheme === 'cassette';
     const lit = Math.round(Math.min(pct, 100) / 100 * SEGMENTS);
-    const color = LEVEL[Math.min(level, 2)];
-    let paths = `<circle cx="42" cy="42" r="36" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="6.5" />`;
+    const color = isCassette ? CASSETTE_LEVEL[Math.min(level, 2)] : LEVEL[Math.min(level, 2)];
+    const bgStroke = isCassette ? '#0a1d11' : 'rgba(255,255,255,0.05)';
+    const unlitStroke = isCassette ? '#0d2917' : 'rgba(255,255,255,0.10)';
+    const strokeLinecap = isCassette ? 'butt' : 'round';
+    let paths = `<circle cx="42" cy="42" r="36" fill="none" stroke="${bgStroke}" stroke-width="7" />`;
     for (let i = 0; i < SEGMENTS; i++) {
       const delay = reducedMotion ? 0 : i * 14;
-      paths += `<path d="${segPath(42, 42, 36, i)}" stroke="${i < lit ? color : 'rgba(255,255,255,0.10)'}" stroke-width="6.5" fill="none" stroke-linecap="round" style="transition-delay:${delay}ms"/>`;
+      const stroke = i < lit ? color : unlitStroke;
+      const filter = (isCassette && i < lit) ? `style="filter:drop-shadow(0 0 3px ${color});transition-delay:${delay}ms"` : `style="transition-delay:${delay}ms"`;
+      paths += `<path d="${segPath(42, 42, 36, i)}" stroke="${stroke}" stroke-width="6.5" fill="none" stroke-linecap="${strokeLinecap}" ${filter}/>`;
     }
     return `<svg viewBox="0 0 84 84" aria-hidden="true">${paths}</svg>`;
   };
@@ -379,10 +646,12 @@
     const head = list[0];
     const tightest = list.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
     const displayPct = (pct) => (usedView ? pct : 100 - pct);
-    const accent = accentOf(head.title);
+    const isCassette = lanTheme === 'cassette';
+    const accent = isCassette ? '#00ff66' : accentOf(head.title);
+    const levelColors = isCassette ? CASSETTE_LEVEL : LEVEL;
     const wins = list.map((ring) => `
       <div class="win">
-        <b style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</b>
+        <b style="color:${levelColors[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</b>
         <span>${ring.label}</span>
         ${ring.resetsInMs ? `<small>${fmtReset(ring.resetsInMs)} 后重置</small>` : ''}
       </div>`).join('');
@@ -391,7 +660,7 @@
       <div class="focus-ring-wrap">
         ${ringSvg(displayPct(tightest.usedPct), tightest.level, accent)}
         <div class="focus-pct">
-          <b style="color:${LEVEL[Math.min(tightest.level, 2)]}">${Math.round(displayPct(tightest.usedPct))}%</b>
+          <b style="color:${levelColors[Math.min(tightest.level, 2)]}">${Math.round(displayPct(tightest.usedPct))}%</b>
           <i>${usedView ? '已用' : '剩余'} · ${tightest.label}</i>
         </div>
       </div>
@@ -435,15 +704,17 @@
   function render(data) {
     last = data;
     const displayPct = (pct) => (usedView ? pct : 100 - pct);
+    const isCassette = lanTheme === 'cassette';
+    const levelColors = isCassette ? CASSETTE_LEVEL : LEVEL;
     // 配额环:同套餐多窗口聚合;竖屏网格
     const grouped = groupedOf();
     $('rings').innerHTML = grouped.map(([, list]) => {
       const head = list[0];
       const tightest = list.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
-      const accent = accentOf(head.title);
+      const accent = isCassette ? '#00ff66' : accentOf(head.title);
       const chips = list.map((ring) => `
         <div class="ring-copy" style="margin-top:9px">
-          <span class="ring-num" style="color:${LEVEL[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</span>
+          <span class="ring-num" style="color:${levelColors[Math.min(ring.level, 2)]}">${Math.round(displayPct(ring.usedPct))}%</span>
           <span class="plan" style="margin-left:6px">${ring.label}${ring.resetsInMs ? ' · ' + fmtReset(ring.resetsInMs) + ' 后重置' : ''}</span>
         </div>`).join('');
       return `<div class="card ring-card">
@@ -459,16 +730,16 @@
     if (isLandscape) $('focusInner').innerHTML = focusHtml();
 
     // 用量(按所选时间段)
-    const periodData = data[period] || {};
+    const periodData = (data && data[period]) || {};
     setText($('pTokens'), fmtTokens(periodData.tokens || 0));
     setText($('pRequests'), (periodData.messages || 0).toLocaleString());
     setText($('pCost'), fmtMoney(periodData.cost));
-    const burn = data.burnRate;
+    const burn = data ? data.burnRate : null;
     $('burnCard').hidden = !(burn > 0);
     if (burn > 0) setText($('burn'), fmtTokens(burn) + '<small>/min</small>');
 
     // 时段
-    const hourly = data.hourly || [];
+    const hourly = (data && data.hourly) || [];
     if (hourly.length) {
       const max = Math.max(1, ...hourly);
       let peak = 0;
@@ -476,7 +747,7 @@
       $('bars').innerHTML = hourly.map((v, i) => `<i class="${i === peak && v > 0 ? 'peak' : ''}" style="height:${Math.max(3, v / max * 100)}%"></i>`).join('');
       setText($('peakLine'), `最活跃 <b>${String(peak).padStart(2, '0')}:00</b> 前后 · 30 天合计 <b>${fmtTokens(hourly.reduce((a, b) => a + b, 0))}</b>`);
     }
-    const value = data.monthlyApiValueUsd;
+    const value = data ? data.monthlyApiValueUsd : null;
     $('valueCard').hidden = !(value > 0);
     if (value > 0) {
       setText($('value'), fmtMoney(value));
@@ -484,7 +755,7 @@
     }
 
     // 新鲜度
-    const age = Date.now() - (data.generatedAtMs || 0);
+    const age = Date.now() - ((data && data.generatedAtMs) || 0);
     const stale = age > 120000;
     $('fresh').classList.toggle('stale', stale);
     setText($('freshText'), stale ? '数据滞后' : '实时');
