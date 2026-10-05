@@ -19,6 +19,23 @@ test('preferences recover from invalid values and keep valid provider choices', 
   assert.deepEqual(result.providerColors, { codex: '#123abc' });
 });
 
+test('cassette theme preference is persisted and validated', () => {
+  const store = {
+    getItem: () => JSON.stringify({ theme: 'cassette' }),
+  };
+  const result = readGuiPreferences(store);
+  assert.equal(result.theme, 'cassette');
+});
+
+test('premium theme preferences persist and invalid names are rejected', () => {
+  for (const theme of ['washi', 'palace', 'aurora', 'amber', 'mocha']) {
+    const result = readGuiPreferences({ getItem: () => JSON.stringify({ theme }) });
+    assert.equal(result.theme, theme);
+  }
+  const rejected = readGuiPreferences({ getItem: () => JSON.stringify({ theme: 'vaporwave' }) });
+  assert.equal(rejected.theme, 'system');
+});
+
 test('quota remaining view persists only when explicitly true', () => {
   const truthy = { getItem: () => JSON.stringify({ quotaRemainingView: true }) };
   const falsy = { getItem: () => JSON.stringify({ quotaRemainingView: 'yes' }) };

@@ -7,6 +7,8 @@ import './app.css';
 import './usage-dashboard.css';
 import './ia.css';
 import './glass.css';
+import './themes.css';
+import './cassette.css';
 import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
 import UsageDashboard, { USAGE_MODULE_LABELS } from './UsageDashboard.jsx';
@@ -388,7 +390,7 @@ function App() {
 
   useLayoutEffect(() => {
     if (preferences.theme === 'system') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = ['dark', 'ink'].includes(preferences.theme) ? 'dark' : 'light';
+    else document.documentElement.dataset.theme = ['dark', 'ink', 'cassette', 'palace', 'aurora', 'amber', 'mocha'].includes(preferences.theme) ? 'dark' : 'light';
     document.documentElement.lang = lang === 0 ? 'zh-CN' : 'en';
   }, [preferences.theme, lang]);
 
