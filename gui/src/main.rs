@@ -866,6 +866,7 @@ fn main() -> anyhow::Result<()> {
                 if let Some((window, _)) = overlay.as_ref()
                     && window.id() == window_id
                 {
+                    overlay::apply_shape(window); // 尺寸变了,胶囊形窗区跟着重裁
                     overlay_dirty = true;
                     if overlay_last_push.elapsed() >= std::time::Duration::from_millis(60) {
                         overlay_last_push = std::time::Instant::now();
