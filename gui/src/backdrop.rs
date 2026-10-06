@@ -110,29 +110,21 @@ pub fn capture_region_data_uri(left: i32, top: i32, width: u32, height: u32) -> 
         eprintln!("[backdrop] capture failed at {left},{top} {width}x{height}");
         return None;
     }
-    // 模糊放在 Rust 侧:页面对伪元素做 backdrop-filter 只会糊掉伪元素自己,
-    // 不会处理它带的背景图,所以毛玻璃的 blur 必须在送进页面前完成。
-    // 先 2×2 均值降采样(重度模糊下无视觉损失,PNG 编码与 base64 小 4 倍),
-    // 再提饱和(iOS 玻璃的关键质感),最后三遍滑窗盒式模糊逼近高斯。
+    // 材质不在这里烙死:页面里有一层真正的 backdrop-filter(Dock 同款配方)直接
+    // 对这张图做 blur+saturate,比离线盒式模糊透亮得多。Rust 只负责:
+    // 2×2 降采样(PNG/base64 小 4 倍,重度 blur 下无视觉损失) → 帧哈希跳重 → 编码。
     let (small, sw, sh) = downscale_2x(&pixels, width, height);
-    let mut rgba = bgra_to_rgba(&small);
-    saturate(&mut rgba, SATURATE);
+    let rgba = bgra_to_rgba(&small);
     let hash = frame_hash(&rgba);
     if !FIRST_FRAME.load(Ordering::Relaxed) && LAST_HASH.swap(hash, Ordering::Relaxed) == hash {
         return None; // 桌面没变:跳过编码与脚本求值,调用方保持上一帧
     }
     FIRST_FRAME.store(false, Ordering::Relaxed);
-    box_blur(&mut rgba, sw, sh, BLUR_RADIUS);
     encode_png_data_uri(&rgba, sw as u32, sh as u32)
 }
 
 /// 降采样倍率:2×2 均值池化。
 const DOWNSCALE: usize = 2;
-/// 毛玻璃模糊半径(降采样后像素):三遍盒式模糊的等效高斯远比单遍 18px 柔,
-/// 桌面文字完全读不出,但保留大色块、光带与明暗。
-const BLUR_RADIUS: usize = 9;
-/// 饱和度提升:iOS 玻璃材料的标志 —— 糊掉细节的同时把底下的颜色"喂"回来。
-const SATURATE: f32 = 1.38;
 
 static FIRST_FRAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 static LAST_HASH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -173,82 +165,6 @@ fn downscale_2x(bgra: &[u8], width: u32, height: u32) -> (Vec<u8>, usize, usize)
         }
     }
     (out, dw, dh)
-}
-
-/// 饱和度提升:c' = luma + (c - luma) × factor。
-fn saturate(rgba: &mut [u8], factor: f32) {
-    for px in rgba.chunks_exact_mut(4) {
-        let (r, g, b) = (px[0] as f32, px[1] as f32, px[2] as f32);
-        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        let mix = |c: f32| -> u8 { (luma + (c - luma) * factor).round().clamp(0.0, 255.0) as u8 };
-        px[0] = mix(r);
-        px[1] = mix(g);
-        px[2] = mix(b);
-    }
-}
-
-/// 可分离盒式模糊:横竖一遍 O(1) 滑动窗口均值,重复 BLUR_PASSES 次逼近高斯。
-/// 半径 9 降采样像素在胶囊尺寸下亚毫秒级,拉到最大尺寸也只有几毫秒。
-fn box_blur(rgba: &mut Vec<u8>, width: usize, height: usize, radius: usize) {
-    const BLUR_PASSES: usize = 3;
-    if radius == 0 || width < 3 || height < 3 {
-        return;
-    }
-    let mut scratch = vec![0u8; rgba.len()];
-    for _ in 0..BLUR_PASSES {
-        blur_axis(rgba, &mut scratch, width, height, radius, true);
-        blur_axis(&mut scratch, rgba, width, height, radius, false);
-    }
-}
-
-/// 单方向滑动窗口均值:窗口左右边界各滑一步,均摊 O(1);
-/// 窗口截断到图内(不延拓),避免边缘读出黑边或重复计数。
-/// 源与目标同为行主序,相邻像素步长 horizontal ? 4 : width*4,两侧一致。
-fn blur_axis(src: &[u8], dst: &mut [u8], width: usize, height: usize, radius: usize, horizontal: bool) {
-    let (outer, inner, stride, base_step) = if horizontal {
-        (height, width, 4usize, width * 4)
-    } else {
-        (width, height, width * 4, 4usize)
-    };
-    for o in 0..outer {
-        let base = o * base_step;
-        let mut lo = 0usize;
-        let mut hi = radius.min(inner - 1);
-        let (mut sr, mut sg, mut sb) = (0u32, 0u32, 0u32);
-        for i in lo..=hi {
-            let idx = base + i * stride;
-            sr += src[idx] as u32;
-            sg += src[idx + 1] as u32;
-            sb += src[idx + 2] as u32;
-        }
-        for i in 0..inner {
-            let n = (hi - lo + 1) as u32;
-            let out_idx = base + i * stride;
-            dst[out_idx] = (sr / n) as u8;
-            dst[out_idx + 1] = (sg / n) as u8;
-            dst[out_idx + 2] = (sb / n) as u8;
-            dst[out_idx + 3] = 255;
-            // 滑向 i+1:右缘进入一格(未到图右界时),左缘离开一格(越过 radius 时)
-            let next_hi = (i + radius + 1).min(inner - 1);
-            if next_hi > hi {
-                hi = next_hi;
-                let idx = base + hi * stride;
-                sr += src[idx] as u32;
-                sg += src[idx + 1] as u32;
-                sb += src[idx + 2] as u32;
-            }
-            let next_lo = (i + 1).saturating_sub(radius);
-            if next_lo > lo {
-                for k in lo..next_lo {
-                    let idx = base + k * stride;
-                    sr -= src[idx] as u32;
-                    sg -= src[idx + 1] as u32;
-                    sb -= src[idx + 2] as u32;
-                }
-                lo = next_lo;
-            }
-        }
-    }
 }
 
 /// GDI 的 32bpp 是 BGRA,页面要 RGBA;顺带把 alpha 钉成不透明。
@@ -302,46 +218,6 @@ mod tests {
         assert_eq!((w, h), (2, 1));
         assert_eq!(out[0], 0);
         assert_eq!(out[2], 200);
-    }
-
-    #[test]
-    fn box_blur_uniform_field_stays_uniform() {
-        // 均匀场模糊后必须恒等(滑动窗口边界不引入暗角/黑边)
-        let mut rgba = vec![128u8; 20 * 12 * 4];
-        box_blur(&mut rgba, 20, 12, 9);
-        assert!(rgba.chunks_exact(4).all(|px| px[0] == 128 && px[3] == 255));
-    }
-
-    #[test]
-    fn box_blur_keeps_extreme_row_means() {
-        // 上半白下半黑:模糊后上半均值应显著高于下半(能量守恒,不许整体漂移)
-        let (w, h) = (8usize, 8usize);
-        let mut rgba = vec![0u8; w * h * 4];
-        for y in 0..h / 2 {
-            for x in 0..w {
-                let i = (y * w + x) * 4;
-                rgba[i] = 255;
-                rgba[i + 1] = 255;
-                rgba[i + 2] = 255;
-            }
-        }
-        box_blur(&mut rgba, w, h, 3);
-        let mean = |start: usize, end: usize| {
-            (start..end)
-                .map(|y| (0..w).map(|x| rgba[(y * w + x) * 4] as u64).sum::<u64>())
-                .sum::<u64>() as f64
-                / ((end - start) * w) as f64
-        };
-        assert!(mean(0, 2) > mean(6, 8) * 1.5); // 上半仍显著亮于下半(半径3×8行的扩散幅度)
-    }
-
-    #[test]
-    fn saturate_pushes_chroma_without_touching_gray() {
-        let mut px = [100, 100, 100, 255, 200, 100, 100, 255];
-        saturate(&mut px, 1.38);
-        assert_eq!(px[0], 100); // 灰色不动
-        assert!(px[4] > 200); // 高于 luma 的通道被推高
-        assert!(px[5] < 100); // 低于 luma 的通道被压低
     }
 
     #[test]

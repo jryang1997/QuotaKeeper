@@ -7,19 +7,19 @@
 <style>
   :root {
     color-scheme: dark;
-    /* 玻璃调参位:--glass-tint 是模糊桌面图之上的暗色覆膜(真毛玻璃的可读性靠它),
-       0 = 全透(浅色壁纸上文字发虚),0.6+ = 发闷。0.46 配合 Rust 侧提饱和,
-       玻璃透出底色层次的同时文字始终可读。 */
-    --glass-tint: rgba(10, 13, 20, 0.46);
+    /* 玻璃调参位:材质与 Dock 同配方(blur+saturate 的 backdrop-filter 实时渲染),
+       --glass-tint 是镜片之上的暗色覆膜,只负责文字可读性的深度,不负责糊度。 */
+    --glass-tint: rgba(10, 13, 20, 0.30);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font-family: "Sarasa Term SC Nerd", "Sarasa Mono SC", "Cascadia Mono", Consolas, monospace; }
 
-  /* 胶囊玻璃:--backdrop 是 Rust 抓来的真实桌面像素(backdrop.rs 已做降采样+高斯化模糊+提饱和)。
-     CSS 里 background-image 永远画在 background-color 之上,所以暗 tint 必须作为
-     独立图层叠在图片上方,否则会被不透明背景图完全盖住(玻璃发白、文字看不清的根因)。
-     图层自上而下:顶部高光 sheen / 底部内阴影 / 暗 tint / 桌面模糊图。
+  /* 液态玻璃分层(自下而上):
+     .glass::before  Rust 推来的原始桌面像素(降采样,未糊) —— 玻璃"后面的世界"
+     .lens           backdrop-filter 镜片:对下层像素实时 blur+saturate+提亮,Dock 同配方
+     .veil           顶部高光 sheen / 底部内阴影 / 暗 tint
+     .glass::after   1px 镜面 rim 亮环(左上最亮)
      玻璃边缘留 4px 不铺,让 tao 的 WM_NCHITTEST 拿到缩放命中。 */
   .glass {
     position: relative; isolation: isolate;
@@ -35,31 +35,42 @@
     content: ''; position: absolute; inset: 0; z-index: 0;
     border-radius: inherit;
     background-color: var(--glass-tint);
-    background-image:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 30%, rgba(255, 255, 255, 0) 55%),
-      linear-gradient(0deg, rgba(2, 6, 14, 0.34), rgba(2, 6, 14, 0) 34%),
-      linear-gradient(var(--glass-tint), var(--glass-tint)),
-      var(--backdrop, none);
-    background-size: 100% 100%, 100% 100%, 100% 100%, calc(100% + 8px) calc(100% + 8px);
+    background-image: var(--backdrop, none);
+    background-size: calc(100% + 8px) calc(100% + 8px);
     background-position: center;
     background-repeat: no-repeat;
   }
-  /* 抓不到桌面像素时(老系统/无权限):退化为自绘烟熏玻璃 */
+  .lens {
+    position: absolute; inset: 0; z-index: 1;
+    border-radius: inherit;
+    pointer-events: none;
+    -webkit-backdrop-filter: blur(26px) saturate(170%) brightness(1.05);
+            backdrop-filter: blur(26px) saturate(170%) brightness(1.05);
+  }
+  .veil {
+    position: absolute; inset: 0; z-index: 2;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 30%, rgba(255, 255, 255, 0) 55%),
+      linear-gradient(0deg, rgba(2, 6, 14, 0.30), rgba(2, 6, 14, 0) 36%),
+      linear-gradient(var(--glass-tint), var(--glass-tint));
+  }
+  /* 抓不到桌面像素时(老系统/无权限):退化为自绘烟熏玻璃,镜片空转无害 */
   body.no-backdrop .glass::before {
     background: linear-gradient(165deg, #1c2537f2, #131a29ec 42%, #0b1018f5);
-    -webkit-backdrop-filter: none; backdrop-filter: none;
   }
   /* 镜面 rim:左上最亮 */
   .glass::after {
-    content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; padding: 1px;
-    background: linear-gradient(155deg, #ffffff6b, #ffffff1a 32%, transparent 55%, #ffffff14 80%, #ffffff47);
+    content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; padding: 1px;
+    background: linear-gradient(155deg, #ffffff78, #ffffff1e 32%, transparent 55%, #ffffff18 80%, #ffffff52);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
             mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask-composite: exclude;
     pointer-events: none;
   }
-  .inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; }
+  .inner { position: relative; z-index: 4; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; }
 
   /* 环:默认态收成一枚,环外百分比 */
   .gauge { position: relative; flex: 0 0 auto; width: 58px; height: 58px; display: grid; place-items: center; }
@@ -70,7 +81,7 @@
     text-shadow: 0 1px 4px rgba(4, 8, 16, 0.95), 0 0 12px rgba(4, 8, 16, 0.7); }
 
   /* 文字层要独立于背景图保持可读:玻璃再透,字也要看得清 */
-.copy { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto;
+.copy { position: relative; z-index: 4; display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto;
     text-shadow: 0 1px 3px rgba(4, 8, 16, 0.9), 0 0 10px rgba(4, 8, 16, 0.55); }
   .copy .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .copy .dot { width: 7px; height: 7px; flex: none; border-radius: 2px; background: #4f7cf0; }
@@ -78,9 +89,9 @@
   .copy .plan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(238, 242, 250, 0.7); font-size: 9px; text-shadow: 0 1px 3px rgba(2, 6, 14, 0.5); }
   .copy .reset { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(238, 242, 250, 0.86); font-size: 10px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(2, 6, 14, 0.55); }
   .copy strong { text-shadow: 0 1px 4px rgba(2, 6, 14, 0.6); }
-  .empty { position: relative; z-index: 2; width: 100%; text-align: center; color: rgba(238, 242, 250, 0.6); font-size: 11px; }
+  .empty { position: relative; z-index: 4; width: 100%; text-align: center; color: rgba(238, 242, 250, 0.6); font-size: 11px; }
 
-  .nav { position: relative; z-index: 2; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+  .nav { position: relative; z-index: 4; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
   .nav button {
     width: 22px; height: 30px; border: 1px solid transparent; border-radius: 999px;
     background: rgba(255, 255, 255, 0.07); color: rgba(238, 242, 250, 0.86);
@@ -105,13 +116,15 @@
 
   /* 拖边角缩放的手感区(右下角) */
   .grip {
-    position: absolute; z-index: 3; right: 2px; bottom: 2px;
+    position: absolute; z-index: 5; right: 2px; bottom: 2px;
     width: 18px; height: 18px; cursor: nwse-resize;
   }
 </style>
 </head>
 <body>
 <div class="glass">
+  <div class="lens"></div>
+  <div class="veil"></div>
   <div class="inner" id="inner">
     <div class="gauge" id="gauge"></div>
     <div class="copy" id="copy">
