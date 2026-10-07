@@ -166,7 +166,7 @@ pub fn fetch_report() -> Result<Report> {
         .set("Authorization", &format!("Bearer {}", creds.access_token))
         .set("anthropic-beta", "oauth-2025-04-20")
         .set("Accept", "application/json")
-        .set("User-Agent", "tui-token-monitor/0.1")
+        .set("User-Agent", "quotakeeper/0.1")
         .timeout(TIMEOUT)
         .call()
         .map_err(|error| match error {

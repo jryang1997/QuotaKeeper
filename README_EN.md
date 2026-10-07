@@ -1,12 +1,12 @@
 <div align="center">
 
-# tui-token-monitor
+# quotakeeper
 
 Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — in your terminal or on your Windows desktop. Local-first; no relay server involved.
 
 ![GUI quota page](assets/screenshots/gui-overview.png)
 
-[![CI](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml)
+[![CI](https://github.com/jryang1997/QuotaKeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/QuotaKeeper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![TUI Rust 1.88+](https://img.shields.io/badge/TUI%20Rust-1.88%2B-orange)
 ![Platform: Windows first](https://img.shields.io/badge/platform-Windows%20first-lightgrey)
@@ -37,7 +37,7 @@ Desktop GUI (four pages): **Quota** (a one-screen quota strip plus full provider
 | OpenCode Go | official usage API | Windows Credential Manager / `OPENCODE_GO_API_KEY` / OpenCode login |
 | Codex | official `app-server` (fallback: wham endpoint → OMP) | Codex CLI login (`CODEX_HOME` honored) |
 | Command Code GOAT | billing API | Credential Manager / `COMMAND_CODE_API_KEY` / `cmdc login` |
-| Antigravity | Google upstream via [CPA](https://github.com/luispater/CLIProxyAPI) | `~/.tui-token-monitor/cpa-key` |
+| Antigravity | Google upstream via [CPA](https://github.com/luispater/CLIProxyAPI) | `~/.quotakeeper/cpa-key` |
 | Claude Pro/Max | official `oauth/usage` endpoint | Claude Code login (`~/.claude/.credentials.json`) |
 | Cursor | usage-summary (undocumented endpoint) | Cursor login (state.vscdb / `cursor-agent login`) |
 | GLM Coding | z.ai / bigmodel monitor endpoint | `GLM_API_KEY`; global region also needs `GLM_API_BASE=https://api.z.ai` |

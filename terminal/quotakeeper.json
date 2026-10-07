@@ -1,7 +1,7 @@
 {
     "profiles": [
         {
-            "name": "tui-token-monitor",
+            "name": "quotakeeper",
             "commandline": "cmd.exe",
             "font": {
                 "face": "Sarasa Term SC"

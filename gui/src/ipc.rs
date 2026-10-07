@@ -6,11 +6,11 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
-use tui_token_monitor::goat::UsageSummary;
-use tui_token_monitor::deepseek_balance::BalanceState;
-use tui_token_monitor::ledger::{self, Agg};
-use tui_token_monitor::model::{self, Card, Snapshot};
-use tui_token_monitor::settings;
+use quotakeeper::goat::UsageSummary;
+use quotakeeper::deepseek_balance::BalanceState;
+use quotakeeper::ledger::{self, Agg};
+use quotakeeper::model::{self, Card, Snapshot};
+use quotakeeper::settings;
 
 #[derive(Serialize)]
 pub struct AggDto {

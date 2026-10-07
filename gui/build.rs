@@ -38,8 +38,8 @@ fn embed_icon() -> std::io::Result<()> {
     println!("cargo:rerun-if-changed={}", icon.display());
     let mut res = winresource::WindowsResource::new();
     res.set_icon(icon.to_str().expect("icon path"));
-    res.set("FileDescription", "TUI Token Monitor (GUI)");
-    res.set("ProductName", "TUI Token Monitor");
+    res.set("FileDescription", "TUI QuotaKeeper (GUI)");
+    res.set("ProductName", "TUI QuotaKeeper");
     res.compile()
 }
 

@@ -93,8 +93,8 @@ enum UserEvent {
     SetLanDashboard(bool),
 }
 
-fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f64)> {
-    use tui_token_monitor::model::{Card, QuotaSource};
+fn quota_levels(snap: &quotakeeper::model::Snapshot) -> Vec<(String, u8, f64)> {
+    use quotakeeper::model::{Card, QuotaSource};
     snap.cards
         .iter()
         .flat_map(|card| match card {
@@ -114,7 +114,7 @@ fn quota_levels(snap: &tui_token_monitor::model::Snapshot) -> Vec<(String, u8, f
                     );
                     (
                         title,
-                        tui_token_monitor::ui::notify::level_for(limit.used_pct),
+                        quotakeeper::ui::notify::level_for(limit.used_pct),
                         limit.used_pct,
                     )
                 })
@@ -141,7 +141,7 @@ fn valid_model_name(model: &str) -> bool {
 
 /// 首页套餐卡可展示的 API key(仅应用自己存在凭据管理器里的)。
 fn provider_key(slug: &str) -> Option<String> {
-    use tui_token_monitor::credential;
+    use quotakeeper::credential;
     match slug {
         "opencode-go" => credential::open_code_go_key().ok().flatten(),
         "goat" => credential::command_code_key().ok().flatten(),
@@ -244,7 +244,7 @@ fn main() -> anyhow::Result<()> {
     let icon = tao::window::Icon::from_rgba(load_icon_rgba(), 32, 32).ok();
 
     let win = WindowBuilder::new()
-        .with_title("Token Monitor")
+        .with_title("QuotaKeeper")
         .with_inner_size(tao::dpi::LogicalSize::new(1180.0, 760.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(960.0, 640.0))
         .with_window_icon(icon)
@@ -270,13 +270,13 @@ fn main() -> anyhow::Result<()> {
                 "refresh" => refresh::spawn(ipc_tx.clone()),
                 "setPlanBenchmark" => {
                     if let Some(amount) = command.amount
-                        && tui_token_monitor::settings::save_monthly_plan_benchmark(amount).is_ok()
+                        && quotakeeper::settings::save_monthly_plan_benchmark(amount).is_ok()
                     {
                         refresh::spawn_ledger(ipc_tx.clone());
                     }
                 }
                 "resetPlanBenchmark" => {
-                    if tui_token_monitor::settings::reset_monthly_plan_benchmark().is_ok() {
+                    if quotakeeper::settings::reset_monthly_plan_benchmark().is_ok() {
                         refresh::spawn_ledger(ipc_tx.clone());
                     }
                 }
@@ -389,7 +389,7 @@ fn main() -> anyhow::Result<()> {
     let mut overlay_dirty = true;
     let mut latest_snapshot = fallback_snapshot();
     let mut quota_error = None;
-    let mut alert_tracker = tui_token_monitor::ui::notify::AlertTracker::default();
+    let mut alert_tracker = quotakeeper::ui::notify::AlertTracker::default();
     let mut notify_enabled = false;
     let mut pace_alerts_enabled = false;
     let mut quiet_hours = false;
@@ -397,17 +397,17 @@ fn main() -> anyhow::Result<()> {
     let mut notify_lang = 0;
     let mut latest_quota_fetched_at_ms = 0_u64;
     let mut latest_quota_checked_at_ms = 0_u64;
-    let mut latest_ledger: Option<std::sync::Arc<tui_token_monitor::ledger::LedgerReport>> = None;
+    let mut latest_ledger: Option<std::sync::Arc<quotakeeper::ledger::LedgerReport>> = None;
     let mut latest_ledger_fetched_at_ms = 0_u64;
-    let mut latest_goat_usage = None::<tui_token_monitor::goat::UsageSummary>;
-    let mut latest_deepseek_balance = tui_token_monitor::deepseek_balance::BalanceState::MissingKey;
+    let mut latest_goat_usage = None::<quotakeeper::goat::UsageSummary>;
+    let mut latest_deepseek_balance = quotakeeper::deepseek_balance::BalanceState::MissingKey;
     let webview = std::cell::RefCell::new(webview);
     let mut overlay: Option<(tao::window::Window, wry::WebView)> = None;
     let mut overlay_index: usize = 0;
     let mut overlay_last_save = std::time::Instant::now();
     // 拖动/缩放期间 ResumeTimeReached 不会到(模态移动循环),背景帧必须在这里直推
     let mut overlay_last_push = std::time::Instant::now();
-    let mut lan_server = if tui_token_monitor::settings::lan_dashboard_enabled() {
+    let mut lan_server = if quotakeeper::settings::lan_dashboard_enabled() {
         lan::LanServer::start()
     } else {
         None
@@ -425,7 +425,7 @@ fn main() -> anyhow::Result<()> {
                 if let Ok(icon) = tray_icon::Icon::from_rgba(load_icon_rgba(), 32, 32) {
                     tray = TrayIconBuilder::new()
                         .with_icon(icon)
-                        .with_tooltip("Token Monitor · 左键打开，右键查看更多")
+                        .with_tooltip("QuotaKeeper · 左键打开，右键查看更多")
                         .with_menu(Box::new(tray_menu.clone()))
                         .build()
                         .ok();
@@ -527,41 +527,41 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 let enabled = desktop::autostart_enabled().unwrap_or(false);
-                let go_key_stored = tui_token_monitor::credential::has_open_code_go_key();
-                let goat_key_stored = tui_token_monitor::credential::has_command_code_key();
-                let deepseek_key_stored = tui_token_monitor::credential::has_deepseek_key();
-                let plan_models = serde_json::to_string(&tui_token_monitor::settings::plan_models())
+                let go_key_stored = quotakeeper::credential::has_open_code_go_key();
+                let goat_key_stored = quotakeeper::credential::has_command_code_key();
+                let deepseek_key_stored = quotakeeper::credential::has_deepseek_key();
+                let plan_models = serde_json::to_string(&quotakeeper::settings::plan_models())
                     .unwrap_or_else(|_| "{}".into());
                 let lan_status = lan_status_json(&lan_server);
                 let _ = webview.borrow().evaluate_script(&format!("window.__onNativeState?.({{autostart:{enabled},goKeyStored:{go_key_stored},goatKeyStored:{goat_key_stored},deepseekKeyStored:{deepseek_key_stored},planModels:{plan_models},lan:{lan_status}}})"));
             }
             Event::UserEvent(UserEvent::SetGoApiKey(key)) => {
                 let result = match key {
-                    Some(key) => tui_token_monitor::credential::set_open_code_go_key(&key),
-                    None => tui_token_monitor::credential::delete_open_code_go_key(),
+                    Some(key) => quotakeeper::credential::set_open_code_go_key(&key),
+                    None => quotakeeper::credential::delete_open_code_go_key(),
                 };
                 let success = result.is_ok();
-                let stored = tui_token_monitor::credential::has_open_code_go_key();
+                let stored = quotakeeper::credential::has_open_code_go_key();
                 let _ = webview.borrow().evaluate_script(&format!("window.__onGoKeyResult?.({{success:{success},stored:{stored}}})"));
                 if success { refresh::spawn_quota(tx.clone()); }
             }
             Event::UserEvent(UserEvent::SetGoatApiKey(key)) => {
                 let result = match key {
-                    Some(key) => tui_token_monitor::credential::set_command_code_key(&key),
-                    None => tui_token_monitor::credential::delete_command_code_key(),
+                    Some(key) => quotakeeper::credential::set_command_code_key(&key),
+                    None => quotakeeper::credential::delete_command_code_key(),
                 };
                 let success = result.is_ok();
-                let stored = tui_token_monitor::credential::has_command_code_key();
+                let stored = quotakeeper::credential::has_command_code_key();
                 let _ = webview.borrow().evaluate_script(&format!("window.__onGoatKeyResult?.({{success:{success},stored:{stored}}})"));
                 if success { refresh::spawn_quota(tx.clone()); }
             }
             Event::UserEvent(UserEvent::SetDeepSeekApiKey(key)) => {
                 let result = match key {
-                    Some(key) => tui_token_monitor::credential::set_deepseek_key(&key),
-                    None => tui_token_monitor::credential::delete_deepseek_key(),
+                    Some(key) => quotakeeper::credential::set_deepseek_key(&key),
+                    None => quotakeeper::credential::delete_deepseek_key(),
                 };
                 let success = result.is_ok();
-                let stored = tui_token_monitor::credential::has_deepseek_key();
+                let stored = quotakeeper::credential::has_deepseek_key();
                 let _ = webview.borrow().evaluate_script(&format!("window.__onDeepSeekKeyResult?.({{success:{success},stored:{stored}}})"));
                 if success { refresh::spawn_quota(tx.clone()); }
             }
@@ -615,7 +615,7 @@ fn main() -> anyhow::Result<()> {
                 ));
             }
             Event::UserEvent(UserEvent::PlanModelsImport(provider, models)) => {
-                let ok = tui_token_monitor::settings::save_plan_models(&provider, &models).is_ok();
+                let ok = quotakeeper::settings::save_plan_models(&provider, &models).is_ok();
                 let payload = serde_json::json!({ "provider": provider, "ok": ok });
                 let _ = webview.borrow().evaluate_script(&format!(
                     "window.__onPlanModelsSaved?.({})",
@@ -634,7 +634,7 @@ fn main() -> anyhow::Result<()> {
                     .evaluate_script(&format!("window.__onShareImageSaved?.({message})"));
             }
             Event::UserEvent(UserEvent::SetLanDashboard(enabled)) => {
-                let _ = tui_token_monitor::settings::save_lan_dashboard_enabled(enabled);
+                let _ = quotakeeper::settings::save_lan_dashboard_enabled(enabled);
                 lan_server = None; // Drop 即停
                 if enabled {
                     lan_server = lan::LanServer::start();
@@ -721,30 +721,30 @@ fn main() -> anyhow::Result<()> {
                                         .iter()
                                         .max_by(|a, b| a.2.total_cmp(&b.2))
                                         .map(|(title, _, pct)| {
-                                            format!("Token Monitor · {title} {pct:.0}%")
+                                            format!("QuotaKeeper · {title} {pct:.0}%")
                                         })
                                         .unwrap_or_else(|| {
-                                            "Token Monitor · 暂无可用额度".to_string()
+                                            "QuotaKeeper · 暂无可用额度".to_string()
                                         });
                                     let _ = tray_icon.set_tooltip(Some(tooltip));
                                 }
                                 let lang = if notify_lang == 1 {
-                                    tui_token_monitor::ui::i18n::Lang::En
+                                    quotakeeper::ui::i18n::Lang::En
                                 } else {
-                                    tui_token_monitor::ui::i18n::Lang::Zh
+                                    quotakeeper::ui::i18n::Lang::Zh
                                 };
                                 if !(quiet_hours && in_quiet_hours()) {
                                     if notify_enabled {
                                         for alert in alerts.quota {
-                                            tui_token_monitor::ui::notify::toast(
+                                            quotakeeper::ui::notify::toast(
                                                 &alert.title,
                                                 &format!("{:.0}% {}", alert.used_pct, alert.event.message_for(lang)),
                                             );
                                         }
                                         for alert in alerts.expiry {
-                                            tui_token_monitor::ui::notify::toast(
-                                                &tui_token_monitor::ui::notify::expiry_title_for(&alert.provider, lang),
-                                                &tui_token_monitor::ui::notify::expiry_message_for(
+                                            quotakeeper::ui::notify::toast(
+                                                &quotakeeper::ui::notify::expiry_title_for(&alert.provider, lang),
+                                                &quotakeeper::ui::notify::expiry_message_for(
                                                     alert.ends_at_ms, r.fetched_at_ms as i64, lang,
                                                 ),
                                             );
@@ -758,7 +758,7 @@ fn main() -> anyhow::Result<()> {
                                             } else {
                                                 format!("比匀速快 {:.0} 个百分点；预计 {minutes} 分钟后耗尽", alert.delta_points)
                                             };
-                                            tui_token_monitor::ui::notify::toast(&alert.title, &message);
+                                            quotakeeper::ui::notify::toast(&alert.title, &message);
                                         }
                                     }
                                 }
@@ -778,7 +778,7 @@ fn main() -> anyhow::Result<()> {
                                 }
                                 if let Some(tray_icon) = tray.as_ref() {
                                     let _ =
-                                        tray_icon.set_tooltip(Some("Token Monitor · 额度读取失败"));
+                                        tray_icon.set_tooltip(Some("QuotaKeeper · 额度读取失败"));
                                 }
                             }
                         }
@@ -906,8 +906,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// quota 全挂时前端也要拿到 ledger 与空卡(四卡永不缺位,同 TUI 语义)。
-fn fallback_snapshot() -> tui_token_monitor::model::Snapshot {
-    use tui_token_monitor::model::{Card, ProviderId, Snapshot};
+fn fallback_snapshot() -> quotakeeper::model::Snapshot {
+    use quotakeeper::model::{Card, ProviderId, Snapshot};
     Snapshot {
         generated_at_ms: refresh::now_ms() as i64,
         cards: ProviderId::all()
@@ -989,7 +989,7 @@ fn parse_ico(data: &[u8]) -> Option<Vec<(u8, u8, Vec<u8>)>> {
 #[cfg(test)]
 mod tray_tests {
     use super::*;
-    use tui_token_monitor::model::{
+    use quotakeeper::model::{
         Card, Limit, ProviderId, QuotaSource, Report, Snapshot, Status,
     };
 

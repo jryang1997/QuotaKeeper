@@ -113,8 +113,8 @@ impl ProviderId {
                 "Set a GOAT API key (app settings or COMMAND_CODE_API_KEY), or use cmdc login",
             ],
             Self::Antigravity => [
-                "CPA 未运行或 ~/.tui-token-monitor/cpa-key 未配置",
-                "CPA not running, or ~/.tui-token-monitor/cpa-key missing",
+                "CPA 未运行或 ~/.quotakeeper/cpa-key 未配置",
+                "CPA not running, or ~/.quotakeeper/cpa-key missing",
             ],
             Self::Claude => [
                 "未找到 Claude Code 登录态；运行 `claude` 登录后刷新",

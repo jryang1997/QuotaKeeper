@@ -1,5 +1,5 @@
 fn main() -> anyhow::Result<()> {
-    let key = tui_token_monitor::credential::command_code_key()?.or_else(|| std::env::var("COMMAND_CODE_API_KEY").ok()).or_else(|| std::env::var("CMD_API_KEY").ok()).or_else(|| {
+    let key = quotakeeper::credential::command_code_key()?.or_else(|| std::env::var("COMMAND_CODE_API_KEY").ok()).or_else(|| std::env::var("CMD_API_KEY").ok()).or_else(|| {
         let home = std::env::var("USERPROFILE").ok()?;
         let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{home}/.commandcode/auth.json")).ok()?).ok()?;
         value.get("apiKey")?.as_str().map(str::to_owned)
@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
             Err(error) => println!("{path}: {error}"),
         }
     }
-    let report = tui_token_monitor::goat::fetch_report()?;
+    let report = quotakeeper::goat::fetch_report()?;
     println!("plan={}, limits={:?}", report.plan_type, report.limits.iter().map(|l| (&l.label, l.used_pct)).collect::<Vec<_>>());
     assert!(report.limits.iter().any(|l| l.label.starts_with("Monthly")), "monthly progress missing");
     Ok(())

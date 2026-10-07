@@ -1,12 +1,12 @@
 <div align="center">
 
-# tui-token-monitor
+# quotakeeper
 
 终端与 Windows 桌面上的 AI coding 用量监测台:订阅配额、token 账本、燃烧率、热力图。本地优先,不经过任何中转服务器。
 
 ![GUI 配额页](assets/screenshots/gui-overview.png)
 
-[![CI](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/tui-token-monitor/actions/workflows/ci.yml)
+[![CI](https://github.com/jryang1997/QuotaKeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/QuotaKeeper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![TUI Rust 1.88+](https://img.shields.io/badge/TUI%20Rust-1.88%2B-orange)
 ![Platform: Windows 优先](https://img.shields.io/badge/platform-Windows%20first-lightgrey)
@@ -34,7 +34,7 @@ Rust 单二进制 TUI(ratatui)+ Windows 桌面壳(WebView2):
 | OpenCode Go | 官方 usage API | Windows 凭据管理器 / `OPENCODE_GO_API_KEY` / OpenCode 登录态 |
 | Codex | 官方 `app-server`(回退:wham 接口 → OMP 兜底) | Codex CLI 登录态(`CODEX_HOME` 可重定向) |
 | Command Code GOAT | billing API | Windows 凭据管理器 / `COMMAND_CODE_API_KEY` / `cmdc login` 登录态 |
-| Antigravity | 经 [CPA](https://github.com/luispater/CLIProxyAPI) 代查 Google 上游配额 | `~/.tui-token-monitor/cpa-key` |
+| Antigravity | 经 [CPA](https://github.com/luispater/CLIProxyAPI) 代查 Google 上游配额 | `~/.quotakeeper/cpa-key` |
 | Claude Pro/Max | 官方 `oauth/usage` 接口 | Claude Code 登录态(`~/.claude/.credentials.json`) |
 | Cursor | usage-summary(未文档化接口) | Cursor 登录态(state.vscdb / `cursor-agent login`) |
 | GLM Coding | z.ai / bigmodel monitor 接口 | `GLM_API_KEY`;国际站另设 `GLM_API_BASE=https://api.z.ai` |
@@ -93,7 +93,7 @@ run_gui.bat                   # GNU 构建自动把 WebView2Loader.dll 复制到
 ## 配置与键位
 
 - 配额凭据按上表配置即可,缺哪张卡,卡片会显示准确的缺失原因与修复途径。
-- 主题 `p` 循环(跟随系统/浅色/深色/深海/暖纸),语言 `l` 切换,均持久化在 `~/.tui-token-monitor/`。
+- 主题 `p` 循环(跟随系统/浅色/深色/深海/暖纸),语言 `l` 切换,均持久化在 `~/.quotakeeper/`。
 - 交互:`1·2·3·4` 切页(总览/配额/用量/热力图),总览页 `←→` 切周期(今日/7天/30天/90天/全部),`↑↓/kj/Tab` 翻页;用量页 `s` 切维度、`g` 切表格/趋势、`t` 切 24h/14d、`c` 切 Token/金额;`?` 全部快捷键;`r` 刷新;`q` 退出。
 - 终端字体推荐等宽中文字体(如 Sarasa Term SC / 更纱黑体),进度条与中文对齐不跑版。
 

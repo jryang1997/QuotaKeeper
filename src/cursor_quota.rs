@@ -276,7 +276,7 @@ pub fn fetch_report() -> Result<Report> {
     let response = crate::http::get(USAGE_URL)
         .set("Cookie", &cookie)
         .set("Accept", "application/json")
-        .set("User-Agent", "tui-token-monitor/0.1")
+        .set("User-Agent", "quotakeeper/0.1")
         .timeout(TIMEOUT)
         .call()
         .map_err(|error| match error {

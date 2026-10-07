@@ -1,19 +1,19 @@
 [package]
-name = "tui-token-monitor-gui"
+name = "quotakeeper-gui"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
-description = "Windows desktop shell (WebView2) for tui-token-monitor"
+description = "Windows desktop shell (WebView2) for quotakeeper"
 license = "MIT"
-repository = "https://github.com/jryang1997/tui-token-monitor"
+repository = "https://github.com/jryang1997/QuotaKeeper"
 build = "build.rs"
 
 [[bin]]
-name = "tui-token-monitor-gui"
+name = "quotakeeper-gui"
 path = "src/main.rs"
 
 [dependencies]
-tui-token-monitor = { path = ".." }
+quotakeeper = { path = ".." }
 wry = "0.53"
 tao = "0.34"
 serde = { version = "1", features = ["derive"] }

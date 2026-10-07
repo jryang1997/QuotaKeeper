@@ -118,7 +118,7 @@ pub fn fetch_report() -> Result<Report> {
     let response = crate::http::get(USAGE_URL)
         .set("Authorization", &format!("Bearer {key}"))
         .set("Accept", "application/json")
-        .set("User-Agent", "tui-token-monitor/0.1")
+        .set("User-Agent", "quotakeeper/0.1")
         .timeout(Duration::from_secs(12))
         .call()
         .map_err(|error| match error {

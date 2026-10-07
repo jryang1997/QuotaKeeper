@@ -1,4 +1,4 @@
-//! 双语(中/英)界面文案:`l` 键切换,选择持久化到 `~/.tui-token-monitor/lang`.
+//! 双语(中/英)界面文案:`l` 键切换,选择持久化到 `~/.quotakeeper/lang`.
 //!
 //! 所有界面文字集中在这里;带参数的用小函数(`age`/`msgs`/`rel`…)。
 //! 数据层错误串保持原样(诊断信息,不做翻译)。
@@ -592,14 +592,14 @@ pub fn rel(ms_ago: i64) -> String {
 const FILE: &str = "lang";
 
 pub fn load(home: &std::path::Path) {
-    let path = home.join(".tui-token-monitor").join(FILE);
+    let path = home.join(".quotakeeper").join(FILE);
     if let Ok(name) = std::fs::read_to_string(path) {
         set(name.trim());
     }
 }
 
 pub fn save(home: &std::path::Path) {
-    let dir = home.join(".tui-token-monitor");
+    let dir = home.join(".quotakeeper");
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::write(
             dir.join(FILE),

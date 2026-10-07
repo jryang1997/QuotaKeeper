@@ -3,15 +3,15 @@
 //! - 落盘:每次满足节流条件的 push 后原子写(同目录 tmp + rename),失败静默
 //!   (缓存只是体验优化,绝不能影响主流程);
 //! - 回放:webview 就绪后把缓存的 payload 打上 `stale:true` 推给前端;
-//! - 位置:`%USERPROFILE%\.tui-token-monitor\gui-last-push.json`.
+//! - 位置:`%USERPROFILE%\.quotakeeper\gui-last-push.json`.
 
 use std::io::Write;
 use std::path::PathBuf;
 
-use tui_token_monitor::paths;
+use quotakeeper::paths;
 
 pub fn cache_path(home: &std::path::Path) -> PathBuf {
-    home.join(".tui-token-monitor").join("gui-last-push.json")
+    home.join(".quotakeeper").join("gui-last-push.json")
 }
 
 /// 读缓存 payload(原始 JSON);缺失或不像我们的 push 则 None.

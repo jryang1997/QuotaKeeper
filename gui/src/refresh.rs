@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, deepseek_balance, goat, ledger, model};
+use quotakeeper::{backend, deepseek_balance, goat, ledger, model};
 
 use model::Snapshot;
 

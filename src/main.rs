@@ -7,7 +7,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tui_token_monitor::{backend, ledger, ui};
+use quotakeeper::{backend, ledger, ui};
 
 use crossterm::{
     event::{
@@ -19,7 +19,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use tui_token_monitor::model::Snapshot;
+use quotakeeper::model::Snapshot;
 use ui::{HitRegions, Page, TrendMetric, TrendRange};
 
 enum Msg {

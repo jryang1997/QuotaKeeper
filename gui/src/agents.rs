@@ -10,7 +10,7 @@ use crate::UserEvent;
 static SCANNING: AtomicBool = AtomicBool::new(false);
 static UPDATING: AtomicBool = AtomicBool::new(false);
 
-fn payload_of(scans: &[tui_token_monitor::agents_scan::AgentScan]) -> String {
+fn payload_of(scans: &[quotakeeper::agents_scan::AgentScan]) -> String {
     serde_json::to_string(scans).unwrap_or_else(|_| "[]".into())
 }
 
@@ -19,7 +19,7 @@ pub(crate) fn scan(proxy: EventLoopProxy<UserEvent>) {
         return;
     }
     std::thread::spawn(move || {
-        let payload = payload_of(&tui_token_monitor::agents_scan::scan_all());
+        let payload = payload_of(&quotakeeper::agents_scan::scan_all());
         SCANNING.store(false, Ordering::SeqCst);
         let _ = proxy.send_event(UserEvent::AgentsScanned(payload));
     });
@@ -32,14 +32,14 @@ pub(crate) fn update(proxy: EventLoopProxy<UserEvent>, tool_id: String) {
         return;
     }
     std::thread::spawn(move || {
-        let specs = tui_token_monitor::agents_scan::specs();
+        let specs = quotakeeper::agents_scan::specs();
         let targets: Vec<&_> = match tool_id.as_str() {
             "all" => specs.iter().collect(),
             id => specs.iter().filter(|spec| spec.id == id).collect(),
         };
         let mut results = Vec::new();
         for spec in targets {
-            let scan = tui_token_monitor::agents_scan::scan_one(spec);
+            let scan = quotakeeper::agents_scan::scan_one(spec);
             let command = scan
                 .default_install()
                 .and_then(|install| install.update_command.clone());
@@ -47,7 +47,7 @@ pub(crate) fn update(proxy: EventLoopProxy<UserEvent>, tool_id: String) {
                 results.push((spec.id.to_string(), false, "no-update-command".to_string()));
                 continue;
             };
-            let (ok, message) = match tui_token_monitor::agents_scan::run_update(&command) {
+            let (ok, message) = match quotakeeper::agents_scan::run_update(&command) {
                 Ok(tail) => (true, tail),
                 Err(message) => (false, message),
             };
@@ -56,7 +56,7 @@ pub(crate) fn update(proxy: EventLoopProxy<UserEvent>, tool_id: String) {
                 break;
             }
         }
-        let payload = payload_of(&tui_token_monitor::agents_scan::scan_all());
+        let payload = payload_of(&quotakeeper::agents_scan::scan_all());
         UPDATING.store(false, Ordering::SeqCst);
         let _ = proxy.send_event(UserEvent::AgentUpdateFinished {
             results,

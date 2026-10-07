@@ -1,5 +1,5 @@
 //! 悬浮小窗:置顶显示当前套餐的 5 小时/周/月三环,上下按钮在有数据的套餐间切换。
-//! 独立 tao 无边框窗口 + 置顶 + 不进任务栏;位置记在 ~/.tui-token-monitor/overlay.json。
+//! 独立 tao 无边框窗口 + 置顶 + 不进任务栏;位置记在 ~/.quotakeeper/overlay.json。
 //! 环口径与 TUI quota.rs 一致(按 limit 标签关键字归 5h/周/月三槽)。
 
 use serde::Serialize;
@@ -16,8 +16,8 @@ use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOB
 
 use crate::UserEvent;
 
-use tui_token_monitor::model::{Card, QuotaSource, Snapshot};
-use tui_token_monitor::ui::notify::level_for;
+use quotakeeper::model::{Card, QuotaSource, Snapshot};
+use quotakeeper::ui::notify::level_for;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +41,7 @@ pub struct OverlayData {
 }
 
 /// 有配额环的 Live 卡(CPA 本地活动卡无环,同托盘口径排除)。
-fn live_cards(snapshot: &Snapshot) -> Vec<&tui_token_monitor::model::Report> {
+fn live_cards(snapshot: &Snapshot) -> Vec<&quotakeeper::model::Report> {
     snapshot
         .cards
         .iter()
@@ -60,7 +60,7 @@ pub fn data_for(snapshot: &Snapshot, index: usize) -> OverlayData {
     let cards = live_cards(snapshot);
     if cards.is_empty() {
         return OverlayData {
-            title: "Token Monitor".into(),
+            title: "QuotaKeeper".into(),
             plan_type: String::new(),
             rings: Vec::new(),
             index: 0,
@@ -106,7 +106,7 @@ pub fn push(webview: &wry::WebView, snapshot: &Snapshot, index: usize) {
 }
 
 fn position_path() -> Option<std::path::PathBuf> {
-    dirs_home().map(|home| home.join(".tui-token-monitor").join("overlay.json"))
+    dirs_home().map(|home| home.join(".quotakeeper").join("overlay.json"))
 }
 
 fn dirs_home() -> Option<std::path::PathBuf> {
@@ -169,10 +169,12 @@ fn prepare_window(window: &Window) -> bool {
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, corner_raw.as_ptr().cast(), 4);
         DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as u32, border_none.as_ptr().cast(), 4);
     };
-    // QA 旋钮:TUI_TM_OVERLAY_NO_EXCLUDE=1 时不把自己从屏幕捕获里排除,
+    // QA 旋钮:QK_OVERLAY_NO_EXCLUDE=1 (兼容旧名 TUI_TM_OVERLAY_NO_EXCLUDE) 时不把自己从屏幕捕获里排除,
     // 桌面级截图(CopyFromScreen)才能拍到悬浮窗的真实观感;平时必须排除,
     // 否则抓背板会把自己抓进去。
-    if std::env::var_os("TUI_TM_OVERLAY_NO_EXCLUDE").is_some() {
+    if std::env::var_os("QK_OVERLAY_NO_EXCLUDE").is_some()
+        || std::env::var_os("TUI_TM_OVERLAY_NO_EXCLUDE").is_some()
+    {
         return true;
     }
     crate::backdrop::exclude_from_capture(hwnd)
@@ -230,7 +232,7 @@ pub(crate) fn create(
 ) -> anyhow::Result<(Window, wry::WebView)> {
     let saved = load_size();
     let mut builder = WindowBuilder::new()
-        .with_title("Token Monitor 悬浮窗")
+        .with_title("QuotaKeeper 悬浮窗")
         .with_inner_size(LogicalSize::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1))
         .with_min_inner_size(LogicalSize::new(MIN_SIZE.0 as f64, MIN_SIZE.1 as f64))
         .with_max_inner_size(LogicalSize::new(MAX_SIZE.0 as f64, MAX_SIZE.1 as f64))

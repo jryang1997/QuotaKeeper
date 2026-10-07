@@ -1,6 +1,6 @@
 //! LiteLLM 开放价目数据集估价(与 tokscale 同源),磁盘缓存 + 后台自动刷新.
 //!
-//! - 缓存:`%USERPROFILE%\.tui-token-monitor\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
+//! - 缓存:`%USERPROFILE%\.quotakeeper\litellm-pricing.json`(HOME 缺失则不落盘),读取不联网;
 //! - 查找:精确名 → 大小写全名 → canonical 别名 → 厂商官方条目(家族前缀,裸名) → 反向别名 → provider 后缀众数 → 家族兜底;
 //! - 官方兜底:裸名回落厂商官方条目;主条目缺消耗桶(cache_read/cache_write 无价)
 //!   时用官方条目补缺桶,渠道价完整的桶一律不动;
@@ -70,7 +70,7 @@ struct CacheDoc {
 }
 
 pub fn cache_path(home: &Path) -> PathBuf {
-    home.join(".tui-token-monitor").join("litellm-pricing.json")
+    home.join(".quotakeeper").join("litellm-pricing.json")
 }
 
 /// 打开应用即后台拉最新价,每 24h 续拉;只写缓存,不碰内存表.

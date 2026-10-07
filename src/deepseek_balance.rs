@@ -62,7 +62,7 @@ fn now_ms() -> u64 {
 }
 
 fn history_path() -> std::path::PathBuf {
-    paths::home_dir().join(".tui-token-monitor").join("deepseek-balance-history.json")
+    paths::home_dir().join(".quotakeeper").join("deepseek-balance-history.json")
 }
 
 fn amount(value: &str) -> Result<f64, String> {

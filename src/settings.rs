@@ -31,7 +31,7 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn settings_path(home: &Path) -> PathBuf {
-    home.join(".tui-token-monitor").join(FILE_NAME)
+    home.join(".quotakeeper").join(FILE_NAME)
 }
 
 pub fn monthly_plan_benchmark() -> PlanBenchmark {
@@ -166,7 +166,7 @@ mod tests {
 
     fn temp_home() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "tui-token-monitor-settings-{}-{}",
+            "quotakeeper-settings-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

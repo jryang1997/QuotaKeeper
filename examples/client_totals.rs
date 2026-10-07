@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
-use tui_token_monitor::ledger::{self, claude, codex, dsh, omp, opencode, zcode};
+use quotakeeper::ledger::{self, claude, codex, dsh, omp, opencode, zcode};
 
 fn main() {
     let home = paths_home();
@@ -84,5 +84,5 @@ fn main() {
 }
 
 fn paths_home() -> std::path::PathBuf {
-    tui_token_monitor::paths::home_dir()
+    quotakeeper::paths::home_dir()
 }

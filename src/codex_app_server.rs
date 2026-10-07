@@ -167,7 +167,7 @@ pub fn fetch_report() -> Result<Report> {
         let deadline = Instant::now() + TIMEOUT;
         send(
             &mut stdin,
-            json!({"method":"initialize","id":0,"params":{"clientInfo":{"name":"tui_token_monitor","title":"Token Monitor","version":env!("CARGO_PKG_VERSION")}}}),
+            json!({"method":"initialize","id":0,"params":{"clientInfo":{"name":"quotakeeper","title":"QuotaKeeper","version":env!("CARGO_PKG_VERSION")}}}),
         )?;
         response(&rx, 0, deadline)?;
         send(&mut stdin, json!({"method":"initialized","params":{}}))?;

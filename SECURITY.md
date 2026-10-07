@@ -2,7 +2,7 @@
 
 ## 报告漏洞
 
-请通过 GitHub [Private Security Advisory](https://github.com/jryang1997/tui-token-monitor/security/advisories/new) 私下报告,不要开公开 issue。会在 7 天内回应。
+请通过 GitHub [Private Security Advisory](https://github.com/jryang1997/QuotaKeeper/security/advisories/new) 私下报告,不要开公开 issue。会在 7 天内回应。
 
 本项目处理凭据与本地会话数据,凡涉及以下内容的报告请格外标注复现步骤:
 
@@ -15,7 +15,7 @@
 - 全部数据留在本机,无遥测、无上报。
 - API key 只存 Windows 凭据管理器(`TuiTokenMonitor/*` 目标),不写 settings.json,不进前端存储。
 - 对各 CLI 的登录态文件(`~/.claude/.credentials.json`、`~/.codex/auth.json`、OpenCode `auth.json`)**只读**;不代刷 OAuth token(refresh token 是旋转式的,代刷会使 CLI 自身登录态失效)。
-- CPA 管理密钥存于 `~/.tui-token-monitor/cpa-key`(0600 语义由用户自行保证),只发往本机 `127.0.0.1:8317`。
+- CPA 管理密钥存于 `~/.quotakeeper/cpa-key`(0600 语义由用户自行保证),只发往本机 `127.0.0.1:8317`。
 
 ## 已接受的风险(非漏洞)
 

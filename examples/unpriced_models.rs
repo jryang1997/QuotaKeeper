@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use chrono::Local;
-use tui_token_monitor::ledger::{self, claude, codex, dsh, omp, opencode, pricing, zcode};
-use tui_token_monitor::paths;
+use quotakeeper::ledger::{self, claude, codex, dsh, omp, opencode, pricing, zcode};
+use quotakeeper::paths;
 
 fn main() {
     let home = paths::home_dir();

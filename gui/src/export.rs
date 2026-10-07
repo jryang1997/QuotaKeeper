@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use tui_token_monitor::ledger::{AnalysisRow, LedgerReport};
+use quotakeeper::ledger::{AnalysisRow, LedgerReport};
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn csv_neutralizes_formulas_and_json_preserves_project_text() {
-        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         for project in [
             "=1+1",
             " +1",
@@ -296,15 +296,15 @@ mod tests {
 
     #[test]
     fn csv_keeps_reported_and_estimated_cost_apart() {
-        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows.clear();
         report
             .analysis_rows
-            .push(tui_token_monitor::ledger::AnalysisRow {
+            .push(quotakeeper::ledger::AnalysisRow {
                 date: "2026-09-27".into(),
                 client: "codex",
                 project: Some("demo".into()),
-                agg: tui_token_monitor::ledger::Agg {
+                agg: quotakeeper::ledger::Agg {
                     input: 8,
                     output: 3,
                     cache_read: 2,
@@ -324,23 +324,23 @@ mod tests {
 
     #[test]
     fn export_selection_filters_date_agent_and_project() {
-        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows = vec![
-            tui_token_monitor::ledger::AnalysisRow {
+            quotakeeper::ledger::AnalysisRow {
                 date: "2026-09-26".into(),
                 client: "codex",
                 project: Some("alpha".into()),
                 agg: Default::default(),
                 unpriced_messages: 0,
             },
-            tui_token_monitor::ledger::AnalysisRow {
+            quotakeeper::ledger::AnalysisRow {
                 date: "2026-09-27".into(),
                 client: "codex",
                 project: Some("alpha".into()),
                 agg: Default::default(),
                 unpriced_messages: 0,
             },
-            tui_token_monitor::ledger::AnalysisRow {
+            quotakeeper::ledger::AnalysisRow {
                 date: "2026-09-27".into(),
                 client: "claude",
                 project: Some("beta".into()),
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn json_identifies_each_collectors_source() {
-        let mut report = tui_token_monitor::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows = ["codex", "claude", "dsh", "omp", "opencode", "zcode"]
             .into_iter()
             .map(|client| AnalysisRow {

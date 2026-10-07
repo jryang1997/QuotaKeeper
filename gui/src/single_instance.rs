@@ -26,7 +26,7 @@ fn wide(value: &str) -> Vec<u16> {
 }
 
 fn restore_existing_window() {
-    let title = wide("Token Monitor");
+    let title = wide("QuotaKeeper");
     for _ in 0..10 {
         // SAFETY: null class and a valid, terminated title are accepted by FindWindowW.
         let hwnd = unsafe { FindWindowW(ptr::null(), title.as_ptr()) };

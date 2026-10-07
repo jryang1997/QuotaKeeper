@@ -3,7 +3,7 @@
 use chrono::Local;
 
 fn main() {
-    let rep = tui_token_monitor::ledger::collect(Local::now());
+    let rep = quotakeeper::ledger::collect(Local::now());
     println!("== sources ==");
     for s in &rep.sources {
         match &s.error {

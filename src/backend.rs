@@ -161,7 +161,7 @@ fn cpa_key() -> Option<String> {
         .ok()?;
     std::fs::read_to_string(
         std::path::PathBuf::from(home)
-            .join(".tui-token-monitor")
+            .join(".quotakeeper")
             .join("cpa-key"),
     )
     .ok()

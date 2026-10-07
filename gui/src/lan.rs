@@ -12,14 +12,14 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use tui_token_monitor::model::{Card, QuotaSource, Snapshot};
-use tui_token_monitor::ui::notify::level_for;
+use quotakeeper::model::{Card, QuotaSource, Snapshot};
+use quotakeeper::ui::notify::level_for;
 
 /// 主循环每轮数据落定时写入;HTTP 线程只读。
 #[derive(Default)]
 pub struct LanState {
     pub snapshot: Option<Snapshot>,
-    pub ledger: Option<Arc<tui_token_monitor::ledger::LedgerReport>>,
+    pub ledger: Option<Arc<quotakeeper::ledger::LedgerReport>>,
     pub goat_tokens: Option<u64>,
     pub goat_requests: Option<u64>,
     pub monthly_api_value_usd: Option<f64>,
@@ -42,8 +42,8 @@ static REQUESTS_SERVED: AtomicU64 = AtomicU64::new(0);
 /// 主循环调用:整体替换共享状态(零拷贝,只克隆 Arc)。
 pub fn publish(
     snapshot: &Snapshot,
-    ledger: Option<&Arc<tui_token_monitor::ledger::LedgerReport>>,
-    goat_usage: Option<&tui_token_monitor::goat::UsageSummary>,
+    ledger: Option<&Arc<quotakeeper::ledger::LedgerReport>>,
+    goat_usage: Option<&quotakeeper::goat::UsageSummary>,
     monthly_api_value_usd: Option<f64>,
     monthly_multiple: Option<f64>,
 ) {
@@ -98,7 +98,7 @@ pub struct LanSummary {
     pub rings: Vec<LanRing>,
 }
 
-fn period_of(agg: &tui_token_monitor::ledger::Agg) -> LanPeriod {
+fn period_of(agg: &quotakeeper::ledger::Agg) -> LanPeriod {
     LanPeriod {
         tokens: agg.total(),
         messages: agg.messages,
@@ -107,8 +107,8 @@ fn period_of(agg: &tui_token_monitor::ledger::Agg) -> LanPeriod {
 }
 
 /// 末尾 N 天聚合(daily_totals 旧→新、空日也保留,故 rev().take(N) 即「含今天的近 N 天」)。
-fn period_of_last_days(days: &[tui_token_monitor::ledger::DailyTotal], count: usize) -> LanPeriod {
-    let mut agg = tui_token_monitor::ledger::Agg::default();
+fn period_of_last_days(days: &[quotakeeper::ledger::DailyTotal], count: usize) -> LanPeriod {
+    let mut agg = quotakeeper::ledger::Agg::default();
     for day in days.iter().rev().take(count) {
         agg.merge(&day.agg);
     }
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn period_of_last_days_sums_recent_window() {
-        use tui_token_monitor::ledger::{Agg, DailyTotal};
+        use quotakeeper::ledger::{Agg, DailyTotal};
         let days: Vec<DailyTotal> = (0..10)
             .map(|i| DailyTotal {
                 date: format!("2026-10-{i:02}"),
@@ -450,18 +450,18 @@ mod tests {
     #[test]
     fn publish_feeds_summary() {
         let _guard = STATE_LOCK.lock().unwrap();
-        use tui_token_monitor::model::ProviderId;
+        use quotakeeper::model::ProviderId;
         let snapshot = Snapshot {
             generated_at_ms: 123,
-            cards: vec![Card::Live(tui_token_monitor::model::Report {
+            cards: vec![Card::Live(quotakeeper::model::Report {
                 provider: ProviderId::Codex,
                 source: QuotaSource::CodexAppServer,
                 plan_type: "plus".into(),
-                limits: vec![tui_token_monitor::model::Limit {
+                limits: vec![quotakeeper::model::Limit {
                     label: "5h".into(),
                     used_pct: 42.0,
                     resets_in_ms: Some(3_600_000),
-                    status: tui_token_monitor::model::Status::Ok,
+                    status: quotakeeper::model::Status::Ok,
                 }],
                 subscription_ends_at_ms: None,
             })],

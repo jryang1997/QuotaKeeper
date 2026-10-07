@@ -1,5 +1,5 @@
 //! 主题系统:四套精选配色(GitHub Light / Tokyo Night / Gruvbox Dark / Catppuccin Mocha),
-//! `p` 键循环,选择持久化到 `~/.tui-token-monitor/theme`。
+//! `p` 键循环,选择持久化到 `~/.quotakeeper/theme`。
 //!
 //! 语义槽位(不绑定具体颜色):
 //! - accent:标题/高亮/图表主色;ok/warn/err:配额状态色;
@@ -187,14 +187,14 @@ pub fn blend(a: Color, b: Color, t: f64) -> Color {
 const FILE: &str = "theme";
 
 pub fn load(home: &std::path::Path) {
-    let path = home.join(".tui-token-monitor").join(FILE);
+    let path = home.join(".quotakeeper").join(FILE);
     if let Ok(name) = std::fs::read_to_string(path) {
         set_by_name(name.trim());
     }
 }
 
 pub fn save(home: &std::path::Path) {
-    let dir = home.join(".tui-token-monitor");
+    let dir = home.join(".quotakeeper");
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::write(dir.join(FILE), get().name);
     }

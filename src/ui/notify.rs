@@ -256,7 +256,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $x = New-Object Windows.Data.Xml.Dom.XmlDocument
 $x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>{title}</text><text>{body}</text></binding></visual></toast>')
 $t = [Windows.UI.Notifications.ToastNotification]::new($x)
-$n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Token Monitor')
+$n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('QuotaKeeper')
 $n.Show($t)
 "#,
             title = xml_escape(&title),

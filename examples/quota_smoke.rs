@@ -1,8 +1,8 @@
 //! 对本机真实凭据跑一遍配额快照,打印每张卡的结果与缺失原因。
 //! 用于真机验收各配额卡(含代理、登录态、CPA 链路)。
 
-use tui_token_monitor::model::{Card, Snapshot};
-use tui_token_monitor::{backend, model};
+use quotakeeper::model::{Card, Snapshot};
+use quotakeeper::{backend, model};
 
 fn print_snapshot(snap: &Snapshot) {
     println!("生成于 {} ms\n", snap.generated_at_ms);
