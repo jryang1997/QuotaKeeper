@@ -8,6 +8,8 @@
 //! 2. 小写 + `_`→`-`
 //! 3. 剥日期/快照尾缀(`-0731`、`-20250428`)与渠道变体(`:free/:batch/-latest`)
 //! 4. `5p3`→`5.3` 点分还原(fireworks 用 p 当小数点)
+//! 4b. 路由层 `auto-` 前缀剥除 + 单数字版本点还原(`v4-1`→`v4.1`,magpie
+//!     类代理把点消毒成连字符)
 //! 5. 显式别名表(官方改名/推广名),未命中走规则结果
 //!
 //! 注意:canonical 只管聚合分组;定价仍优先按原始名查真价(同一代不同档
@@ -85,6 +87,13 @@ pub fn canonical(model: &str) -> String {
             break;
         }
     }
+    // 4b. 路由层命名(magpie 类代理):模型名被套 auto- 前缀、点分版本消毒成
+    //     连字符(group/auto-deepseek-v4-1-flash)。剥路由前缀后把「两侧均为
+    //     单独一位数字」的连字符还原成版本点;非 auto- 命名不动(databricks
+    //     的 glm-5-3 等连字符拼写保持独立组)。
+    if let Some(routed) = name.strip_prefix("auto-") {
+        name = restore_version_dots(routed);
+    }
     // 4. fireworks 的 p-当-点:5p3 → 5.3(仅 版本段,字母数字混合段不动)
     name = restore_dots(&name);
     // 5. 显式别名
@@ -117,6 +126,35 @@ fn is_date_like(snap: &str) -> bool {
         8 => b[0] == b'2' && b[1] == b'0' && d(2) && d(3) && d(4) && d(5) && d(6) && d(7), // YYYYMMDD
         _ => false,
     }
+}
+
+/// 还原路由层消毒掉的版本点:`单数字-单数字` → `单数字.单数字`
+/// (deepseek-v4-1-flash → deepseek-v4.1-flash)。多位数字段不动,
+/// qwen3-235b、3-70b、2-251201 这类尺寸/日期连字符不误伤。
+fn restore_version_dots(name: &str) -> String {
+    let b = name.as_bytes();
+    let digit_run = |mut i: isize, step: isize| -> usize {
+        let mut n = 0;
+        while i >= 0 && (i as usize) < b.len() && b[i as usize].is_ascii_digit() {
+            n += 1;
+            i += step;
+        }
+        n
+    };
+    let mut out = String::with_capacity(name.len());
+    for i in 0..b.len() {
+        if b[i] == b'-'
+            && i > 0
+            && i + 1 < b.len()
+            && digit_run(i as isize - 1, -1) == 1
+            && digit_run(i as isize + 1, 1) == 1
+        {
+            out.push('.');
+        } else {
+            out.push(b[i] as char);
+        }
+    }
+    out
 }
 
 /// fireworks 的 `p` 是小数点:glm-5p3 → glm-5.3。只在「字母-数字p-数字」
@@ -185,6 +223,24 @@ mod tests {
         // 非力度词不剥
         assert_eq!(canonical("deepseek-v4.1-flash"), "deepseek-v4.1-flash");
         assert_eq!(canonical("muse-spark-1.3-contributor"), "muse-spark-1.3-contributor");
+    }
+
+    /// 路由层(magpie 类代理)命名:模型名被套 auto- 前缀、点分版本消毒成
+    /// 连字符(group/auto-deepseek-v4-1-flash)。剥路由前缀并还原版本点;
+    /// 非 auto- 命名不受影响(databricks 连字符版保持独立组)。
+    #[test]
+    fn router_auto_prefix_and_mangled_version_dots_restored() {
+        assert_eq!(canonical("group/auto-deepseek-v4-1-flash"), "deepseek-v4.1-flash");
+        assert_eq!(canonical("group/auto-glm-5-3-flash"), "glm-5.3-flash");
+        assert_eq!(canonical("group/auto-mimo-v2-6-flash"), "mimo-v2.6-flash");
+        // 日期尾缀先剥,再还原版本点
+        assert_eq!(canonical("group/auto-deepseek-v3-2-251201"), "deepseek-v3.2");
+        // 两侧须均为单独一位数字:多位数字段(尺寸/日期)不误伤
+        assert_eq!(canonical("group/auto-qwen3-235b-a22b"), "qwen3-235b-a22b");
+        assert_eq!(canonical("group/auto-llama-3-3-70b"), "llama-3.3-70b");
+        // 非 auto- 命名不动
+        assert_eq!(canonical("databricks/databricks-glm-5-3-flash"), "glm-5-3-flash");
+        assert_eq!(canonical("glm-5-3-251222"), "glm-5-3");
     }
 
     #[test]

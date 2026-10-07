@@ -823,6 +823,54 @@ mod tests {
         assert_eq!(p.estimate("OpenAI/GPT-6-SOL", &tokens), Some(2.0));
     }
 
+    /// 路由层命名(group/auto-*):点分版本被消毒成连字符再套 auto- 路由前缀。
+    /// canonical 还原后应走既有价路:反向别名(deepseek-flash)、官方条目
+    /// (zai/glm-5.3-flash)、补充价(mimo-v2.6-flash)。
+    #[test]
+    fn group_auto_router_names_price_via_canonical() {
+        // 真实目录形态:裸 deepseek-v4.1-flash 缺,只有推广短名;glm 仅有官方条目
+        let official_ds = ModelPrice {
+            input: 3e-7,
+            output: 1.2e-6,
+            cache_read: Some(6e-9),
+            cache_write: Some(0.0),
+        };
+        let p = build(HashMap::from([
+            ("deepseek-flash".to_string(), official_ds),
+            ("deepseek/deepseek-flash".to_string(), official_ds),
+            (
+                "zai/glm-5.3-flash".to_string(),
+                ModelPrice {
+                    input: 1.5e-7,
+                    output: 5e-7,
+                    cache_read: Some(3e-8),
+                    cache_write: Some(0.0),
+                },
+            ),
+        ]));
+        let t = TokenBreakdown {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            ..Default::default()
+        };
+        // deepseek:反向别名 deepseek-flash,0.3 + 1.2 + 0.006
+        let ds = p
+            .estimate("group/auto-deepseek-v4-1-flash", &t)
+            .expect("router deepseek");
+        assert!((ds - (0.3 + 1.2 + 0.006)).abs() < 1e-9);
+        // glm:官方条目兜底,0.15 + 0.5 + 0.03
+        let glm = p
+            .estimate("group/auto-glm-5-3-flash", &t)
+            .expect("router glm");
+        assert!((glm - (0.15 + 0.5 + 0.03)).abs() < 1e-9);
+        // mimo:补充价 0.14 + 0.28 + 0.0028
+        let mimo = p
+            .estimate("group/auto-mimo-v2-6-flash", &t)
+            .expect("router mimo");
+        assert!((mimo - 0.4228).abs() < 1e-6);
+    }
+
     #[test]
     fn supplement_prices_fill_missing_models() {
         let p = build(HashMap::new());
