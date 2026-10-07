@@ -1,6 +1,6 @@
 <div align="center">
 
-# quotakeeper
+# QuotaKeeper
 
 终端与 Windows 桌面上的 AI coding 用量监测台:订阅配额、token 账本、燃烧率、热力图。本地优先,不经过任何中转服务器。
 

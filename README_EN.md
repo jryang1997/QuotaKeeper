@@ -1,6 +1,6 @@
 <div align="center">
 
-# quotakeeper
+# QuotaKeeper
 
 Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — in your terminal or on your Windows desktop. Local-first; no relay server involved.
 
