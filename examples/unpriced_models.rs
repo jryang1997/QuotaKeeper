@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use chrono::Local;
-use tui_token_monitor::ledger::{self, claude, codex, dsh, ompstats, opencode, pricing, zcode};
+use tui_token_monitor::ledger::{self, claude, codex, dsh, omp, opencode, pricing, zcode};
 use tui_token_monitor::paths;
 
 fn main() {
@@ -16,6 +16,7 @@ fn main() {
         (codex::scan_paths as fn(&std::path::Path) -> Vec<std::path::PathBuf>, codex::parse_file as fn(&std::path::Path) -> std::io::Result<Vec<ledger::UsageRecord>>),
         (claude::scan_paths, claude::parse_file),
         (dsh::scan_paths, dsh::parse_file),
+        (omp::scan_paths, omp::parse_file),
     ] {
         for p in scan(&home) {
             if let Ok(rs) = parse(&p) {
@@ -24,8 +25,7 @@ fn main() {
         }
     }
     for (path, run) in [
-        (ompstats::db_path(&home), ompstats::collect as fn(&std::path::Path) -> Result<Vec<ledger::UsageRecord>, String>),
-        (opencode::db_path(&home), opencode::collect),
+        (opencode::db_path(&home), opencode::collect as fn(&std::path::Path) -> Result<Vec<ledger::UsageRecord>, String>),
         (zcode::db_path(&home), zcode::collect),
     ] {
         if let Ok(rs) = run(&path) {

@@ -18,7 +18,7 @@ pub mod claude;
 pub mod codex;
 pub mod dsh;
 pub mod model_alias;
-pub mod ompstats;
+pub mod omp;
 pub mod opencode;
 pub mod pricing;
 pub mod types;
@@ -176,6 +176,7 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
         ),
         (claude::CLIENT, claude::scan_paths, claude::parse_file),
         (dsh::CLIENT, dsh::scan_paths, dsh::parse_file),
+        (omp::CLIENT, omp::scan_paths, omp::parse_file),
     ] {
         let (recs, error) = load_client(&home, scan, parse, &mut active_files);
         sources.push(SourceStatus {
@@ -193,14 +194,9 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
     // SQLite 源:每轮直查
     for (client, path, run) in [
         (
-            ompstats::CLIENT,
-            ompstats::db_path(&home),
-            ompstats::collect as fn(&Path) -> Result<Vec<UsageRecord>, String>,
-        ),
-        (
             opencode::CLIENT,
             opencode::db_path(&home),
-            opencode::collect,
+            opencode::collect as fn(&Path) -> Result<Vec<UsageRecord>, String>,
         ),
         (zcode::CLIENT, zcode::db_path(&home), zcode::collect),
     ] {

@@ -55,7 +55,7 @@ pub struct UsageRecord {
     pub tokens: TokenBreakdown,
     /// Some = 已有美元成本;None = 无价可算(UI 显示 "—").
     pub cost: Option<f64>,
-    /// cost 是否为 LiteLLM 估价(区别于来源方报告价,如 OMP stats.db).
+    /// cost 是否为 LiteLLM 估价(区别于来源方报告价,如 OMP 会话 usage).
     pub cost_is_estimate: bool,
     /// 会话标识(用于会话维度聚合);None = 该源不提供.
     pub session: Option<String>,

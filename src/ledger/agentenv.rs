@@ -47,7 +47,7 @@ mod tests {
         include_str!("claude.rs"),
         include_str!("codex.rs"),
         include_str!("dsh.rs"),
-        include_str!("ompstats.rs"),
+        include_str!("omp.rs"),
         include_str!("opencode.rs"),
         include_str!("zcode.rs"),
         include_str!("../paths.rs"),
