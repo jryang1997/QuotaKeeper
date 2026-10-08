@@ -303,6 +303,7 @@ mod tests {
                     status: Status::Ok,
                 }],
                 subscription_ends_at_ms: ends_at_ms,
+                balance: None,
             })],
         }
     }
@@ -336,6 +337,26 @@ mod tests {
         );
         assert!(matches!(reset.quota[0].event, ToastEvent::Reset));
         assert!(reset.expiry.is_empty());
+    }
+
+    #[test]
+    fn expiry_alerts_fire_once_per_tier_as_the_end_date_approaches() {
+        let ends = 1_790_000_000_000 + 8 * 86_400_000;
+        let at = |days_left: i64| ends - days_left * 86_400_000;
+        let observe = |tracker: &mut AlertTracker, days_left: i64| {
+            tracker
+                .update(&snapshot(20.0, Some(ends), QuotaSource::CodexAppServer), at(days_left))
+                .expiry
+                .len()
+        };
+        let mut tracker = AlertTracker::default();
+        assert_eq!(observe(&mut tracker, 8), 0);
+        assert_eq!(observe(&mut tracker, 7), 1);
+        assert_eq!(observe(&mut tracker, 6), 0);
+        assert_eq!(observe(&mut tracker, 3), 1);
+        assert_eq!(observe(&mut tracker, 2), 0);
+        assert_eq!(observe(&mut tracker, 1), 1);
+        assert_eq!(observe(&mut tracker, 0), 0);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use crate::model::{Limit, ProviderId, QuotaSource, Report, status_for};
+use crate::model::{Balance, Limit, ProviderId, QuotaSource, Report, status_for};
 
 const DEFAULT_BASE: &str = "https://open.bigmodel.cn";
 const TIMEOUT: Duration = Duration::from_secs(15);
@@ -120,6 +120,49 @@ struct SubEntry {
     in_current_period: Option<bool>,
     #[serde(default, rename = "nextRenewTime")]
     next_renew_time: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct BalanceResp {
+    #[serde(default)]
+    success: Option<bool>,
+    #[serde(default)]
+    data: Option<BalanceData>,
+}
+
+#[derive(Deserialize, Default)]
+struct BalanceData {
+    #[serde(default, rename = "availableBalance")]
+    available_balance: Option<serde_json::Value>,
+    #[serde(default)]
+    balance: Option<serde_json::Value>,
+    #[serde(default)]
+    currency: Option<String>,
+}
+
+/// 账户余额:只认 success===true 的 HTTP 200(智谱失败也回 200,状态码不可信).
+/// 金额缺失不回落为 0;币种缺失时仅国内站默认 CNY,国际站不猜.
+fn balance_of(resp: &BalanceResp, base: &str) -> Option<Balance> {
+    if resp.success != Some(true) {
+        return None;
+    }
+    let data = resp.data.as_ref()?;
+    let amount = json_amount(&data.available_balance).or_else(|| json_amount(&data.balance))?;
+    let currency = data
+        .currency
+        .as_deref()
+        .filter(|c| !c.is_empty())
+        .map(str::to_string)
+        .or_else(|| (base == DEFAULT_BASE).then(|| "CNY".to_string()))?;
+    Some(Balance { amount, currency })
+}
+
+fn json_amount(value: &Option<serde_json::Value>) -> Option<f64> {
+    let value = value.as_ref()?;
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.trim().parse().ok())
+        .filter(|n| n.is_finite())
 }
 
 impl LimitRow {
@@ -262,6 +305,10 @@ pub fn fetch_report() -> anyhow::Result<Report> {
                 .or_else(|| list.first())
                 .cloned()
         });
+    // 余额同理:账户报告失败只丢余额行,配额卡照常显示.
+    let balance = get_json::<BalanceResp>(&base, "/api/biz/account/query-customer-account-report", &key)
+        .ok()
+        .and_then(|resp| balance_of(&resp, &base));
     let limits = windows(&data.limits, now_ms);
     if limits.is_empty() {
         anyhow::bail!("GLM quota/limit 无可用窗口数据");
@@ -272,6 +319,7 @@ pub fn fetch_report() -> anyhow::Result<Report> {
         plan_type: plan_name(sub_entry.as_ref(), &data),
         limits,
         subscription_ends_at_ms: None,
+        balance,
     };
     report.subscription_ends_at_ms = sub_entry
         .as_ref()
@@ -401,5 +449,53 @@ mod tests {
             )
         );
         assert_eq!(parse_renew_ms("nonsense"), None);
+    }
+
+    fn balance_resp(json: &str) -> BalanceResp {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn domestic_balance_reads_available_amount_as_cny() {
+        let resp = balance_resp(
+            r#"{"success":true,"code":200,"data":{"availableBalance":32.15,"balance":40.0,"totalSpendAmount":7.85}}"#,
+        );
+        assert_eq!(
+            balance_of(&resp, DEFAULT_BASE),
+            Some(Balance { amount: 32.15, currency: "CNY".into() })
+        );
+    }
+
+    #[test]
+    fn balance_accepts_string_amounts_and_falls_back_to_balance_field() {
+        let resp = balance_resp(r#"{"success":true,"data":{"availableBalance":"12.5"}}"#);
+        assert_eq!(balance_of(&resp, DEFAULT_BASE).map(|b| b.amount), Some(12.5));
+
+        let resp = balance_resp(r#"{"success":true,"data":{"availableBalance":null,"balance":"3"}}"#);
+        assert_eq!(balance_of(&resp, DEFAULT_BASE).map(|b| b.amount), Some(3.0));
+    }
+
+    #[test]
+    fn balance_refusal_inside_http_200_is_not_read_as_zero() {
+        let refused = balance_resp(r#"{"success":false,"code":401,"msg":"token invalid","data":{"availableBalance":0}}"#);
+        assert_eq!(balance_of(&refused, DEFAULT_BASE), None);
+
+        let empty = balance_resp(r#"{"success":true,"data":{"availableBalance":null}}"#);
+        assert_eq!(balance_of(&empty, DEFAULT_BASE), None);
+
+        let missing = balance_resp(r#"{"success":true}"#);
+        assert_eq!(balance_of(&missing, DEFAULT_BASE), None);
+    }
+
+    #[test]
+    fn international_balance_without_currency_is_not_guessed() {
+        let resp = balance_resp(r#"{"success":true,"data":{"availableBalance":8.0}}"#);
+        assert_eq!(balance_of(&resp, "https://api.z.ai"), None);
+
+        let resp = balance_resp(r#"{"success":true,"data":{"availableBalance":8.0,"currency":"USD"}}"#);
+        assert_eq!(
+            balance_of(&resp, "https://api.z.ai"),
+            Some(Balance { amount: 8.0, currency: "USD".into() })
+        );
     }
 }

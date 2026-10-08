@@ -51,6 +51,12 @@ pub struct LimitDto {
 }
 
 #[derive(Serialize)]
+pub struct BalanceDto {
+    pub amount: f64,
+    pub currency: String,
+}
+
+#[derive(Serialize)]
 #[serde(tag = "kind")]
 pub enum CardDto {
     Live {
@@ -62,6 +68,8 @@ pub enum CardDto {
         /// 订阅周期结束(续费/到期)时间;None = 该来源不提供.
         #[serde(skip_serializing_if = "Option::is_none")]
         subscription_ends_at_ms: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        balance: Option<BalanceDto>,
         limits: Vec<LimitDto>,
     },
     Missing {
@@ -102,9 +110,14 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Claude
                     | model::ProviderId::Cursor
                     | model::ProviderId::Glm
-                    | model::ProviderId::Kimi => "provider_fraction",
+                    | model::ProviderId::Kimi
+                    | model::ProviderId::MiniMax => "provider_fraction",
                 },
                 subscription_ends_at_ms: r.subscription_ends_at_ms,
+                balance: r.balance.as_ref().map(|b| BalanceDto {
+                    amount: b.amount,
+                    currency: b.currency.clone(),
+                }),
                 limits: r
                     .limits
                     .iter()
@@ -129,6 +142,7 @@ pub fn cards(snap: &Snapshot) -> Vec<CardDto> {
                     model::ProviderId::Cursor => "Cursor usage-summary（Cursor 登录态）",
                     model::ProviderId::Glm => "z.ai / bigmodel 官方 monitor 接口",
                     model::ProviderId::Kimi => "Kimi 官方 coding usage 接口",
+                    model::ProviderId::MiniMax => "MiniMax 官方 coding_plan remains 接口",
                 },
                 method: "unavailable",
             },
@@ -146,6 +160,7 @@ fn provider_slug(p: model::ProviderId) -> &'static str {
         model::ProviderId::Cursor => "cursor",
         model::ProviderId::Glm => "glm",
         model::ProviderId::Kimi => "kimi",
+        model::ProviderId::MiniMax => "minimax",
     }
 }
 

@@ -110,6 +110,7 @@ fn parse_report(json: &str, now_ms: i64) -> Result<Report> {
             parse_window("Monthly", response.usage.monthly, now_ms)?,
         ],
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 

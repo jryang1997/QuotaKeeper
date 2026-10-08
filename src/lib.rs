@@ -10,6 +10,7 @@ pub mod goat;
 pub mod http;
 pub mod kimi_quota;
 pub mod ledger;
+pub mod minimax_quota;
 pub mod model;
 pub mod opencode_go;
 pub mod pace;

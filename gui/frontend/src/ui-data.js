@@ -7,6 +7,7 @@ export const PROVIDER_ACCENT = {
   cursor: 'var(--color-text-primary)',
   glm: 'var(--color-text-blue)',
   kimi: 'var(--color-text-orange)',
+  minimax: '#f0476a',
   deepseek: '#2764d6',
 };
 
@@ -17,9 +18,9 @@ export const STATUS_COLOR = {
 };
 
 export const PROVIDER_COLOR_DEFAULTS = {
-  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', glm: '#2f6bff', kimi: '#ff8d1a', deepseek: '#2764d6',
+  'opencode-go': '#14b8a6', codex: '#8b5cf6', goat: '#f59e0b', antigravity: '#0ea5e9', claude: '#d97757', cursor: '#5a5a5a', glm: '#2f6bff', kimi: '#ff8d1a', minimax: '#f0476a', deepseek: '#2764d6',
 };
-export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'glm', 'kimi', 'deepseek'];
+export const PROVIDERS = ['opencode-go', 'codex', 'goat', 'antigravity', 'claude', 'cursor', 'glm', 'kimi', 'minimax', 'deepseek'];
 export const PROVIDER_LOGOS = {
   'opencode-go': 'logos/opencode-go.svg',
   codex: 'logos/codex.svg',
@@ -53,6 +54,7 @@ export const QUOTA_REPAIR = {
   antigravity: ['启动本机 CPA，并将管理密钥放在 ~/.tui-token-monitor/cpa-key；应用会通过 CPA 代查 Google 上游配额。', 'Start local CPA and place the management key in ~/.tui-token-monitor/cpa-key. The app reads upstream Google quotas through CPA.'],
   glm: ['设置环境变量 GLM_API_KEY 后重启应用（bigmodel.cn 或 api.z.ai 控制台创建）；国际站还需 GLM_API_BASE=https://api.z.ai。', 'Set GLM_API_KEY and restart the app (create a key in the bigmodel.cn or api.z.ai console); the global region also needs GLM_API_BASE=https://api.z.ai.'],
   kimi: ['设置环境变量 KIMI_CODE_API_KEY 后重启应用（kimi.com 控制台创建，sk-kimi- 开头；与 Moonshot 开放平台 key 不通用）。', 'Set KIMI_CODE_API_KEY and restart the app (from kimi.com, sk-kimi- prefix; not interchangeable with Moonshot platform keys).'],
+  minimax: ['在凭据管理器添加 TuiTokenMonitor/MiniMax（sk-cp- 编程套餐密钥），或设置 MINIMAX_CODING_API_KEY 后重启应用。', 'Add TuiTokenMonitor/MiniMax in Credential Manager (sk-cp- coding plan key), or set MINIMAX_CODING_API_KEY and restart the app.'],
 };
 export const QUOTA_HINT = {
   'opencode-go': ['未连接 · 保存 Go API key 或登录 OpenCode', 'Not connected · save a Go API key or sign in to OpenCode'],
@@ -61,6 +63,7 @@ export const QUOTA_HINT = {
   antigravity: ['未连接 · 启动 CPA 并放置管理密钥', 'Not connected · start CPA with its management key'],
   glm: ['未连接 · 设置 GLM_API_KEY 后重启', 'Not connected · set GLM_API_KEY and restart'],
   kimi: ['未连接 · 设置 KIMI_CODE_API_KEY 后重启', 'Not connected · set KIMI_CODE_API_KEY and restart'],
+  minimax: ['未连接 · 添加 MiniMax 编程套餐密钥后重启', 'Not connected · add a MiniMax coding plan key and restart'],
 };
 
 export const CLIENT_COLORS = {
@@ -358,6 +361,7 @@ export const STR = {
   status_exhausted: ['耗尽', 'Exhausted'],
   quota_local_month: ['本机本月', 'Local this month'],
   quota_official_period: ['官方账期', 'Official period'],
+  quota_balance: ['账户余额', 'Balance'],
   quota_requests: ['请求', 'requests'],
   quota_hidden_link: ['已隐藏 {n} 张卡片 · 管理', '{n} hidden cards · manage'],
   quota_advice: ['可先用 {name}（当前 {pct}%）', 'Try {name} meanwhile ({pct}% used)'],

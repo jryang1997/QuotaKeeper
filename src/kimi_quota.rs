@@ -222,6 +222,7 @@ pub fn fetch_report() -> anyhow::Result<Report> {
         limits,
         // 订阅期 expireTime 只在 web 会话里;API key 路径拿不到,不编造.
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 

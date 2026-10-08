@@ -1244,6 +1244,7 @@ mod tests {
                         status: Status::Warning,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::Codex,
@@ -1256,6 +1257,7 @@ mod tests {
                         status: Status::Ok,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
             ],
         };
@@ -1282,6 +1284,7 @@ mod tests {
                         status: Status::Exhausted,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::OpenCodeGo,
@@ -1294,6 +1297,7 @@ mod tests {
                         status: Status::Ok,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
             ],
         };

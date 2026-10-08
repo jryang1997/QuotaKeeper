@@ -147,6 +147,7 @@ fn provider_key(slug: &str) -> Option<String> {
         "goat" => credential::command_code_key().ok().flatten(),
         "glm" => credential::glm_key().ok().flatten(),
         "kimi" => credential::kimi_key().ok().flatten(),
+        "minimax" => credential::minimax_key().ok().flatten(),
         _ => None,
     }
 }
@@ -1009,6 +1010,7 @@ mod tray_tests {
                         status: Status::Warning,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
                 Card::Live(Report {
                     provider: ProviderId::Antigravity,
@@ -1021,6 +1023,7 @@ mod tray_tests {
                         status: Status::Exhausted,
                     }],
                     subscription_ends_at_ms: None,
+                    balance: None,
                 }),
             ],
         };
@@ -1045,6 +1048,7 @@ mod tray_tests {
                     status: Status::Warning,
                 }],
                 subscription_ends_at_ms: None,
+                balance: None,
             })],
         };
         let levels = quota_levels(&snap);

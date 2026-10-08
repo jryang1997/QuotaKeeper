@@ -2127,6 +2127,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "quotakeeper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "ratatui",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "ureq",
+ "walkdir",
+ "windows-sys 0.61.2",
+ "zstd",
+]
+
+[[package]]
+name = "quotakeeper-gui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "include_dir",
+ "png",
+ "quotakeeper",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tao",
+ "tray-icon",
+ "windows-sys 0.61.2",
+ "winresource",
+ "wry",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3000,42 +3036,6 @@ dependencies = [
  "png",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "tui-token-monitor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "ratatui",
- "rusqlite",
- "serde",
- "serde_json",
- "ureq",
- "walkdir",
- "windows-sys 0.61.2",
- "zstd",
-]
-
-[[package]]
-name = "tui-token-monitor-gui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "include_dir",
- "png",
- "rfd",
- "serde",
- "serde_json",
- "tao",
- "tray-icon",
- "tui-token-monitor",
- "windows-sys 0.61.2",
- "winresource",
- "wry",
 ]
 
 [[package]]

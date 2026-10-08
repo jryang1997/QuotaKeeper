@@ -464,6 +464,7 @@ mod tests {
                     status: quotakeeper::model::Status::Ok,
                 }],
                 subscription_ends_at_ms: None,
+                balance: None,
             })],
         };
         publish(&snapshot, None, None, Some(108.0), Some(2.7));

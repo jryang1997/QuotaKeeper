@@ -157,6 +157,7 @@ fn parse_report(json: &str, now: i64, plan: String) -> Result<Report> {
         plan_type: plan,
         limits,
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 

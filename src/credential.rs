@@ -6,6 +6,7 @@ const GOAT_TARGET: &str = "TuiTokenMonitor/CommandCodeGoat";
 const DEEPSEEK_TARGET: &str = "TuiTokenMonitor/DeepSeek";
 const GLM_TARGET: &str = "TuiTokenMonitor/Glm";
 const KIMI_TARGET: &str = "TuiTokenMonitor/Kimi";
+const MINIMAX_TARGET: &str = "TuiTokenMonitor/MiniMax";
 
 pub fn valid_api_key(key: &str) -> bool {
     let trimmed = key.trim();
@@ -274,6 +275,17 @@ pub fn delete_kimi_key() -> anyhow::Result<()> {
 
 pub fn has_kimi_key() -> bool {
     kimi_key().ok().flatten().is_some()
+}
+
+pub fn minimax_key() -> anyhow::Result<Option<String>> {
+    #[cfg(windows)]
+    {
+        win::read(MINIMAX_TARGET)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

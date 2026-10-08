@@ -243,6 +243,7 @@ fn parse_report(json: &str, now: i64) -> Result<Report> {
         plan_type: membership_display(summary.membership_type.as_deref()),
         limits,
         subscription_ends_at_ms: ends_ms,
+        balance: None,
     })
 }
 

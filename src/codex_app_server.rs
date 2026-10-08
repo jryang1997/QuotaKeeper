@@ -97,6 +97,7 @@ fn parse_report(account: &Value, rates: &Value, now_ms: i64) -> Result<Report> {
         plan_type: plan.to_string(),
         limits,
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 

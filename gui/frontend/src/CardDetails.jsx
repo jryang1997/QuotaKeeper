@@ -22,8 +22,8 @@ function writeClipboard(text) {
   });
 }
 
-// 应用存有凭据的套餐(opencode-go/goat/glm/kimi);其余走登录态,无 key 可展示
-const KEY_PROVIDERS = new Set(['opencode-go', 'goat', 'glm', 'kimi']);
+// 应用存有凭据的套餐(opencode-go/goat/glm/kimi/minimax);其余走登录态,无 key 可展示
+const KEY_PROVIDERS = new Set(['opencode-go', 'goat', 'glm', 'kimi', 'minimax']);
 
 export function maskKey(key) {
   if (!key) return '';

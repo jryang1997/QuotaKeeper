@@ -61,6 +61,11 @@ function ProviderLogo({ provider }) {
   return <img className="quota-logo" src={src} alt="" aria-hidden="true" draggable="false" />;
 }
 
+function formatBalance(balance, lang) {
+  if (!/^[A-Z]{3}$/.test(balance.currency)) return `${balance.amount.toFixed(2)} ${balance.currency}`;
+  return new Intl.NumberFormat(lang === 0 ? 'zh-CN' : 'en-US', { style: 'currency', currency: balance.currency, maximumFractionDigits: 2 }).format(balance.amount);
+}
+
 function ExpiryChip({ endsAtMs, lang }) {
   if (endsAtMs == null) return null;
   const days = Math.max(0, Math.ceil((endsAtMs - Date.now()) / 86_400_000));
@@ -176,7 +181,8 @@ function ProviderCard({ card, lang, allowPace, remainingView, pinned, providerCo
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const official = card.provider === 'goat' && goatUsage ? goatUsage : null;
-  const detailsAvailable = (PLAN_MODELS[card.provider]?.length || 0) > 0 || ['opencode-go', 'goat', 'glm', 'kimi'].includes(card.provider);
+  const balanceText = card.kind === 'Live' && card.balance ? formatBalance(card.balance, lang) : null;
+  const detailsAvailable = (PLAN_MODELS[card.provider]?.length || 0) > 0 || ['opencode-go', 'goat', 'glm', 'kimi', 'minimax'].includes(card.provider);
   const menuItems = [
     { key: 'pin', label: pinned ? t('card_unpin') : t('card_pin'), onSelect: () => { onTogglePin(card.provider); setMenuOpen(false); } },
     ...(detailsAvailable ? [{ key: 'details', label: expanded ? t('card_details_hide') : t('card_details'), onSelect: () => { setExpanded((value) => !value); setMenuOpen(false); } }] : []),
@@ -221,7 +227,8 @@ function ProviderCard({ card, lang, allowPace, remainingView, pinned, providerCo
           <Text type="supporting" className="quota-missing-hint">{QUOTA_HINT[card.provider]?.[lang] || card.hints?.[lang]}</Text>
         </div>
       )}
-      {(monthlyTokens > 0 || official) && <div className="quota-footnotes">
+      {(monthlyTokens > 0 || official || balanceText) && <div className="quota-footnotes">
+        {balanceText && <div className="quota-footnote"><span>{t('quota_balance')}</span><strong>{balanceText}</strong></div>}
         {official && <div className="quota-footnote"><span>{t('quota_official_period')}</span><strong>{fmtTokens(official.tokens, lang === 0)} {t('usage_unit_tokens')} · {fmtInt(official.requests)} {t('quota_requests')}</strong></div>}
         {monthlyTokens > 0 && <div className="quota-footnote"><span>{t('quota_local_month')}</span><strong>{fmtTokens(monthlyTokens, lang === 0)} {t('usage_unit_tokens')}</strong></div>}
       </div>}

@@ -59,6 +59,7 @@ pub enum ProviderId {
     Cursor,
     Glm,
     Kimi,
+    MiniMax,
 }
 
 impl ProviderId {
@@ -71,7 +72,7 @@ impl ProviderId {
     }
 
     /// 固定展示顺序.
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 9] {
         [
             Self::OpenCodeGo,
             Self::Codex,
@@ -81,6 +82,7 @@ impl ProviderId {
             Self::Cursor,
             Self::Glm,
             Self::Kimi,
+            Self::MiniMax,
         ]
     }
 
@@ -94,6 +96,7 @@ impl ProviderId {
             Self::Cursor => "Cursor",
             Self::Glm => "GLM Coding",
             Self::Kimi => "Kimi Coding",
+            Self::MiniMax => "MiniMax Coding",
         }
     }
 
@@ -132,6 +135,10 @@ impl ProviderId {
                 "设置环境变量 KIMI_CODE_API_KEY 后重启应用；kimi.com 控制台创建，sk-kimi- 开头，与 Moonshot 开放平台 key 不通用",
                 "Set KIMI_CODE_API_KEY and restart the app; create it in the kimi.com console (sk-kimi- prefix, not interchangeable with Moonshot platform keys)",
             ],
+            Self::MiniMax => [
+                "在凭据管理器添加 TuiTokenMonitor/MiniMax（sk-cp- 编程套餐密钥）或设置 MINIMAX_CODING_API_KEY 后重启应用",
+                "Add TuiTokenMonitor/MiniMax in Credential Manager (sk-cp- coding plan key) or set MINIMAX_CODING_API_KEY and restart the app",
+            ],
         }
     }
 }
@@ -149,6 +156,7 @@ pub enum QuotaSource {
     CursorUsageSummary,
     ZaiMonitorApi,
     KimiCodingApi,
+    MinimaxRemainsApi,
 }
 
 impl QuotaSource {
@@ -165,6 +173,7 @@ impl QuotaSource {
             Self::CursorUsageSummary => "Cursor usage-summary · 本应用直连（未文档化接口）",
             Self::ZaiMonitorApi => "z.ai / bigmodel 官方 monitor 接口 · 本应用直连（未文档化接口）",
             Self::KimiCodingApi => "Kimi 官方 coding usage 接口 · 本应用直连",
+            Self::MinimaxRemainsApi => "MiniMax 官方 coding_plan remains 接口 · 本应用直连",
         }
     }
 }
@@ -178,6 +187,13 @@ pub struct Limit {
     pub status: Status,
 }
 
+/// 账户余额(预付费钱包):金额 + 币种代码(如 CNY/USD).币种不明时不编造,整项留 None.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Balance {
+    pub amount: f64,
+    pub currency: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Report {
     pub provider: ProviderId,
@@ -187,6 +203,8 @@ pub struct Report {
     /// 订阅周期结束(续费/到期)时间;None = 该来源不提供订阅期.
     /// 语义上是"付费订阅到期",与配额窗口的 reset(月度窗口等)是两回事.
     pub subscription_ends_at_ms: Option<i64>,
+    /// 账户余额;None = 该来源不提供或本次读取失败.
+    pub balance: Option<Balance>,
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +313,7 @@ pub fn parse_snapshot(json: &str) -> anyhow::Result<Snapshot> {
                 plan_type: r.metadata.plan_type.clone(),
                 limits,
                 subscription_ends_at_ms: None,
+                balance: None,
             },
         );
     }
@@ -362,7 +381,7 @@ mod tests {
     #[test]
     fn fixture_parses_to_expected_percentages() {
         let snap = parse_snapshot(FIXTURE).unwrap();
-        assert_eq!(snap.cards.len(), 8);
+        assert_eq!(snap.cards.len(), 9);
         let go = match &snap.cards[0] {
             Card::Live(r) => r,
             Card::Missing { .. } => panic!("go 应为 Live"),

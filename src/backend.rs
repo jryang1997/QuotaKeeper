@@ -19,7 +19,7 @@ fn omp_candidates() -> Vec<String> {
 
 /// Fetch all providers independently. One failed source cannot erase other live cards.
 pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
-    let (codex, go, goat, cpa, claude, cursor, glm, kimi) = std::thread::scope(|scope| {
+    let (codex, go, goat, cpa, claude, cursor, glm, kimi, minimax) = std::thread::scope(|scope| {
         let codex = scope.spawn(codex_card);
         let go = scope.spawn(crate::opencode_go::fetch_report);
         let goat = scope.spawn(crate::goat::fetch_report);
@@ -28,6 +28,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
         let cursor = scope.spawn(crate::cursor_quota::fetch_report);
         let glm = scope.spawn(crate::glm_quota::fetch_report);
         let kimi = scope.spawn(crate::kimi_quota::fetch_report);
+        let minimax = scope.spawn(crate::minimax_quota::fetch_report);
         (
             codex.join(),
             go.join(),
@@ -37,6 +38,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
             cursor.join(),
             glm.join(),
             kimi.join(),
+            minimax.join(),
         )
     });
 
@@ -51,6 +53,7 @@ pub fn fetch_snapshot() -> anyhow::Result<Snapshot> {
     fill_report(&mut cards, cursor);
     fill_report(&mut cards, glm);
     fill_report(&mut cards, kimi);
+    fill_report(&mut cards, minimax);
 
     let needs_omp = [ProviderId::OpenCodeGo, ProviderId::Codex]
         .iter()
@@ -442,6 +445,7 @@ fn cpa_upstream_report(
         plan_type,
         limits,
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 
@@ -553,6 +557,7 @@ pub fn cpa_antigravity_card() -> Option<model::Card> {
         plan_type: plan,
         limits,
         subscription_ends_at_ms: None,
+        balance: None,
     }))
 }
 
@@ -670,6 +675,7 @@ fn codex_native_quota_report() -> anyhow::Result<Report> {
         limits,
         // wham 路径自身不带订阅期;由调用方补 accounts/check 的 renews_at.
         subscription_ends_at_ms: None,
+        balance: None,
     })
 }
 
@@ -715,6 +721,7 @@ mod tests {
             plan_type: "pro".into(),
             limits: vec![],
             subscription_ends_at_ms: None,
+            balance: None,
         });
         let fallback = model::parse_snapshot(include_str!("../tests/fixtures/usage.json")).unwrap();
         merge_missing(&mut cards, fallback.cards);
