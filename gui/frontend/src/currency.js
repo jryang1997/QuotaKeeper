@@ -36,3 +36,16 @@ export function formatCurrency(usd, currency = { code: 'USD', rate: 1 }) {
   const digits = amount >= 100 ? 0 : amount >= 1 ? 2 : amount > 0 ? 4 : 2;
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: code, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount);
 }
+
+export function pricingCurrency(currency = {}) {
+  const { code = 'USD', rate } = currency;
+  return code !== 'USD' && Number.isFinite(rate) && rate > 0 ? { code, rate } : { code: 'USD', rate: 1 };
+}
+
+export function formatTokenRate(usdPerToken, currency) {
+  if (!Number.isFinite(usdPerToken) || usdPerToken < 0) return '—';
+  const { code, rate } = pricingCurrency(currency);
+  const amount = usdPerToken * 1_000_000 * rate;
+  const notation = amount > 0 && amount < 0.0001 ? 'scientific' : 'standard';
+  return `${code} ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 8, notation }).format(amount)}`;
+}

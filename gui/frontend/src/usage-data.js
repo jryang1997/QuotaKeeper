@@ -52,14 +52,16 @@ export function aggregateUsage(rows, bounds, agent = '', model = '') {
   const dayMap = new Map();
   const clientMap = new Map();
   const modelMap = new Map();
+  const selectedRows = [];
   let unpriced = 0;
-  const empty = { valid: false, total, days: [], byClient: [], byModel: [], unpriced };
+  const empty = { valid: false, total, days: [], byClient: [], byModel: [], unpriced, selectedRows };
   if (!valid) return empty;
   const count = (end - start) / 86_400_000 + 1;
   if (!Number.isFinite(count) || count < 1 || count > 366) return empty;
 
   for (const row of rows || []) {
     if (!matchesSelection(row, bounds, agent, model)) continue;
+    selectedRows.push(row);
     addAgg(total, row.agg);
     const rowUnpriced = Number(row.unpriced_messages || 0);
     unpriced += rowUnpriced;
@@ -99,7 +101,7 @@ export function aggregateUsage(rows, bounds, agent = '', model = '') {
   const byModel = [...modelMap.values()]
     .sort((a, b) => b.agg.total - a.agg.total || b.agg.messages - a.agg.messages || String(a.model).localeCompare(String(b.model)))
     .map((row) => ({ ...row, rawModels: [...row.rawModels].sort(), clients: [...row.clients].sort() }));
-  return { valid: true, total, days, byClient: byClientRows(clientMap), byModel, unpriced };
+  return { valid: true, total, days, byClient: byClientRows(clientMap), byModel, unpriced, selectedRows };
 }
 
 export function aggregateIntraday(rows, date, agent = '', model = '') {

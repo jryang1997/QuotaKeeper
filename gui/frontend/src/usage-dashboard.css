@@ -52,6 +52,31 @@
 .usage-dashboard .usage-summary-card > span { font-size: 14px; }
 .usage-dashboard .usage-summary-card strong { overflow-wrap: anywhere; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.18; font-weight: 650; letter-spacing: -0.035em; }
 .usage-dashboard .usage-summary-card small { color: var(--usage-muted); font-size: 11px; line-height: 1.35; }
+.usage-price-summary { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px; }
+.usage-price-disclosure { min-width: 0; padding: 16px 22px; font-size: 13px; line-height: 1.55; }
+.usage-price-disclosure > summary { width: fit-content; cursor: pointer; font-weight: 600; }
+.usage-price-content { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.usage-price-content p { color: var(--usage-muted); font-size: 12px; }
+.usage-price-facts { display: grid; gap: 7px; margin: 0; }
+.usage-price-facts > div { display: grid; grid-template-columns: minmax(90px, 0.25fr) minmax(0, 1fr); gap: 8px 16px; }
+.usage-price-facts dt { color: var(--usage-muted); }
+.usage-price-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.usage-price-disclosure code { display: block; font: inherit; overflow-wrap: anywhere; white-space: pre-wrap; }
+.usage-price-bases { display: flex; flex-direction: column; gap: 6px; }
+.usage-price-basis { min-width: 0; border-top: 1px solid var(--usage-line); }
+.usage-price-basis > summary { display: list-item; padding: 12px 0; cursor: pointer; overflow-wrap: anywhere; }
+.usage-price-basis-name { display: inline; }
+.usage-price-basis-name > span { margin-right: 10px; }
+.usage-price-basis-name > code { display: inline; }
+.usage-price-basis > summary > span:last-child { display: block; margin: 4px 0 0 16px; color: var(--usage-muted); font-size: 12px; }
+.usage-price-basis-body { display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px 16px; }
+.usage-price-basis-body .usage-price-approx { color: var(--color-text-orange); }
+.usage-price-basis-body .usage-price-rate-unit { margin-top: 4px; color: var(--usage-text); font-weight: 600; }
+.usage-price-rates { display: grid; gap: 9px; margin: 0; }
+.usage-price-rates > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.usage-price-rates dt { color: var(--usage-muted); }
+.usage-price-rates dd { display: flex; flex-direction: column; min-width: 0; gap: 2px; margin: 0; }
+.usage-price-rates small, .usage-price-rates code { color: var(--usage-muted); font-size: 11px; }
 .usage-chart-card, .usage-buckets-card, .usage-clients-card { min-width: 0; padding: 22px 23px 18px; }
 .usage-chart-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .usage-chart-heading p, .usage-section-heading p, .usage-reasoning-count { margin-top: 4px; color: var(--usage-muted); font-size: 12px; line-height: 1.45; }
@@ -128,6 +153,9 @@
   .usage-popover { width: min(250px, 70vw); }
   .usage-client { grid-template-columns: minmax(0, 1fr) auto auto; }
   .usage-client-track { grid-column: 1 / -1; }
+  .usage-price-disclosure { padding: 16px 14px; }
+  .usage-price-facts > div { grid-template-columns: 1fr; gap: 2px; }
+  .usage-price-rates > div { grid-template-columns: 74px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .usage-day-bar { transition: none; } }
 @media (prefers-contrast: more) {

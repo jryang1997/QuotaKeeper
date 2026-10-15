@@ -4,6 +4,8 @@ import { STR, fill, fmtInt, fmtTokens } from './ui-data.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
 import { aggregateIntraday, aggregateUsage, localDate, seriesMatchesTotal, usageBounds, usageCoverage, usageMetric } from './usage-data.js';
 import { formatCurrency } from './currency.js';
+import { aggregatePricing } from './pricing-data.js';
+import PricingDetails, { PricingSummary } from './PricingDetails.jsx';
 import AnimatedNumber from './AnimatedNumber.jsx';
 import { PopoverSurface, SelectionGroup, SelectionHighlight, useMotionPreference } from './ui-motion.jsx';
 import { FADE, LAYOUT_SPRING } from './motion-tuning.js';
@@ -140,6 +142,7 @@ export default function UsageDashboard({ ledger, stale, model, onModelChange: se
   const today = localDate();
   const bounds = usageBounds(range, today, customStart, customEnd);
   const summary = useMemo(() => aggregateUsage(ledger?.analysis_rows, bounds, agent, model), [ledger, bounds.start, bounds.end, agent, model]);
+  const pricing = useMemo(() => aggregatePricing(summary.selectedRows, ledger?.price_bases || []), [summary, ledger]);
   const models = useMemo(() => [...new Set([...(ledger?.analysis_rows || []).map((row) => row.model), ...(model ? [model] : [])])].sort(), [ledger, model]);
   const coverage = useMemo(() => usageCoverage(ledger?.sources, agent, summary), [ledger, agent, summary]);
   const trendDays = useMemo(() => {
@@ -168,11 +171,10 @@ export default function UsageDashboard({ ledger, stale, model, onModelChange: se
     ? tr(zh, '采集未完成，不能当成 0', 'Collection incomplete, not a real zero')
     : t('period_invalid');
   const notBill = tr(zh, '不是订阅扣费', 'Not a subscription charge');
-  const costKnown = usageMetric(summary.total, 'cost', summary.unpriced) !== null;
-  let priceNote = notBill;
-  if (!measured) priceNote = withheld;
-  else if (!costKnown) priceNote = `${t('usage_not_priced')} · ${fill(t('usage_unpriced'), { n: summary.unpriced })} · ${notBill}`;
-  else if (summary.unpriced > 0) priceNote = `${fill(t('usage_unpriced_partial'), { n: summary.unpriced })} · ${notBill}`;
+  const costKnown = pricing.valid && pricing.amount !== null;
+  const priceNote = measured && pricing.valid
+    ? <><PricingSummary pricing={pricing} currency={currency} lang={lang} /><span>{notBill}</span></>
+    : withheld;
   const failedText = coverage.failed.map((client) => names[client] || client).join(zh ? '、' : ', ');
   const collectionCopy = coverage.state === 'unknown'
     ? (failedText
@@ -187,7 +189,7 @@ export default function UsageDashboard({ ledger, stale, model, onModelChange: se
   return <div className="usage-page usage-dashboard">
     <header className="usage-head">
       <p className="usage-subtitle">{t('usage_subtitle')}</p>
-      <p className="usage-disclaimer">{tr(zh, 'API 等值按本机记录里已有的价格估算，不是订阅扣费，也不能和额度页的剩余量相加。', 'API equivalent is priced from local records. It is not a subscription charge and is not added to remaining quota.')}</p>
+      <p className="usage-disclaimer">{t('price_disclaimer')}</p>
     </header>
     <div className="usage-filters"><div className="usage-filter-left">
       <label className="usage-select"><span>{t('period_range')}</span><select value={range} onChange={(event) => setRange(event.target.value)} aria-label={t('period_range')}>{RANGES.map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}</select></label>
@@ -204,8 +206,9 @@ export default function UsageDashboard({ ledger, stale, model, onModelChange: se
     <div className="usage-kpis">
       <SummaryCard title={t('usage_summary_tokens')} value={summary.total.total} format={(n) => fmtTokens(n, zh)} note={measured ? `${rangeNote} · ${t('usage_total_note')}` : withheld} measured={measured} />
       <SummaryCard title={t('usage_summary_requests')} value={summary.total.messages} format={(n) => fmtInt(Math.round(n))} note={measured ? t('usage_record_note') : withheld} measured={measured} />
-      <SummaryCard title={tr(zh, 'API 等值参考', 'API equivalent')} value={summary.total.cost} format={(n) => formatCurrency(n, currency)} note={priceNote} measured={measured && costKnown} />
+      <SummaryCard title={tr(zh, 'API 等值参考', 'API equivalent')} value={pricing.amount ?? 0} format={(n) => formatCurrency(n, currency)} note={priceNote} measured={measured && costKnown} />
     </div>
+    {measured && pricing.valid && <PricingDetails pricing={pricing} snapshot={ledger.price_snapshot} currency={currency} currencyFallback={currency?.code && currency.code !== 'USD' && !(Number.isFinite(currency.rate) && currency.rate > 0)} lang={lang} />}
     <section className="usage-surface usage-chart-card">
       <div className="usage-chart-heading">
         <div><h2>{t('usage_trend_title')}</h2><p>{t('usage_trend_hint')}</p></div>
