@@ -350,7 +350,7 @@ mod tests {
         };
         // 25 天前(恰好在 26 周窗口内)与今天
         let records = vec![mk("omp", 25, 400), mk("omp", 0, 800), mk("zcode", 0, 100)];
-        let mut rep = aggregate(records, now);
+        let mut rep = aggregate(records, now, &crate::ledger::pricing::Pricing::default());
         rep.sources = vec![SourceStatus {
             client: "omp",
             records: 3,

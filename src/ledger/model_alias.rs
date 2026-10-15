@@ -17,9 +17,13 @@
 
 /// 归一化为 canonical 名。空输入返回 "unknown"(与采集侧兜底一致)。
 pub fn canonical(model: &str) -> String {
+    resolve(model).0
+}
+
+pub(super) fn resolve(model: &str) -> (String, bool) {
     let raw = model.trim();
     if raw.is_empty() {
-        return "unknown".into();
+        return ("unknown".into(), false);
     }
     // 1. 最后一段:剥供应商前缀(openrouter/z-ai/、bedrock 点分 zai. 等)。
     //    点分只用于 bedrock 式「org.model」两段名:仅当点后还有第二段且首段
@@ -99,7 +103,10 @@ pub fn canonical(model: &str) -> String {
     // 4. fireworks 的 p-当-点:5p3 → 5.3(仅 版本段,字母数字混合段不动)
     name = restore_dots(&name);
     // 5. 显式别名
-    ALIAS.iter().find(|(from, _)| *from == name).map_or(name, |(_, to)| (*to).into())
+    match ALIAS.iter().find(|(from, _)| *from == name) {
+        Some((_, to)) => ((*to).into(), true),
+        None => (name, false),
+    }
 }
 
 /// 反向查别名表:canonical 名对应的原始短名(定价兜底用——目录里常有

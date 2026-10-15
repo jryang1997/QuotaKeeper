@@ -1008,7 +1008,7 @@ mod tests {
             mk("omp", "muse-spark-1.3", 0, 500),
             mk("zcode", "GLM-5.3-Flash", 0, 300),
         ];
-        let mut rep = aggregate(records, now);
+        let mut rep = aggregate(records, now, &crate::ledger::pricing::Pricing::default());
         rep.sources = vec![
             SourceStatus {
                 client: "codex",
@@ -1330,7 +1330,7 @@ mod tests {
             duration_ms: 0,
             ttft_ms: 0,
         }];
-        let ledger = aggregate(records, now);
+        let ledger = aggregate(records, now, &crate::ledger::pricing::Pricing::default());
         let backend = TestBackend::new(100, 30);
         let mut term = Terminal::new(backend).unwrap();
         let mut hits = HitRegions::default();

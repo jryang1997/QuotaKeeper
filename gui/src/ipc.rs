@@ -288,6 +288,32 @@ pub fn push(
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_pricing(models: serde_json::Value) -> ledger::pricing::Pricing {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+    let home = std::env::temp_dir().join(format!(
+        "quotakeeper-gui-prices-{}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
+    ));
+    let path = ledger::pricing::cache_path(&home);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::to_vec(&serde_json::json!({
+        "schema_version": 2,
+        "dataset_url": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+        "fetched_at_ms": 1,
+        "models": models,
+    })).unwrap()).unwrap();
+    let pricing = ledger::pricing::Pricing::load(&home);
+    std::fs::remove_dir_all(home).unwrap();
+    pricing
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
@@ -321,7 +347,10 @@ mod tests {
             duration_ms: 0,
             ttft_ms: 0,
         });
-        let report = ledger::aggregate(records.into(), now);
+        let pricing = fixture_pricing(serde_json::json!({
+            "openrouter/gpt-5": { "input": 0.015625, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0 }
+        }));
+        let report = ledger::aggregate(records.into(), now, &pricing);
         let wire = serde_json::to_value(ledger_dto(&report)).unwrap();
 
         assert_eq!(wire["today"]["cost_reported"], 1.25);

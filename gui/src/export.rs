@@ -178,10 +178,69 @@ pub fn save_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quotakeeper::ledger::{self, Agg, TokenBreakdown, UsageRecord, pricing::PriceBasis};
+
+    fn empty_report() -> LedgerReport {
+        let mut report = ledger::aggregate(
+            Vec::new(),
+            chrono::Local::now(),
+            &ledger::pricing::Pricing::default(),
+        );
+        report.price_bases.push(PriceBasis::Reported);
+        report
+    }
+
+    fn cost_report(reported: f64, estimated: f64) -> LedgerReport {
+        let now = chrono::Local::now();
+        let pricing = crate::ipc::fixture_pricing(serde_json::json!({
+            "openai/gpt-5": { "input": estimated, "output": 0.0 }
+        }));
+        let records = [
+            (
+                TokenBreakdown {
+                    input: 7,
+                    output: 3,
+                    cache_read: 1,
+                    ..Default::default()
+                },
+                Some(reported),
+                false,
+            ),
+            (
+                TokenBreakdown {
+                    input: 1,
+                    ..Default::default()
+                },
+                Some(999.0),
+                true,
+            ),
+            (
+                TokenBreakdown {
+                    cache_read: 1,
+                    ..Default::default()
+                },
+                None,
+                false,
+            ),
+        ]
+        .map(|(tokens, cost, cost_is_estimate)| UsageRecord {
+            client: "codex",
+            model: "openai/gpt-5".into(),
+            ts_ms: now.timestamp_millis(),
+            tokens,
+            cost,
+            cost_is_estimate,
+            session: None,
+            project: Some("demo".into()),
+            duration_ms: 0,
+            ttft_ms: 0,
+        });
+        ledger::aggregate(records.into(), now, &pricing)
+    }
 
     #[test]
     fn csv_neutralizes_formulas_and_json_preserves_all_text_fields() {
-        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = empty_report();
         for project in [
             "=1+1",
             " +1",
@@ -207,6 +266,7 @@ mod tests {
                 raw_model: project.into(),
                 agg: Default::default(),
                 unpriced_messages: 0,
+                price_basis_id: 0,
             }];
             let text = csv(&report, "+08:00", &ExportSelection::default());
             let safe_field = format!("\"'{}\"", project.replace('"', "\"\""));
@@ -224,83 +284,122 @@ mod tests {
 
     #[test]
     fn csv_keeps_reported_and_estimated_cost_apart() {
-        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
-        report.analysis_rows.clear();
-        report.analysis_rows.push(quotakeeper::ledger::AnalysisRow {
-            date: "2026-09-27".into(),
-            client: "codex",
-            project: Some("demo".into()),
-            model: "gpt-5".into(),
-            raw_model: "openai/gpt-5".into(),
-            agg: quotakeeper::ledger::Agg {
-                input: 8,
-                output: 3,
-                cache_read: 2,
-                cache_write: 0,
-                reasoning: 0,
-                messages: 1,
-                cost_reported: 1.5,
-                cost_estimated: 0.25,
-            },
-            unpriced_messages: 1,
-        });
+        let report = cost_report(1.5, 0.25);
+        assert_eq!(report.analysis_rows.len(), 3);
+        let total = report
+            .analysis_rows
+            .iter()
+            .fold(Agg::default(), |mut sum, row| {
+                sum.merge(&row.agg);
+                sum
+            });
+        assert_eq!(
+            (total.input, total.output, total.cache_read, total.total()),
+            (8, 3, 2, 13)
+        );
+        assert_eq!(
+            (total.cost_reported, total.cost_estimated, total.cost()),
+            (1.5, 0.25, 1.75)
+        );
         let result = csv(&report, "+08:00", &ExportSelection::default());
-        assert!(result.contains(
-            "\"2026-09-27\",\"codex\",\"demo\",\"gpt-5\",\"openai/gpt-5\",8,3,2,0,0,13,1,1.5,0.25,1.75,1,true,\"codex_rollout_jsonl\",\"'+08:00\""
-        ));
+        assert_eq!(result.lines().count(), 4);
+        for costs in [
+            ",1.5,0,1.5,0,false,",
+            ",0,0.25,0.25,0,false,",
+            ",0,0,0,1,true,",
+        ] {
+            assert!(result.contains(costs), "{result}");
+        }
+        for row in &report.analysis_rows {
+            assert_eq!(
+                row.unpriced_messages,
+                if matches!(
+                    report.price_bases[row.price_basis_id],
+                    PriceBasis::Unpriced { .. }
+                ) {
+                    row.agg.messages
+                } else {
+                    0
+                }
+            );
+        }
     }
 
     #[test]
     fn exports_round_trip_tiny_and_full_precision_costs() {
-        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         for (reported, estimated) in [
             (1.25e-10, 3.75e-10),
             (1.2345678901234567, 2.345678901234567),
         ] {
-            report.analysis_rows = vec![AnalysisRow {
-                date: "2026-09-27".into(),
-                client: "codex",
-                project: None,
-                model: "gpt-5".into(),
-                raw_model: "OpenAI/GPT-5".into(),
-                agg: quotakeeper::ledger::Agg {
-                    input: 1,
-                    messages: 1,
-                    cost_reported: reported,
-                    cost_estimated: estimated,
-                    ..Default::default()
-                },
-                unpriced_messages: 1,
-            }];
+            let report = cost_report(reported, estimated);
             let text = csv(&report, "+08:00", &ExportSelection::default());
             let mut lines = text.lines();
             let columns: Vec<_> = lines.next().unwrap().split(',').collect();
-            let fields: Vec<_> = lines.next().unwrap().split(',').collect();
-            assert_eq!(fields.len(), columns.len());
+            let rows: Vec<Vec<_>> = lines.map(|line| line.split(',').collect()).collect();
+            assert_eq!(rows.len(), 3);
+            assert!(rows.iter().all(|fields| fields.len() == columns.len()));
             for (column, expected) in [
                 ("cost_reported_usd", reported),
                 ("cost_estimated_usd", estimated),
                 ("cost_total_usd", reported + estimated),
             ] {
                 let index = columns.iter().position(|name| *name == column).unwrap();
-                assert_eq!(fields[index].parse::<f64>().unwrap(), expected, "{column}");
+                let values: Vec<f64> = rows
+                    .iter()
+                    .map(|fields| fields[index].parse().unwrap())
+                    .collect();
+                assert_eq!(values.iter().sum::<f64>(), expected, "{column}");
+                for row in &report.analysis_rows {
+                    let expected_row = match column {
+                        "cost_reported_usd" => row.agg.cost_reported,
+                        "cost_estimated_usd" => row.agg.cost_estimated,
+                        _ => row.agg.cost(),
+                    };
+                    assert!(values.contains(&expected_row));
+                }
             }
             let value: serde_json::Value = serde_json::from_slice(
                 &json(&report, "+08:00", &ExportSelection::default()).unwrap(),
             )
             .unwrap();
-            let row = &value["rows"][0];
-            assert_eq!(row["cost_reported_usd"].as_f64().unwrap(), reported);
-            assert_eq!(row["cost_estimated_usd"].as_f64().unwrap(), estimated);
-            assert_eq!(row["agg"]["cost"].as_f64().unwrap(), reported + estimated);
-            assert_eq!(row["unpriced_messages"], 1);
-            assert_eq!(row["cost_is_partial"], true);
+            let rows = value["rows"].as_array().unwrap();
+            assert_eq!(rows.len(), 3);
+            let source = rows
+                .iter()
+                .find(|row| row["cost_reported_usd"].as_f64() == Some(reported))
+                .unwrap();
+            assert_eq!(source["agg"]["cost"].as_f64().unwrap(), reported);
+            assert_eq!(source["cost_estimated_usd"].as_f64().unwrap(), 0.0);
+            let estimate = rows
+                .iter()
+                .find(|row| row["cost_estimated_usd"].as_f64() == Some(estimated))
+                .unwrap();
+            assert_eq!(estimate["agg"]["cost"].as_f64().unwrap(), estimated);
+            assert_eq!(estimate["cost_reported_usd"].as_f64().unwrap(), 0.0);
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| row["cost_is_partial"] == true)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                rows.iter()
+                    .map(|row| row["unpriced_messages"].as_u64().unwrap())
+                    .sum::<u64>(),
+                1
+            );
+            assert_eq!(
+                rows.iter()
+                    .map(|row| row["agg"]["cost"].as_f64().unwrap())
+                    .sum::<f64>(),
+                reported + estimated
+            );
         }
     }
 
     #[test]
     fn export_selection_filters_exact_canonical_model_date_agent_and_project() {
-        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = empty_report();
         report.analysis_rows = [
             (
                 "2026-09-26",
@@ -364,6 +463,7 @@ mod tests {
             raw_model: raw_model.into(),
             agg: Default::default(),
             unpriced_messages: 0,
+            price_basis_id: 0,
         })
         .collect();
         let selection: ExportSelection = serde_json::from_str(
@@ -415,7 +515,7 @@ mod tests {
 
     #[test]
     fn json_identifies_each_collectors_source() {
-        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut report = empty_report();
         report.analysis_rows = ["codex", "claude", "dsh", "omp", "opencode", "zcode"]
             .into_iter()
             .map(|client| AnalysisRow {
@@ -426,6 +526,7 @@ mod tests {
                 raw_model: "openai/gpt-5".into(),
                 agg: Default::default(),
                 unpriced_messages: 0,
+                price_basis_id: 0,
             })
             .collect();
         let value: serde_json::Value =

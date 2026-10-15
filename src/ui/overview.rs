@@ -630,8 +630,15 @@ mod tests {
     fn today_period_never_includes_future_grid_days() {
         // aggregate 产出的 26 周网格尾部含本周未来日;Today 切片必须恰好是今天,
         // 且 All 切片不得越过今天(2026-09-29 回归:今日 tab 恒为 0)。
-        let ledger = crate::ledger::aggregate(Vec::new(), chrono::Local::now());
-        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let ledger = crate::ledger::aggregate(
+            Vec::new(),
+            chrono::Local::now(),
+            &crate::ledger::pricing::Pricing::default(),
+        );
+        let today = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
         let grid_last = ledger.daily_totals.last().unwrap().date.clone();
         assert!(grid_last.as_str() >= today.as_str(), "网格应含未来日:{grid_last}");
         let today_days = period_days(Period::Today, &ledger);
@@ -708,7 +715,11 @@ mod tests {
 
     fn fixture_ledger(days: usize) -> LedgerReport {
         // 构造指定天数的 daily_totals(字段哨兵由 aggregate 测试覆盖,这里只测切片)
-        let mut ledger = crate::ledger::aggregate(Vec::new(), chrono::Local::now());
+        let mut ledger = crate::ledger::aggregate(
+            Vec::new(),
+            chrono::Local::now(),
+            &crate::ledger::pricing::Pricing::default(),
+        );
         ledger.daily_totals = (0..days)
             .map(|i| crate::ledger::DailyTotal {
                 date: format!("2026-01-{:02}", i + 1),
@@ -730,7 +741,8 @@ mod render_tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     fn rich_ledger(now: chrono::DateTime<chrono::Local>) -> LedgerReport {
-        let mut ledger = crate::ledger::aggregate(Vec::new(), now);
+        let mut ledger =
+            crate::ledger::aggregate(Vec::new(), now, &crate::ledger::pricing::Pricing::default());
         let mut sources = Vec::new();
         for client in ["codex", "claude", "omp", "opencode", "zcode", "dsh"] {
             sources.push(crate::ledger::SourceStatus {

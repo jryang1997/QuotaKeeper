@@ -26,6 +26,7 @@ pub mod zcode;
 
 pub use types::{Agg, SpeedStats, TokenBreakdown, UsageRecord, client_label};
 
+use pricing::{PriceBasis, PriceSnapshot, Pricing};
 use types::CLIENTS;
 
 pub struct SourceStatus {
@@ -93,17 +94,20 @@ pub struct AnalysisRow {
     pub raw_model: String,
     pub agg: Agg,
     pub unpriced_messages: u64,
+    pub price_basis_id: usize,
 }
 
 /// 今天与昨天按本地整点拆分，供单日趋势图按两小时绘制。
 pub struct IntradayRow {
     pub date: String,
     pub hour: u8,
+    pub project: Option<String>,
     pub client: &'static str,
     pub model: String,
     pub raw_model: String,
     pub agg: Agg,
     pub unpriced_messages: u64,
+    pub price_basis_id: usize,
 }
 
 /// 会话维度行(近 30 天,按最后活跃排序).
@@ -126,6 +130,10 @@ pub struct ProjectRow {
 pub const HEATMAP_WEEKS: usize = 26;
 
 pub struct LedgerReport {
+    pub price_snapshot: PriceSnapshot,
+    pub price_bases: Vec<PriceBasis>,
+    pub report_id: String,
+    pub timezone_offset: String,
     pub sources: Vec<SourceStatus>,
     pub today: Agg,
     pub week: Agg,
@@ -221,21 +229,9 @@ pub fn collect(now: DateTime<Local>) -> LedgerReport {
         }
     }
 
-    // 估价只读缓存;新价由后台线程刷新写入。
     pricing::spawn_refresher(&home);
-    if records.iter().any(|r| r.cost.is_none()) {
-        let pricing = pricing::Pricing::load(&home);
-        for r in records.iter_mut() {
-            if r.cost.is_none()
-                && let Some(c) = pricing.estimate(&r.model, &r.tokens)
-            {
-                r.cost = Some(c);
-                r.cost_is_estimate = true;
-            }
-        }
-    }
-
-    let report = aggregate(records, now);
+    let pricing = Pricing::load(&home);
+    let report = aggregate(records, now, &pricing);
     report.sources_filled(sources)
 }
 
@@ -303,7 +299,11 @@ fn file_sig(path: &Path) -> Option<FileSig> {
     Some((mtime, meta.len()))
 }
 
-pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerReport {
+pub fn aggregate(
+    mut records: Vec<UsageRecord>,
+    now: DateTime<Local>,
+    pricing: &Pricing,
+) -> LedgerReport {
     let now_ms = now.timestamp_millis();
     records.retain(|r| r.ts_ms > 0 && r.ts_ms <= now_ms);
     let today = now.date_naive();
@@ -312,9 +312,12 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let today_str = today.format("%Y-%m-%d").to_string();
     let heat_start = monday - Duration::weeks((HEATMAP_WEEKS - 1) as i64);
     let mut heat_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
-    let mut analysis_raw: HashMap<(String, &'static str, Option<String>, String), (Agg, u64)> =
+    let mut analysis_raw: HashMap<(String, &'static str, Option<String>, String, usize), Agg> =
         HashMap::new();
-    let mut intraday_raw: HashMap<(String, u8, &'static str, String), (Agg, u64)> = HashMap::new();
+    let mut intraday_raw: HashMap<(String, u8, &'static str, Option<String>, String, usize), Agg> =
+        HashMap::new();
+    let mut basis_ids: HashMap<String, usize> = HashMap::new();
+    let mut basis_entries: Vec<(String, PriceBasis)> = Vec::new();
 
     let mut today_agg = Agg::default();
     let mut week_agg = Agg::default();
@@ -344,34 +347,53 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     );
     let mut project_raw: HashMap<String, ProjectEntry> = HashMap::new();
 
-    for r in &records {
+    for mut r in records {
         let Some(ts) = DateTime::from_timestamp_millis(r.ts_ms) else {
             continue;
+        };
+        let basis = if !r.cost_is_estimate && r.cost.is_some_and(f64::is_finite) {
+            PriceBasis::Reported
+        } else {
+            let quote = pricing.quote(&r.model, &r.tokens);
+            r.cost = quote.amount;
+            r.cost_is_estimate = matches!(quote.basis, PriceBasis::Estimated(_));
+            quote.basis
+        };
+        let key = serde_json::to_string(&basis).expect("finite price basis");
+        let price_basis_id = if let Some(id) = basis_ids.get(&key) {
+            *id
+        } else {
+            let id = basis_entries.len();
+            basis_ids.insert(key.clone(), id);
+            basis_entries.push((key, basis));
+            id
         };
         let date: NaiveDate = ts.with_timezone(&Local).date_naive();
         let date_str = date.format("%Y-%m-%d").to_string();
         if date <= today {
-            let entry = analysis_raw
-                .entry((date_str.clone(), r.client, r.project.clone(), r.model.clone()))
-                .or_default();
-            entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
-            if r.cost.is_none() {
-                entry.1 += 1;
-            }
+            analysis_raw
+                .entry((
+                    date_str.clone(),
+                    r.client,
+                    r.project.clone(),
+                    r.model.clone(),
+                    price_basis_id,
+                ))
+                .or_default()
+                .add(&r.tokens, r.cost, r.cost_is_estimate);
         }
         if date >= today - Duration::days(1) && date <= today {
-            let entry = intraday_raw
+            intraday_raw
                 .entry((
                     date_str.clone(),
                     ts.with_timezone(&Local).hour() as u8,
                     r.client,
+                    r.project.clone(),
                     r.model.clone(),
+                    price_basis_id,
                 ))
-                .or_default();
-            entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
-            if r.cost.is_none() {
-                entry.1 += 1;
-            }
+                .or_default()
+                .add(&r.tokens, r.cost, r.cost_is_estimate);
         }
         if date_str == today_str {
             today_agg.add(&r.tokens, r.cost, r.cost_is_estimate);
@@ -410,15 +432,12 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 .entry(canonical_model.clone())
                 .or_default()
                 .insert(r.model.clone());
-            entry
-                .1
-                .entry(canonical_model.clone())
-                .or_default()
-                .add(&r.tokens, r.cost, r.cost_is_estimate);
-            speed_raw
-                .entry(canonical_model)
-                .or_default()
-                .sample(r);
+            entry.1.entry(canonical_model.clone()).or_default().add(
+                &r.tokens,
+                r.cost,
+                r.cost_is_estimate,
+            );
+            speed_raw.entry(canonical_model).or_default().sample(&r);
             // 时段分布(本地小时 / 星期 / 星期×小时 punchcard)
             let local = ts.with_timezone(&Local);
             let hour_idx = local.hour() as usize;
@@ -640,10 +659,29 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     });
     by_project.truncate(20);
 
+    let mut ordered_bases: Vec<_> = basis_entries.into_iter().enumerate().collect();
+    ordered_bases.sort_by(|a, b| a.1.0.cmp(&b.1.0));
+    let mut basis_remap = vec![0; ordered_bases.len()];
+    let price_bases: Vec<PriceBasis> = ordered_bases
+        .into_iter()
+        .enumerate()
+        .map(|(id, (previous_id, (_, basis)))| {
+            basis_remap[previous_id] = id;
+            basis
+        })
+        .collect();
+
     let mut analysis_rows: Vec<AnalysisRow> = analysis_raw
         .into_iter()
-        .map(
-            |((date, client, project, raw_model), (agg, unpriced_messages))| AnalysisRow {
+        .map(|((date, client, project, raw_model, previous_id), agg)| {
+            let price_basis_id = basis_remap[previous_id];
+            let unpriced_messages =
+                if matches!(price_bases[price_basis_id], PriceBasis::Unpriced { .. }) {
+                    agg.messages
+                } else {
+                    0
+                };
+            AnalysisRow {
                 date,
                 client,
                 project,
@@ -651,40 +689,79 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
                 raw_model,
                 agg,
                 unpriced_messages,
-            },
-        )
+                price_basis_id,
+            }
+        })
         .collect();
     analysis_rows.sort_by(|a, b| {
-        (&a.date, a.client, &a.project, &a.raw_model).cmp(&(
-            &b.date,
-            b.client,
-            &b.project,
-            &b.raw_model,
-        ))
+        (
+            &a.date,
+            a.client,
+            &a.project,
+            &a.raw_model,
+            a.price_basis_id,
+        )
+            .cmp(&(
+                &b.date,
+                b.client,
+                &b.project,
+                &b.raw_model,
+                b.price_basis_id,
+            ))
     });
 
     let mut intraday_rows: Vec<IntradayRow> = intraday_raw
         .into_iter()
         .map(
-            |((date, hour, client, raw_model), (agg, unpriced_messages))| IntradayRow {
-                date,
-                hour,
-                client,
-                model: model_alias::canonical(&raw_model),
-                raw_model,
-                agg,
-                unpriced_messages,
+            |((date, hour, client, project, raw_model, previous_id), agg)| {
+                let price_basis_id = basis_remap[previous_id];
+                let unpriced_messages =
+                    if matches!(price_bases[price_basis_id], PriceBasis::Unpriced { .. }) {
+                        agg.messages
+                    } else {
+                        0
+                    };
+                IntradayRow {
+                    date,
+                    hour,
+                    client,
+                    project,
+                    model: model_alias::canonical(&raw_model),
+                    raw_model,
+                    agg,
+                    unpriced_messages,
+                    price_basis_id,
+                }
             },
         )
         .collect();
     intraday_rows.sort_by(|a, b| {
-        (&a.date, a.hour, a.client, &a.raw_model).cmp(&(&b.date, b.hour, b.client, &b.raw_model))
+        (
+            &a.date,
+            a.hour,
+            a.client,
+            &a.project,
+            &a.raw_model,
+            a.price_basis_id,
+        )
+            .cmp(&(
+                &b.date,
+                b.hour,
+                b.client,
+                &b.project,
+                &b.raw_model,
+                b.price_basis_id,
+            ))
     });
 
     let mut month_by_client: Vec<(&'static str, Agg)> = month_by_client_raw.into_iter().collect();
     month_by_client.sort_by(|a, b| b.1.total().cmp(&a.1.total()));
 
     LedgerReport {
+        price_snapshot: pricing.snapshot().clone(),
+        price_bases,
+        report_id: new_report_id(),
+        timezone_offset: now.format("%:z").to_string(),
         sources: Vec::new(),
         today: today_agg,
         week: week_agg,
@@ -712,6 +789,20 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         },
         generated_at_ms: now.timestamp_millis(),
     }
+}
+
+fn new_report_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_REPORT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!(
+        "{}-{nanos}-{}",
+        std::process::id(),
+        NEXT_REPORT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 impl LedgerReport {
@@ -748,6 +839,24 @@ pub fn format_tokens(v: i64) -> String {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    fn fixture_pricing(models: serde_json::Value) -> Pricing {
+        let home =
+            std::env::temp_dir().join(format!("quotakeeper-ledger-prices-{}", new_report_id()));
+        let path = pricing::cache_path(&home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "fetched_at_ms": 1, "models": models,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let prices = Pricing::load(&home);
+        std::fs::remove_dir_all(home).unwrap();
+        prices
+    }
 
     fn rec(client: &'static str, model: &str, ts_ms: i64, tokens: TokenBreakdown) -> UsageRecord {
         UsageRecord {
@@ -795,8 +904,16 @@ mod tests {
                 ..Default::default()
             },
         );
-        let rep = aggregate(vec![timed, timed2, no_ttft, untimed], n);
-        let row = rep.by_model.iter().find(|m| m.model == "claude-opus-4").unwrap();
+        let rep = aggregate(
+            vec![timed, timed2, no_ttft, untimed],
+            n,
+            &pricing::Pricing::default(),
+        );
+        let row = rep
+            .by_model
+            .iter()
+            .find(|m| m.model == "claude-opus-4")
+            .unwrap();
         let speed = row.speed.clone().expect("有计时样本");
         assert_eq!(speed.timed_calls, 3);
         assert_eq!(speed.ttft_samples, 2);
@@ -822,6 +939,7 @@ mod tests {
                 },
             )],
             n,
+            &pricing::Pricing::default(),
         );
         assert!(rep.by_model[0].speed.is_none());
     }
@@ -872,6 +990,45 @@ mod tests {
     }
 
     #[test]
+    fn daily_and_hourly_rows_separate_price_dispositions() {
+        let n = now();
+        let mut reported = rec(
+            "codex",
+            "unknown-price-model",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                input: 10,
+                ..Default::default()
+            },
+        );
+        reported.project = Some("alpha".into());
+        let mut unpriced = reported.clone();
+        unpriced.cost = None;
+        let report = aggregate(vec![reported, unpriced], n, &pricing::Pricing::default());
+        assert_eq!(report.analysis_rows.len(), 2);
+        assert_eq!(report.intraday_rows.len(), 2);
+        for rows in [
+            report
+                .analysis_rows
+                .iter()
+                .map(|row| (&row.agg, row.unpriced_messages))
+                .collect::<Vec<_>>(),
+            report
+                .intraday_rows
+                .iter()
+                .map(|row| (&row.agg, row.unpriced_messages))
+                .collect(),
+        ] {
+            for (agg, unpriced_messages) in rows {
+                assert_eq!(agg.messages, 1);
+                assert_eq!(unpriced_messages, u64::from(agg.cost_reported == 0.0));
+            }
+        }
+        assert_eq!(report.today.messages, 2);
+        assert_eq!(report.today.cost_reported, 0.5);
+    }
+
+    #[test]
     fn analysis_rows_preserve_project_and_missing_price() {
         let now = Local.with_ymd_and_hms(2026, 9, 27, 12, 0, 0).unwrap();
         let mut first = rec(
@@ -888,7 +1045,7 @@ mod tests {
         let mut second = first.clone();
         second.project = Some("beta".into());
         second.cost = Some(1.25);
-        let report = aggregate(vec![first, second], now);
+        let report = aggregate(vec![first, second], now, &pricing::Pricing::default());
         assert_eq!(report.analysis_rows.len(), 2);
         let alpha = report
             .analysis_rows
@@ -925,7 +1082,7 @@ mod tests {
                 record
             })
             .collect();
-        let report = aggregate(records, n);
+        let report = aggregate(records, n, &pricing::Pricing::default());
 
         assert_eq!(report.analysis_rows.len(), 2);
         assert_eq!(report.intraday_rows.len(), 2);
@@ -996,9 +1153,14 @@ mod tests {
             reasoning: 2,
         };
         other_project.cost = Some(0.0);
+        let pricing = fixture_pricing(serde_json::json!({
+            "openrouter/gpt-5": { "input": 0.125, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0 },
+            "OpenAI/GPT-5": { "input": 0.0, "output": 0.0 }
+        }));
         let report = aggregate(
             vec![reported, estimated, unpriced, other_client, other_project],
             n,
+            &pricing,
         );
 
         let expected = Agg {
@@ -1013,8 +1175,8 @@ mod tests {
         };
         assert_eq!(report.today, expected);
         assert_eq!(report.today.total(), 1_154);
-        assert_eq!(report.analysis_rows.len(), 4);
-        assert_eq!(report.intraday_rows.len(), 3);
+        assert_eq!(report.analysis_rows.len(), 5);
+        assert_eq!(report.intraday_rows.len(), 5);
         let daily = report
             .analysis_rows
             .iter()
@@ -1053,14 +1215,18 @@ mod tests {
         let alpha = report
             .analysis_rows
             .iter()
-            .find(|row| {
+            .filter(|row| {
                 row.client == "codex"
                     && row.project.as_deref() == Some("alpha")
                     && row.raw_model == "OpenAI/GPT-5"
             })
-            .unwrap();
+            .fold((Agg::default(), 0), |mut sum, row| {
+                sum.0.merge(&row.agg);
+                sum.1 += row.unpriced_messages;
+                sum
+            });
         assert_eq!(
-            alpha.agg,
+            alpha.0,
             Agg {
                 input: 11,
                 output: 22,
@@ -1072,7 +1238,7 @@ mod tests {
                 cost_estimated: 0.0,
             }
         );
-        assert_eq!(alpha.unpriced_messages, 1);
+        assert_eq!(alpha.1, 1);
         let channel = report
             .analysis_rows
             .iter()
@@ -1128,7 +1294,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        let report = aggregate(vec![empty, whitespace, old], n);
+        let report = aggregate(
+            vec![empty, whitespace, old],
+            n,
+            &pricing::Pricing::default(),
+        );
 
         assert_eq!(report.analysis_rows.len(), 3);
         let old = &report.analysis_rows[0];
@@ -1199,7 +1369,10 @@ mod tests {
             .into_iter()
             .chain(invalid)
             .collect();
-        let report = aggregate(records, n);
+        let pricing = fixture_pricing(serde_json::json!({
+            "OpenAI/GPT-5": { "input": 0.25, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0 }
+        }));
+        let report = aggregate(records, n, &pricing);
 
         assert_eq!(report.analysis_rows.len(), 4);
         assert_eq!(report.intraday_rows.len(), 3);
@@ -1287,7 +1460,7 @@ mod tests {
             input: 12,
             ..Default::default()
         });
-        let report = aggregate(vec![record], now);
+        let report = aggregate(vec![record], now, &pricing::Pricing::default());
         assert_eq!(report.intraday_rows.len(), 1);
         assert_eq!(report.intraday_rows[0].date, "2026-09-29");
         assert_eq!(report.intraday_rows[0].hour, 13);
@@ -1360,7 +1533,7 @@ mod tests {
                 },
             ), // 30天外
         ];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         assert_eq!(rep.today.input, 1);
         assert_eq!(rep.week.input, 11);
         assert_eq!(rep.month.input, 111);
@@ -1411,7 +1584,7 @@ mod tests {
                 },
             ), // 30天前,排除
         ];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         let codex = rep.by_agent.iter().find(|a| a.client == "codex").unwrap();
         assert_eq!(codex.agg.input, 5);
     }
@@ -1427,7 +1600,7 @@ mod tests {
                 ..Default::default()
             },
         )];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         assert_eq!(rep.by_day.len(), 14);
         assert_eq!(rep.by_day[13].date, "2026-09-25");
         assert_eq!(rep.by_day[13].agg.input, 7);
@@ -1461,7 +1634,7 @@ mod tests {
                 },
             ),
         ];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         assert_eq!(rep.week.input, 3);
         assert_eq!(rep.month.input, 7);
     }
@@ -1488,7 +1661,7 @@ mod tests {
                 },
             ),
         ];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         let omp = rep.by_agent.iter().find(|a| a.client == "omp").unwrap();
         assert_eq!(omp.models[0].0, "big");
     }
@@ -1503,7 +1676,7 @@ mod tests {
             r.project = Some("project".into());
             r
         });
-        let rep = aggregate(records.into(), n);
+        let rep = aggregate(records.into(), n, &pricing::Pricing::default());
         for agg in [&rep.today, &rep.week, &rep.month, &rep.by_agent[0].agg, &rep.by_model[0].agg] {
             assert_eq!(agg.total(), 10);
             assert_eq!(agg.messages, 1);
@@ -1529,7 +1702,7 @@ mod tests {
                 ..Default::default()
             },
         )];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         assert_eq!(rep.today.total(), 0);
         assert!(rep.by_agent.is_empty());
     }
@@ -1555,7 +1728,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let rep = aggregate(vec![recent, old], n);
+        let rep = aggregate(vec![recent, old], n, &pricing::Pricing::default());
         // 600 tok / 60 min = 10 tok/min(不含 3 小时前的量)
         let br = rep.burn_rate.expect("应有燃烧率");
         assert!((br - 10.0).abs() < 1e-9, "burn_rate = {br}");
@@ -1573,7 +1746,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(aggregate(vec![old], n).burn_rate.is_none());
+        assert!(
+            aggregate(vec![old], n, &pricing::Pricing::default())
+                .burn_rate
+                .is_none()
+        );
     }
 
     #[test]
@@ -1600,6 +1777,7 @@ mod tests {
                 mk("omp", at + 1, 999),
             ],
             n,
+            &pricing::Pricing::default(),
         );
         assert_eq!(rep.trend_24h.len(), 24);
         assert_eq!(rep.trend_24h[0].agg.total(), 10);
@@ -1639,7 +1817,7 @@ mod tests {
                 ..Default::default()
             },
         )];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         assert_eq!(rep.daily_totals.len(), 26 * 7);
         // 2026-09-25 是周五 → 本周一 09-21,起点 = 25 周前的周一 2026-03-30
         assert_eq!(rep.daily_totals[0].date, "2026-03-30");
@@ -1675,7 +1853,7 @@ mod tests {
                 },
             ),
         ];
-        let rep = aggregate(records, now());
+        let rep = aggregate(records, now(), &pricing::Pricing::default());
         let d = rep.daily_detail.get("2026-09-25").unwrap();
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].0, "omp");
@@ -1692,5 +1870,330 @@ mod tests {
         assert_eq!(format_usd(0.0007), "$0.0007");
         assert_eq!(format_usd(1.5), "$1.50");
         assert_eq!(format_usd(250.0), "$250");
+    }
+    fn assert_price_references(report: &LedgerReport) {
+        for (agg, unpriced, id) in report
+            .analysis_rows
+            .iter()
+            .map(|row| (&row.agg, row.unpriced_messages, row.price_basis_id))
+            .chain(
+                report
+                    .intraday_rows
+                    .iter()
+                    .map(|row| (&row.agg, row.unpriced_messages, row.price_basis_id)),
+            )
+        {
+            let basis = report
+                .price_bases
+                .get(id)
+                .expect("valid report-local basis ID");
+            match basis {
+                PriceBasis::Reported => {
+                    assert_eq!(agg.cost_estimated, 0.0);
+                    assert_eq!(unpriced, 0);
+                }
+                PriceBasis::Estimated(_) => {
+                    assert_eq!(agg.cost_reported, 0.0);
+                    assert_eq!(unpriced, 0);
+                }
+                PriceBasis::Unpriced { .. } => {
+                    assert_eq!(agg.cost(), 0.0);
+                    assert_eq!(unpriced, agg.messages);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn one_valuation_preserves_reports_zero_and_all_summary_rollups() {
+        let n = now();
+        let pricing =
+            fixture_pricing(serde_json::json!({ "known-model": { "input": 2.0, "output": 0.0 } }));
+        let mut records: Vec<_> = [
+            (Some(5.0), false),
+            (Some(0.0), false),
+            (Some(999.0), true),
+            (None, false),
+            (Some(f64::NAN), false),
+            (Some(f64::INFINITY), false),
+        ]
+        .into_iter()
+        .map(|(cost, cost_is_estimate)| {
+            let mut record = rec(
+                "codex",
+                "known-model",
+                n.timestamp_millis(),
+                TokenBreakdown {
+                    input: 1,
+                    ..Default::default()
+                },
+            );
+            record.cost = cost;
+            record.cost_is_estimate = cost_is_estimate;
+            record
+        })
+        .collect();
+        let mut unknown = records[3].clone();
+        unknown.model = "missing-model".into();
+        let mut free = unknown.clone();
+        free.model = "big-pickle".into();
+        let mut missing_cache = records[3].clone();
+        missing_cache.tokens.cache_read = 1;
+        records.extend([unknown, free, missing_cache]);
+        for record in &mut records {
+            record.project = Some("alpha".into());
+            record.session = Some("one-session".into());
+        }
+        let report = aggregate(records, n, &pricing);
+        assert_eq!(report.today.messages, 9);
+        assert_eq!(report.today.total(), 10);
+        assert_eq!(report.today.cost_reported, 5.0);
+        assert_eq!(report.today.cost_estimated, 8.0);
+        assert_eq!(report.today.cost(), 13.0);
+        for agg in [
+            &report.week,
+            &report.month,
+            &report.month_by_client[0].1,
+            &report.by_agent[0].agg,
+            &report.recent_by_agent[0].agg,
+            &report.trend_24h[23].agg,
+            &report.by_day[13].agg,
+            &report.by_session[0].agg,
+            &report.by_project[0].agg,
+        ] {
+            assert_eq!(agg, &report.today);
+        }
+        for aggs in [
+            report
+                .analysis_rows
+                .iter()
+                .map(|row| &row.agg)
+                .collect::<Vec<_>>(),
+            report.intraday_rows.iter().map(|row| &row.agg).collect(),
+            report.by_model.iter().map(|row| &row.agg).collect(),
+            report.daily_totals.iter().map(|row| &row.agg).collect(),
+        ] {
+            let total = aggs.into_iter().fold(Agg::default(), |mut sum, agg| {
+                sum.merge(agg);
+                sum
+            });
+            assert_eq!(total, report.today);
+        }
+        let mut dispositions = [0u64; 3];
+        for row in &report.analysis_rows {
+            let index = match report.price_bases[row.price_basis_id] {
+                PriceBasis::Reported => 0,
+                PriceBasis::Estimated(_) => 1,
+                PriceBasis::Unpriced { .. } => 2,
+            };
+            dispositions[index] += row.agg.messages;
+        }
+        assert_eq!(dispositions, [2, 5, 2]);
+        assert_eq!(
+            report
+                .analysis_rows
+                .iter()
+                .map(|row| row.unpriced_messages)
+                .sum::<u64>(),
+            2
+        );
+        assert_price_references(&report);
+    }
+
+    #[test]
+    fn basis_catalogue_is_amount_free_and_stable_after_row_remapping() {
+        let n = now();
+        let pricing =
+            fixture_pricing(serde_json::json!({ "known": { "input": 2.0, "output": 0.0 } }));
+        let mut first = rec(
+            "codex",
+            "known",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                input: 10,
+                ..Default::default()
+            },
+        );
+        first.cost = None;
+        first.project = Some("alpha".into());
+        let mut second = first.clone();
+        second.tokens.input = 20;
+        let mut reported = first.clone();
+        reported.cost = Some(7.0);
+        let mut other_project = first.clone();
+        other_project.project = Some("beta".into());
+        let mut unknown = first.clone();
+        unknown.model = "missing".into();
+        let records = vec![first, second, reported, other_project, unknown];
+        let a = aggregate(records.clone(), n, &pricing);
+        let b = aggregate(records.into_iter().rev().collect(), n, &pricing);
+        assert_eq!(a.price_bases.len(), 3);
+        assert_eq!(a.price_bases, b.price_bases);
+        assert_ne!(a.report_id, b.report_id);
+        assert_eq!(a.timezone_offset, n.offset().to_string());
+        for (a, b) in a.analysis_rows.iter().zip(&b.analysis_rows) {
+            assert_eq!(
+                (
+                    &a.date,
+                    a.client,
+                    &a.project,
+                    &a.raw_model,
+                    a.price_basis_id
+                ),
+                (
+                    &b.date,
+                    b.client,
+                    &b.project,
+                    &b.raw_model,
+                    b.price_basis_id
+                )
+            );
+            assert_eq!(a.agg, b.agg);
+        }
+        for (a, b) in a.intraday_rows.iter().zip(&b.intraday_rows) {
+            assert_eq!(
+                (
+                    &a.date,
+                    a.hour,
+                    a.client,
+                    &a.project,
+                    &a.raw_model,
+                    a.price_basis_id
+                ),
+                (
+                    &b.date,
+                    b.hour,
+                    b.client,
+                    &b.project,
+                    &b.raw_model,
+                    b.price_basis_id
+                )
+            );
+            assert_eq!(a.agg, b.agg);
+        }
+        let estimated: Vec<_> = a
+            .analysis_rows
+            .iter()
+            .filter(|row| matches!(a.price_bases[row.price_basis_id], PriceBasis::Estimated(_)))
+            .collect();
+        assert_eq!(estimated.len(), 2);
+        assert_eq!(estimated[0].price_basis_id, estimated[1].price_basis_id);
+        assert_eq!(estimated[0].agg.cost_estimated, 60.0);
+        assert_eq!(estimated[1].agg.cost_estimated, 20.0);
+        for project in ["alpha", "beta"] {
+            let daily: Vec<_> = a
+                .analysis_rows
+                .iter()
+                .filter(|row| row.project.as_deref() == Some(project))
+                .map(|row| (&row.raw_model, row.price_basis_id, &row.agg))
+                .collect();
+            let hourly: Vec<_> = a
+                .intraday_rows
+                .iter()
+                .filter(|row| row.project.as_deref() == Some(project))
+                .map(|row| (&row.raw_model, row.price_basis_id, &row.agg))
+                .collect();
+            assert_eq!(daily, hourly);
+        }
+        assert_price_references(&a);
+        assert_price_references(&b);
+    }
+
+    #[test]
+    fn raw_channel_prices_stay_distinct_before_canonical_model_rollup() {
+        let n = now();
+        let pricing = fixture_pricing(serde_json::json!({
+            "a/shared": { "input": 1.0, "output": 0.0 },
+            "b/shared": { "input": 3.0, "output": 0.0 }
+        }));
+        let records = ["a/shared", "b/shared"].map(|model| {
+            let mut record = rec(
+                "codex",
+                model,
+                n.timestamp_millis(),
+                TokenBreakdown {
+                    input: 10,
+                    ..Default::default()
+                },
+            );
+            record.cost = None;
+            record
+        });
+        let report = aggregate(records.into(), n, &pricing);
+        assert_eq!(report.analysis_rows.len(), 2);
+        assert_eq!(report.by_model.len(), 1);
+        assert_eq!(report.by_model[0].model, "shared");
+        assert_eq!(report.by_model[0].agg.cost_estimated, 40.0);
+        assert_eq!(report.analysis_rows[0].agg.cost_estimated, 10.0);
+        assert_eq!(report.analysis_rows[1].agg.cost_estimated, 30.0);
+        assert_ne!(
+            report.analysis_rows[0].price_basis_id,
+            report.analysis_rows[1].price_basis_id
+        );
+        assert_price_references(&report);
+    }
+
+    #[test]
+    fn writing_snapshot_b_cannot_mutate_or_reprice_snapshot_a_report() {
+        let n = now();
+        let home = std::env::temp_dir().join(format!("quotakeeper-snapshot-{}", new_report_id()));
+        let path = pricing::cache_path(&home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let write = |rate| {
+            std::fs::write(&path, serde_json::to_vec(&serde_json::json!({
+            "schema_version": 2,
+            "dataset_url": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+            "fetched_at_ms": 1_000,
+            "models": { "known": { "input": rate, "output": 0.0 } }
+        })).unwrap()).unwrap()
+        };
+        write(1.0);
+        let a = Pricing::load(&home);
+        let mut record = rec(
+            "codex",
+            "known",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                input: 10,
+                ..Default::default()
+            },
+        );
+        record.cost = None;
+        let report_a = aggregate(vec![record.clone()], n, &a);
+        let frozen_snapshot = report_a.price_snapshot.clone();
+        let frozen_bases = report_a.price_bases.clone();
+        write(3.0);
+        let b = Pricing::load(&home);
+        let report_b = aggregate(vec![record.clone()], n, &b);
+        let old_again = aggregate(vec![record], n, &a);
+        std::fs::remove_dir_all(home).unwrap();
+        assert_eq!(report_a.today.cost_estimated, 10.0);
+        assert_eq!(report_b.today.cost_estimated, 30.0);
+        assert_eq!(old_again.today.cost_estimated, 10.0);
+        assert_eq!(report_a.price_snapshot, frozen_snapshot);
+        assert_eq!(report_a.price_bases, frozen_bases);
+        assert_eq!(old_again.price_snapshot, frozen_snapshot);
+        assert_eq!(old_again.price_bases, frozen_bases);
+        assert_ne!(report_b.price_snapshot.version, frozen_snapshot.version);
+        assert_eq!(report_a.price_snapshot.fetched_at_ms, Some(1_000));
+        assert_price_references(&report_a);
+        assert_price_references(&report_b);
+    }
+
+    #[test]
+    fn concurrent_reports_get_distinct_identifiers_at_the_same_collect_time() {
+        let n = now();
+        let ids = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(move || aggregate(Vec::new(), n, &Pricing::default()).report_id)
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<HashSet<_>>()
+        });
+        assert_eq!(ids.len(), 16);
     }
 }
