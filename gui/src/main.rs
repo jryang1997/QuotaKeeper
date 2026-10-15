@@ -50,6 +50,7 @@ struct IpcCommand {
     end: Option<String>,
     agent: Option<String>,
     project: Option<String>,
+    model: Option<String>,
     provider: Option<String>,
     models: Option<Vec<String>>,
 }
@@ -316,6 +317,7 @@ fn main() -> anyhow::Result<()> {
                             end: command.end,
                             agent: command.agent,
                             project: command.project,
+                            model: command.model,
                         };
                         let _ = ipc_proxy.send_event(UserEvent::Export(format, selection));
                     }

@@ -12,6 +12,7 @@ pub struct ExportSelection {
     pub end: Option<String>,
     pub agent: Option<String>,
     pub project: Option<String>,
+    pub model: Option<String>,
 }
 
 impl ExportSelection {
@@ -23,6 +24,7 @@ impl ExportSelection {
                 .project
                 .as_ref()
                 .is_none_or(|project| row.project.as_ref() == Some(project))
+            && self.model.as_ref().is_none_or(|model| &row.model == model)
     }
 
     fn validate(&self) -> Result<()> {
@@ -60,7 +62,7 @@ fn source_for_client(client: &str) -> &'static str {
         "codex" => "codex_rollout_jsonl",
         "claude" => "claude_project_jsonl",
         "dsh" => "dsh_session_jsonl_zstd",
-        "omp" => "omp_stats_sqlite",
+        "omp" => "omp_session_jsonl",
         "opencode" => "opencode_sqlite",
         "zcode" => "zcode_sqlite",
         _ => "unknown_local_collector",
@@ -69,7 +71,7 @@ fn source_for_client(client: &str) -> &'static str {
 
 pub fn csv(report: &LedgerReport, timezone_offset: &str, selection: &ExportSelection) -> String {
     let mut out = String::from(
-        "\u{feff}date_local,client,project,input,output,cache_read,cache_write,reasoning,total,messages,cost_reported_usd,cost_estimated_usd,cost_total_usd,unpriced_messages,cost_is_partial,source,timezone_offset\r\n",
+        "\u{feff}date_local,client,project,model,raw_model,input,output,cache_read,cache_write,reasoning,total,messages,cost_reported_usd,cost_estimated_usd,cost_total_usd,unpriced_messages,cost_is_partial,source,timezone_offset\r\n",
     );
     for row in report
         .analysis_rows
@@ -78,10 +80,12 @@ pub fn csv(report: &LedgerReport, timezone_offset: &str, selection: &ExportSelec
     {
         let agg = &row.agg;
         out.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{},{},{},{}\r\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
             csv_field(&row.date),
             csv_field(row.client),
             csv_field(row.project.as_deref().unwrap_or("")),
+            csv_field(&row.model),
+            csv_field(&row.raw_model),
             agg.input,
             agg.output,
             agg.cache_read,
@@ -115,6 +119,8 @@ pub fn json(
                 "date_local": row.date,
                 "client": row.client,
                 "project": row.project,
+                "model": row.model,
+                "raw_model": row.raw_model,
                 "agg": crate::ipc::agg_dto(&row.agg),
                 "cost_reported_usd": row.agg.cost_reported,
                 "cost_estimated_usd": row.agg.cost_estimated,
@@ -125,7 +131,7 @@ pub fn json(
         })
         .collect();
     Ok(serde_json::to_vec_pretty(&serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at_ms": report.generated_at_ms,
         "timezone_offset": timezone_offset,
         "currency": "USD",
@@ -135,6 +141,7 @@ pub fn json(
             "end": selection.end,
             "agent": selection.agent,
             "project": selection.project,
+            "model": selection.model,
         },
         "rows": rows,
     }))?)
@@ -172,9 +179,8 @@ pub fn save_report(
 mod tests {
     use super::*;
 
-
     #[test]
-    fn csv_neutralizes_formulas_and_json_preserves_project_text() {
+    fn csv_neutralizes_formulas_and_json_preserves_all_text_fields() {
         let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         for project in [
             "=1+1",
@@ -185,22 +191,33 @@ mod tests {
             "\r=1",
             "\n=1",
             "＝1+1",
+            "＋1",
+            "－1",
+            "＠SUM(1)",
             "\u{feff}=1",
+            " \u{feff}\t=1",
+            "=SUM(1,2)",
+            "=HYPERLINK(\"https://example.com\",\"label\")",
         ] {
             report.analysis_rows = vec![AnalysisRow {
                 date: "2026-10-01".into(),
                 client: "codex",
                 project: Some(project.into()),
+                model: project.into(),
+                raw_model: project.into(),
                 agg: Default::default(),
                 unpriced_messages: 0,
             }];
             let text = csv(&report, "+08:00", &ExportSelection::default());
-            assert!(text.contains(&format!("\"'{project}\"")), "{project:?}");
+            let safe_field = format!("\"'{}\"", project.replace('"', "\"\""));
+            assert_eq!(text.matches(&safe_field).count(), 3, "{project:?}");
             let value: serde_json::Value = serde_json::from_slice(
                 &json(&report, "+08:00", &ExportSelection::default()).unwrap(),
             )
             .unwrap();
             assert_eq!(value["rows"][0]["project"], project);
+            assert_eq!(value["rows"][0]["model"], project);
+            assert_eq!(value["rows"][0]["raw_model"], project);
         }
         assert_eq!(csv_field("a,\"b\""), "\"a,\"\"b\"\"\"");
     }
@@ -209,67 +226,191 @@ mod tests {
     fn csv_keeps_reported_and_estimated_cost_apart() {
         let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
         report.analysis_rows.clear();
-        report
-            .analysis_rows
-            .push(quotakeeper::ledger::AnalysisRow {
-                date: "2026-09-27".into(),
-                client: "codex",
-                project: Some("demo".into()),
-                agg: quotakeeper::ledger::Agg {
-                    input: 8,
-                    output: 3,
-                    cache_read: 2,
-                    cache_write: 0,
-                    reasoning: 0,
-                    messages: 1,
-                    cost_reported: 1.5,
-                    cost_estimated: 0.25,
-                },
-                unpriced_messages: 1,
-            });
+        report.analysis_rows.push(quotakeeper::ledger::AnalysisRow {
+            date: "2026-09-27".into(),
+            client: "codex",
+            project: Some("demo".into()),
+            model: "gpt-5".into(),
+            raw_model: "openai/gpt-5".into(),
+            agg: quotakeeper::ledger::Agg {
+                input: 8,
+                output: 3,
+                cache_read: 2,
+                cache_write: 0,
+                reasoning: 0,
+                messages: 1,
+                cost_reported: 1.5,
+                cost_estimated: 0.25,
+            },
+            unpriced_messages: 1,
+        });
         let result = csv(&report, "+08:00", &ExportSelection::default());
         assert!(result.contains(
-            "\"2026-09-27\",\"codex\",\"demo\",8,3,2,0,0,13,1,1.500000,0.250000,1.750000,1,true,\"codex_rollout_jsonl\",\"'+08:00\""
+            "\"2026-09-27\",\"codex\",\"demo\",\"gpt-5\",\"openai/gpt-5\",8,3,2,0,0,13,1,1.5,0.25,1.75,1,true,\"codex_rollout_jsonl\",\"'+08:00\""
         ));
     }
 
     #[test]
-    fn export_selection_filters_date_agent_and_project() {
+    fn exports_round_trip_tiny_and_full_precision_costs() {
         let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
-        report.analysis_rows = vec![
-            quotakeeper::ledger::AnalysisRow {
-                date: "2026-09-26".into(),
-                client: "codex",
-                project: Some("alpha".into()),
-                agg: Default::default(),
-                unpriced_messages: 0,
-            },
-            quotakeeper::ledger::AnalysisRow {
+        for (reported, estimated) in [
+            (1.25e-10, 3.75e-10),
+            (1.2345678901234567, 2.345678901234567),
+        ] {
+            report.analysis_rows = vec![AnalysisRow {
                 date: "2026-09-27".into(),
                 client: "codex",
-                project: Some("alpha".into()),
-                agg: Default::default(),
-                unpriced_messages: 0,
-            },
-            quotakeeper::ledger::AnalysisRow {
-                date: "2026-09-27".into(),
-                client: "claude",
-                project: Some("beta".into()),
-                agg: Default::default(),
-                unpriced_messages: 0,
-            },
-        ];
-        let selection = ExportSelection {
-            start: Some("2026-09-27".into()),
-            end: Some("2026-09-27".into()),
-            agent: Some("codex".into()),
-            project: Some("alpha".into()),
-        };
+                project: None,
+                model: "gpt-5".into(),
+                raw_model: "OpenAI/GPT-5".into(),
+                agg: quotakeeper::ledger::Agg {
+                    input: 1,
+                    messages: 1,
+                    cost_reported: reported,
+                    cost_estimated: estimated,
+                    ..Default::default()
+                },
+                unpriced_messages: 1,
+            }];
+            let text = csv(&report, "+08:00", &ExportSelection::default());
+            let mut lines = text.lines();
+            let columns: Vec<_> = lines.next().unwrap().split(',').collect();
+            let fields: Vec<_> = lines.next().unwrap().split(',').collect();
+            assert_eq!(fields.len(), columns.len());
+            for (column, expected) in [
+                ("cost_reported_usd", reported),
+                ("cost_estimated_usd", estimated),
+                ("cost_total_usd", reported + estimated),
+            ] {
+                let index = columns.iter().position(|name| *name == column).unwrap();
+                assert_eq!(fields[index].parse::<f64>().unwrap(), expected, "{column}");
+            }
+            let value: serde_json::Value = serde_json::from_slice(
+                &json(&report, "+08:00", &ExportSelection::default()).unwrap(),
+            )
+            .unwrap();
+            let row = &value["rows"][0];
+            assert_eq!(row["cost_reported_usd"].as_f64().unwrap(), reported);
+            assert_eq!(row["cost_estimated_usd"].as_f64().unwrap(), estimated);
+            assert_eq!(row["agg"]["cost"].as_f64().unwrap(), reported + estimated);
+            assert_eq!(row["unpriced_messages"], 1);
+            assert_eq!(row["cost_is_partial"], true);
+        }
+    }
+
+    #[test]
+    fn export_selection_filters_exact_canonical_model_date_agent_and_project() {
+        let mut report = quotakeeper::ledger::aggregate(Vec::new(), chrono::Local::now());
+        report.analysis_rows = [
+            (
+                "2026-09-26",
+                "codex",
+                Some("alpha"),
+                "gpt-5",
+                "openai/gpt-5",
+            ),
+            (
+                "2026-09-27",
+                "codex",
+                Some("alpha"),
+                "gpt-5",
+                "OpenAI/GPT-5",
+            ),
+            (
+                "2026-09-27",
+                "codex",
+                Some("alpha"),
+                "gpt-5",
+                "openrouter/gpt-5",
+            ),
+            (
+                "2026-09-28",
+                "codex",
+                Some("alpha"),
+                "gpt-5",
+                "openai/gpt-5",
+            ),
+            (
+                "2026-09-27",
+                "claude",
+                Some("alpha"),
+                "gpt-5",
+                "openai/gpt-5",
+            ),
+            ("2026-09-27", "codex", Some("beta"), "gpt-5", "openai/gpt-5"),
+            ("2026-09-27", "codex", None, "gpt-5", "openai/gpt-5"),
+            (
+                "2026-09-27",
+                "codex",
+                Some("alpha"),
+                "gpt-5-mini",
+                "openai/gpt-5-mini",
+            ),
+            (
+                "2026-09-27",
+                "codex",
+                Some("alpha"),
+                "gpt-5.1",
+                "openai/gpt-5.1",
+            ),
+            ("2026-09-27", "codex", Some("alpha"), "unknown", ""),
+        ]
+        .into_iter()
+        .map(|(date, client, project, model, raw_model)| AnalysisRow {
+            date: date.into(),
+            client,
+            project: project.map(str::to_owned),
+            model: model.into(),
+            raw_model: raw_model.into(),
+            agg: Default::default(),
+            unpriced_messages: 0,
+        })
+        .collect();
+        let selection: ExportSelection = serde_json::from_str(
+            r#"{
+            "start": "2026-09-27", "end": "2026-09-27",
+            "agent": "codex", "project": "alpha", "model": "gpt-5"
+        }"#,
+        )
+        .unwrap();
         selection.validate().unwrap();
         let result = csv(&report, "+08:00", &selection);
-        assert_eq!(result.lines().count(), 2);
+        assert_eq!(result.lines().count(), 3);
+        assert!(result.starts_with("\u{feff}date_local,client,project,model,raw_model,input,"));
         assert!(result.contains("\"2026-09-27\",\"codex\",\"alpha\""));
+        assert!(result.contains("\"gpt-5\",\"OpenAI/GPT-5\""));
+        assert!(result.contains("\"gpt-5\",\"openrouter/gpt-5\""));
         assert!(!result.contains("\"claude\""));
+        let value: serde_json::Value =
+            serde_json::from_slice(&json(&report, "+08:00", &selection).unwrap()).unwrap();
+        assert_eq!(value["schema_version"], 3);
+        assert_eq!(value["selection"]["start"], "2026-09-27");
+        assert_eq!(value["selection"]["end"], "2026-09-27");
+        assert_eq!(value["selection"]["agent"], "codex");
+        assert_eq!(value["selection"]["project"], "alpha");
+        assert_eq!(value["selection"]["model"], "gpt-5");
+        let rows = value["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row["model"] == "gpt-5"));
+        assert_eq!(rows[0]["raw_model"], "OpenAI/GPT-5");
+        assert_eq!(rows[1]["raw_model"], "openrouter/gpt-5");
+
+        let all: serde_json::Value =
+            serde_json::from_slice(&json(&report, "+08:00", &ExportSelection::default()).unwrap())
+                .unwrap();
+        assert_eq!(all["rows"].as_array().unwrap().len(), 10);
+        assert_eq!(
+            all["selection"].get("model"),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(all["rows"][9]["model"], "unknown");
+        assert_eq!(all["rows"][9]["raw_model"], "");
+
+        let no_match: ExportSelection = serde_json::from_str(r#"{"model":"GPT-5"}"#).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&json(&report, "+08:00", &no_match).unwrap()).unwrap();
+        assert!(value["rows"].as_array().unwrap().is_empty());
+        assert_eq!(csv(&report, "+08:00", &no_match).lines().count(), 1);
     }
 
     #[test]
@@ -281,6 +422,8 @@ mod tests {
                 date: "2026-09-27".into(),
                 client,
                 project: None,
+                model: "gpt-5".into(),
+                raw_model: "openai/gpt-5".into(),
                 agg: Default::default(),
                 unpriced_messages: 0,
             })
@@ -300,10 +443,14 @@ mod tests {
                 "codex_rollout_jsonl",
                 "claude_project_jsonl",
                 "dsh_session_jsonl_zstd",
-                "omp_stats_sqlite",
+                "omp_session_jsonl",
                 "opencode_sqlite",
                 "zcode_sqlite",
             ]
         );
+        let text = csv(&report, "+08:00", &ExportSelection::default());
+        for source in sources {
+            assert!(text.contains(&format!("\"{source}\"")));
+        }
     }
 }

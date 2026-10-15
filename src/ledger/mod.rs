@@ -84,11 +84,13 @@ pub struct DailyTotal {
     pub agg: Agg,
 }
 
-/// 可筛选的每日账本。保留来源和项目维度，供任意日期分析及导出使用。
+/// 可筛选的每日账本。保留来源、项目和原始模型维度，供任意日期分析及导出使用。
 pub struct AnalysisRow {
     pub date: String,
     pub client: &'static str,
     pub project: Option<String>,
+    pub model: String,
+    pub raw_model: String,
     pub agg: Agg,
     pub unpriced_messages: u64,
 }
@@ -98,6 +100,8 @@ pub struct IntradayRow {
     pub date: String,
     pub hour: u8,
     pub client: &'static str,
+    pub model: String,
+    pub raw_model: String,
     pub agg: Agg,
     pub unpriced_messages: u64,
 }
@@ -308,9 +312,9 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let today_str = today.format("%Y-%m-%d").to_string();
     let heat_start = monday - Duration::weeks((HEATMAP_WEEKS - 1) as i64);
     let mut heat_raw: HashMap<String, HashMap<&'static str, Agg>> = HashMap::new();
-    let mut analysis_raw: HashMap<(String, &'static str, Option<String>), (Agg, u64)> =
+    let mut analysis_raw: HashMap<(String, &'static str, Option<String>, String), (Agg, u64)> =
         HashMap::new();
-    let mut intraday_raw: HashMap<(String, u8, &'static str), (Agg, u64)> = HashMap::new();
+    let mut intraday_raw: HashMap<(String, u8, &'static str, String), (Agg, u64)> = HashMap::new();
 
     let mut today_agg = Agg::default();
     let mut week_agg = Agg::default();
@@ -348,7 +352,7 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         let date_str = date.format("%Y-%m-%d").to_string();
         if date <= today {
             let entry = analysis_raw
-                .entry((date_str.clone(), r.client, r.project.clone()))
+                .entry((date_str.clone(), r.client, r.project.clone(), r.model.clone()))
                 .or_default();
             entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
             if r.cost.is_none() {
@@ -357,7 +361,12 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
         }
         if date >= today - Duration::days(1) && date <= today {
             let entry = intraday_raw
-                .entry((date_str.clone(), ts.with_timezone(&Local).hour() as u8, r.client))
+                .entry((
+                    date_str.clone(),
+                    ts.with_timezone(&Local).hour() as u8,
+                    r.client,
+                    r.model.clone(),
+                ))
                 .or_default();
             entry.0.add(&r.tokens, r.cost, r.cost_is_estimate);
             if r.cost.is_none() {
@@ -634,29 +643,43 @@ pub fn aggregate(mut records: Vec<UsageRecord>, now: DateTime<Local>) -> LedgerR
     let mut analysis_rows: Vec<AnalysisRow> = analysis_raw
         .into_iter()
         .map(
-            |((date, client, project), (agg, unpriced_messages))| AnalysisRow {
+            |((date, client, project, raw_model), (agg, unpriced_messages))| AnalysisRow {
                 date,
                 client,
                 project,
+                model: model_alias::canonical(&raw_model),
+                raw_model,
                 agg,
                 unpriced_messages,
             },
         )
         .collect();
-    analysis_rows
-        .sort_by(|a, b| (&a.date, a.client, &a.project).cmp(&(&b.date, b.client, &b.project)));
+    analysis_rows.sort_by(|a, b| {
+        (&a.date, a.client, &a.project, &a.raw_model).cmp(&(
+            &b.date,
+            b.client,
+            &b.project,
+            &b.raw_model,
+        ))
+    });
 
     let mut intraday_rows: Vec<IntradayRow> = intraday_raw
         .into_iter()
-        .map(|((date, hour, client), (agg, unpriced_messages))| IntradayRow {
-            date,
-            hour,
-            client,
-            agg,
-            unpriced_messages,
-        })
+        .map(
+            |((date, hour, client, raw_model), (agg, unpriced_messages))| IntradayRow {
+                date,
+                hour,
+                client,
+                model: model_alias::canonical(&raw_model),
+                raw_model,
+                agg,
+                unpriced_messages,
+            },
+        )
         .collect();
-    intraday_rows.sort_by(|a, b| (&a.date, a.hour, a.client).cmp(&(&b.date, b.hour, b.client)));
+    intraday_rows.sort_by(|a, b| {
+        (&a.date, a.hour, a.client, &a.raw_model).cmp(&(&b.date, b.hour, b.client, &b.raw_model))
+    });
 
     let mut month_by_client: Vec<(&'static str, Agg)> = month_by_client_raw.into_iter().collect();
     month_by_client.sort_by(|a, b| b.1.total().cmp(&a.1.total()));
@@ -881,6 +904,379 @@ mod tests {
             .unwrap();
         assert_eq!(beta.agg.cost_reported, 1.25);
         assert_eq!(beta.unpriced_messages, 0);
+    }
+
+    #[test]
+    fn model_rows_keep_two_models_for_one_client_and_day() {
+        let n = now();
+        let records = ["openai/gpt-5", "anthropic/claude-opus-4"]
+            .into_iter()
+            .map(|model| {
+                let mut record = rec(
+                    "codex",
+                    model,
+                    n.timestamp_millis(),
+                    TokenBreakdown {
+                        input: 10,
+                        ..Default::default()
+                    },
+                );
+                record.project = Some("alpha".into());
+                record
+            })
+            .collect();
+        let report = aggregate(records, n);
+
+        assert_eq!(report.analysis_rows.len(), 2);
+        assert_eq!(report.intraday_rows.len(), 2);
+        assert_eq!(report.today.total(), 20);
+        for row in &report.analysis_rows {
+            assert_eq!(row.project.as_deref(), Some("alpha"));
+            assert!(matches!(
+                (row.model.as_str(), row.raw_model.as_str()),
+                ("gpt-5", "openai/gpt-5") | ("claude-opus-4", "anthropic/claude-opus-4")
+            ));
+        }
+        for row in &report.intraday_rows {
+            assert!(matches!(
+                (row.model.as_str(), row.raw_model.as_str()),
+                ("gpt-5", "openai/gpt-5") | ("claude-opus-4", "anthropic/claude-opus-4")
+            ));
+        }
+    }
+
+    #[test]
+    fn model_rows_preserve_raw_channels_clients_and_cost_parts() {
+        let n = now();
+        let mut reported = rec(
+            "codex",
+            "OpenAI/GPT-5",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                input: 10,
+                output: 20,
+                cache_read: 30,
+                cache_write: 40,
+                reasoning: 5,
+            },
+        );
+        reported.project = Some("alpha".into());
+        reported.cost = Some(1.25);
+        let mut estimated = reported.clone();
+        estimated.model = "openrouter/gpt-5".into();
+        estimated.tokens = TokenBreakdown {
+            input: 1,
+            output: 2,
+            cache_read: 3,
+            cache_write: 4,
+            reasoning: 1,
+        };
+        estimated.cost = Some(0.125);
+        estimated.cost_is_estimate = true;
+        let mut unpriced = reported.clone();
+        unpriced.tokens = estimated.tokens;
+        unpriced.cost = None;
+        let mut other_client = reported.clone();
+        other_client.client = "claude";
+        other_client.tokens = TokenBreakdown {
+            input: 100,
+            output: 200,
+            cache_read: 300,
+            cache_write: 400,
+            reasoning: 50,
+        };
+        other_client.cost = Some(2.5);
+        let mut other_project = reported.clone();
+        other_project.project = Some("beta".into());
+        other_project.tokens = TokenBreakdown {
+            input: 7,
+            output: 8,
+            cache_read: 9,
+            cache_write: 10,
+            reasoning: 2,
+        };
+        other_project.cost = Some(0.0);
+        let report = aggregate(
+            vec![reported, estimated, unpriced, other_client, other_project],
+            n,
+        );
+
+        let expected = Agg {
+            input: 119,
+            output: 232,
+            cache_read: 345,
+            cache_write: 458,
+            reasoning: 59,
+            messages: 5,
+            cost_reported: 3.75,
+            cost_estimated: 0.125,
+        };
+        assert_eq!(report.today, expected);
+        assert_eq!(report.today.total(), 1_154);
+        assert_eq!(report.analysis_rows.len(), 4);
+        assert_eq!(report.intraday_rows.len(), 3);
+        let daily = report
+            .analysis_rows
+            .iter()
+            .fold(Agg::default(), |mut sum, row| {
+                assert_eq!(row.model, "gpt-5");
+                sum.merge(&row.agg);
+                sum
+            });
+        let hourly = report
+            .intraday_rows
+            .iter()
+            .fold(Agg::default(), |mut sum, row| {
+                assert_eq!(row.model, "gpt-5");
+                sum.merge(&row.agg);
+                sum
+            });
+        assert_eq!(daily, expected);
+        assert_eq!(hourly, expected);
+        assert_eq!(
+            report
+                .analysis_rows
+                .iter()
+                .map(|r| r.unpriced_messages)
+                .sum::<u64>(),
+            1
+        );
+        assert_eq!(
+            report
+                .intraday_rows
+                .iter()
+                .map(|r| r.unpriced_messages)
+                .sum::<u64>(),
+            1
+        );
+
+        let alpha = report
+            .analysis_rows
+            .iter()
+            .find(|row| {
+                row.client == "codex"
+                    && row.project.as_deref() == Some("alpha")
+                    && row.raw_model == "OpenAI/GPT-5"
+            })
+            .unwrap();
+        assert_eq!(
+            alpha.agg,
+            Agg {
+                input: 11,
+                output: 22,
+                cache_read: 33,
+                cache_write: 44,
+                reasoning: 6,
+                messages: 2,
+                cost_reported: 1.25,
+                cost_estimated: 0.0,
+            }
+        );
+        assert_eq!(alpha.unpriced_messages, 1);
+        let channel = report
+            .analysis_rows
+            .iter()
+            .find(|row| row.raw_model == "openrouter/gpt-5")
+            .unwrap();
+        assert_eq!(channel.agg.cost_reported, 0.0);
+        assert_eq!(channel.agg.cost_estimated, 0.125);
+        let beta = report
+            .analysis_rows
+            .iter()
+            .find(|row| row.project.as_deref() == Some("beta"))
+            .unwrap();
+        assert_eq!(beta.agg.cost(), 0.0);
+        assert_eq!(beta.unpriced_messages, 0);
+        let claude = report
+            .intraday_rows
+            .iter()
+            .find(|row| row.client == "claude")
+            .unwrap();
+        assert_eq!(claude.raw_model, "OpenAI/GPT-5");
+        assert_eq!(claude.agg.cost_reported, 2.5);
+    }
+
+    #[test]
+    fn model_rows_keep_unknown_names_and_all_retained_history() {
+        let n = now();
+        let mut empty = rec(
+            "codex",
+            "",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                input: 11,
+                ..Default::default()
+            },
+        );
+        empty.cost = None;
+        let mut whitespace = rec(
+            "codex",
+            " \t ",
+            n.timestamp_millis(),
+            TokenBreakdown {
+                output: 13,
+                ..Default::default()
+            },
+        );
+        whitespace.cost = Some(0.0);
+        let old = rec(
+            "codex",
+            "OpenAI/GPT-5",
+            ts(2025, 1, 1, 12),
+            TokenBreakdown {
+                input: 17,
+                ..Default::default()
+            },
+        );
+        let report = aggregate(vec![empty, whitespace, old], n);
+
+        assert_eq!(report.analysis_rows.len(), 3);
+        let old = &report.analysis_rows[0];
+        assert_eq!(old.date, "2025-01-01");
+        assert_eq!(old.model, "gpt-5");
+        assert_eq!(old.raw_model, "OpenAI/GPT-5");
+        assert_eq!(old.agg.total(), 17);
+        assert_eq!(old.agg.cost_reported, 0.5);
+        assert_eq!(report.today.total(), 24);
+        assert_eq!(report.by_model.len(), 1);
+        assert_eq!(report.by_model[0].model, "unknown");
+        assert_eq!(report.by_model[0].agg.total(), 24);
+        assert_eq!(report.intraday_rows.len(), 2);
+        for raw in ["", " \t "] {
+            let daily = report
+                .analysis_rows
+                .iter()
+                .find(|row| row.raw_model == raw)
+                .unwrap();
+            let hourly = report
+                .intraday_rows
+                .iter()
+                .find(|row| row.raw_model == raw)
+                .unwrap();
+            assert_eq!(daily.model, "unknown");
+            assert_eq!(hourly.model, "unknown");
+            assert_eq!(daily.agg, hourly.agg);
+            assert_eq!(daily.unpriced_messages, u64::from(raw.is_empty()));
+            assert_eq!(hourly.unpriced_messages, daily.unpriced_messages);
+        }
+        assert_eq!(
+            report
+                .analysis_rows
+                .iter()
+                .map(|r| r.agg.total())
+                .sum::<i64>(),
+            41
+        );
+    }
+
+    #[test]
+    fn model_rows_keep_local_midnight_windows_and_drop_invalid_timestamps() {
+        let n = now();
+        let tokens = TokenBreakdown {
+            input: 1,
+            output: 2,
+            cache_read: 3,
+            cache_write: 4,
+            reasoning: 1,
+        };
+        let yesterday_at = Local.with_ymd_and_hms(2026, 9, 24, 23, 59, 59).unwrap();
+        let mut yesterday = rec(
+            "codex",
+            "OpenAI/GPT-5",
+            yesterday_at.timestamp_millis(),
+            tokens,
+        );
+        yesterday.cost = Some(1.0);
+        let mut midnight = rec("codex", "OpenAI/GPT-5", ts(2026, 9, 25, 0), tokens);
+        midnight.cost = Some(0.25);
+        midnight.cost_is_estimate = true;
+        let mut today = rec("omp", "", n.timestamp_millis(), tokens);
+        today.cost = None;
+        let older = rec("codex", "OpenAI/GPT-5", ts(2026, 9, 23, 12), tokens);
+        let invalid = [0, -1, n.timestamp_millis() + 1, ts(2026, 9, 26, 0)]
+            .map(|at| rec("codex", "invalid-timestamp", at, tokens));
+        let records = [yesterday, midnight, today, older]
+            .into_iter()
+            .chain(invalid)
+            .collect();
+        let report = aggregate(records, n);
+
+        assert_eq!(report.analysis_rows.len(), 4);
+        assert_eq!(report.intraday_rows.len(), 3);
+        assert_eq!(
+            report
+                .intraday_rows
+                .iter()
+                .map(|r| (r.date.as_str(), r.hour))
+                .collect::<Vec<_>>(),
+            [("2026-09-24", 23), ("2026-09-25", 0), ("2026-09-25", 12),]
+        );
+        for (date, expected, unpriced) in [
+            (
+                "2026-09-24",
+                Agg {
+                    input: 1,
+                    output: 2,
+                    cache_read: 3,
+                    cache_write: 4,
+                    reasoning: 1,
+                    messages: 1,
+                    cost_reported: 1.0,
+                    cost_estimated: 0.0,
+                },
+                0,
+            ),
+            (
+                "2026-09-25",
+                Agg {
+                    input: 2,
+                    output: 4,
+                    cache_read: 6,
+                    cache_write: 8,
+                    reasoning: 2,
+                    messages: 2,
+                    cost_reported: 0.0,
+                    cost_estimated: 0.25,
+                },
+                1,
+            ),
+        ] {
+            let daily: Vec<_> = report
+                .analysis_rows
+                .iter()
+                .filter(|r| r.date == date)
+                .collect();
+            let hourly: Vec<_> = report
+                .intraday_rows
+                .iter()
+                .filter(|r| r.date == date)
+                .collect();
+            for aggs in [
+                daily.iter().map(|r| &r.agg).collect::<Vec<_>>(),
+                hourly.iter().map(|r| &r.agg).collect(),
+            ] {
+                let sum = aggs.into_iter().fold(Agg::default(), |mut sum, agg| {
+                    sum.merge(agg);
+                    sum
+                });
+                assert_eq!(sum, expected, "{date}");
+            }
+            assert_eq!(
+                daily.iter().map(|r| r.unpriced_messages).sum::<u64>(),
+                unpriced
+            );
+            assert_eq!(
+                hourly.iter().map(|r| r.unpriced_messages).sum::<u64>(),
+                unpriced
+            );
+        }
+        assert_eq!(report.today.messages, 2);
+        assert!(
+            !report
+                .analysis_rows
+                .iter()
+                .any(|r| r.raw_model == "invalid-timestamp")
+        );
     }
 
     #[test]

@@ -18,6 +18,8 @@ pub struct AggDto {
     pub reasoning: i64,
     pub messages: u64,
     pub cost: f64,
+    pub cost_reported: f64,
+    pub cost_estimated: f64,
     /// 成本是否有非估价来源(纯估价时前端打 ~ 号)。
     pub cost_is_estimate: bool,
     #[serde(rename = "total")]
@@ -33,6 +35,8 @@ pub fn agg_dto(a: &Agg) -> AggDto {
         reasoning: a.reasoning,
         messages: a.messages,
         cost: a.cost(),
+        cost_reported: a.cost_reported,
+        cost_estimated: a.cost_estimated,
         cost_is_estimate: a.cost_reported == 0.0 && a.cost_estimated > 0.0,
         total: a.total(),
     }
@@ -173,6 +177,8 @@ pub struct SourceStatusDto {
 pub struct AnalysisRowDto {
     pub date: String,
     pub client: &'static str,
+    pub model: String,
+    pub raw_model: String,
     pub agg: AggDto,
     pub unpriced_messages: u64,
 }
@@ -182,6 +188,8 @@ pub struct IntradayRowDto {
     pub date: String,
     pub hour: u8,
     pub client: &'static str,
+    pub model: String,
+    pub raw_model: String,
     pub agg: AggDto,
     pub unpriced_messages: u64,
 }
@@ -233,6 +241,8 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
             .map(|row| AnalysisRowDto {
                 date: row.date.clone(),
                 client: row.client,
+                model: row.model.clone(),
+                raw_model: row.raw_model.clone(),
                 agg: agg_dto(&row.agg),
                 unpriced_messages: row.unpriced_messages,
             })
@@ -244,6 +254,8 @@ pub fn ledger_dto(r: &ledger::LedgerReport) -> LedgerDto {
                 date: row.date.clone(),
                 hour: row.hour,
                 client: row.client,
+                model: row.model.clone(),
+                raw_model: row.raw_model.clone(),
                 agg: agg_dto(&row.agg),
                 unpriced_messages: row.unpriced_messages,
             })
@@ -275,3 +287,73 @@ pub fn push(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use quotakeeper::ledger::{TokenBreakdown, UsageRecord};
+
+    #[test]
+    fn ledger_payload_keeps_model_names_and_both_cost_parts() {
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 9, 25, 12, 0, 0)
+            .unwrap();
+        let records = [
+            ("OpenAI/GPT-5", Some(1.25), false),
+            ("openrouter/gpt-5", Some(0.125), true),
+            ("", None, false),
+        ]
+        .map(|(model, cost, cost_is_estimate)| UsageRecord {
+            client: "codex",
+            model: model.into(),
+            ts_ms: now.timestamp_millis(),
+            tokens: TokenBreakdown {
+                input: 8,
+                output: 3,
+                cache_read: 2,
+                cache_write: 1,
+                reasoning: 1,
+            },
+            cost,
+            cost_is_estimate,
+            session: None,
+            project: Some("alpha".into()),
+            duration_ms: 0,
+            ttft_ms: 0,
+        });
+        let report = ledger::aggregate(records.into(), now);
+        let wire = serde_json::to_value(ledger_dto(&report)).unwrap();
+
+        assert_eq!(wire["today"]["cost_reported"], 1.25);
+        assert_eq!(wire["today"]["cost_estimated"], 0.125);
+        assert_eq!(wire["today"]["cost"], 1.375);
+        assert_eq!(wire["today"]["cost_is_estimate"], false);
+        assert_eq!(wire["today"]["total"], 42);
+        assert_eq!(wire["today"]["messages"], 3);
+        for rows in ["analysis_rows", "intraday_rows"] {
+            let rows = wire[rows].as_array().unwrap();
+            assert_eq!(rows.len(), 3);
+            for (raw, model, reported, estimated, unpriced, is_estimate) in [
+                ("OpenAI/GPT-5", "gpt-5", 1.25, 0.0, 0, false),
+                ("openrouter/gpt-5", "gpt-5", 0.0, 0.125, 0, true),
+                ("", "unknown", 0.0, 0.0, 1, false),
+            ] {
+                let row = rows.iter().find(|row| row["raw_model"] == raw).unwrap();
+                assert_eq!(row["model"], model);
+                assert_eq!(row["client"], "codex");
+                assert_eq!(row["unpriced_messages"], unpriced);
+                assert_eq!(row["agg"]["input"], 8);
+                assert_eq!(row["agg"]["output"], 3);
+                assert_eq!(row["agg"]["cache_read"], 2);
+                assert_eq!(row["agg"]["cache_write"], 1);
+                assert_eq!(row["agg"]["reasoning"], 1);
+                assert_eq!(row["agg"]["total"], 14);
+                assert_eq!(row["agg"]["messages"], 1);
+                assert_eq!(row["agg"]["cost_reported"], reported);
+                assert_eq!(row["agg"]["cost_estimated"], estimated);
+                assert_eq!(row["agg"]["cost"], reported + estimated);
+                assert_eq!(row["agg"]["cost_is_estimate"], is_estimate);
+            }
+        }
+    }
+}
