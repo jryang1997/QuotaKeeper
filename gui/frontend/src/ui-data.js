@@ -215,6 +215,9 @@ export const STR = {
   export_saved: ['文件已保存', 'File saved'],
   export_error: ['导出失败，请重试', 'Export failed, please retry'],
   export_unavailable: ['暂无可导出的数据', 'No data to export yet'],
+  export_refresh_required: ['用量报告已更新，导出已暂停。请点击顶部「刷新」后重试。', 'The usage report changed. Export is paused; use Refresh at the top, then retry.'],
+  export_stale: ['当前显示上次读取的用量，暂不能导出。请点击顶部「刷新」。', 'Showing previously collected usage. Export is disabled; use Refresh at the top.'],
+  usage_refresh_required: ['这份用量数据不兼容，已暂不显示。请点击顶部「刷新」重新读取；订阅额度仍可查看。', 'This usage data is incompatible and has been withheld. Use Refresh at the top; subscription quotas are still available.'],
   cards_custom: ['配额卡片', 'Quota cards'],
   cards_custom_hint: ['固定重要卡片、隐藏无关卡片，并调整各来源颜色', 'Pin key cards, hide irrelevant cards, and set provider colors'],
   card_pin: ['固定', 'Pin'],
@@ -237,6 +240,7 @@ export const STR = {
   period_custom: ['自定义', 'Custom'],
   period_range: ['时间范围', 'Range'],
   period_agent: ['采集源', 'Collector'],
+  period_model: ['模型', 'Model'],
   period_all: ['全部', 'All'],
   period_clear: ['清除筛选', 'Clear filters'],
   period_from: ['开始', 'From'],
@@ -260,19 +264,21 @@ export const STR = {
   usage_recent: ['最近 60 分钟', 'Last 60 minutes'],
   usage_no_activity: ['暂无活动', 'No activity'],
   usage_tokens_per_min: ['Tokens/分钟', 'Tokens/min'],
-  usage_summary_tokens: ['Tokens', 'Tokens'],
-  usage_summary_requests: ['请求数', 'Requests'],
+  usage_summary_tokens: ['总 Token', 'Total tokens'],
+  usage_summary_requests: ['调用记录数', 'Usage records'],
+  usage_total_note: ['含缓存读取和写入', 'Includes cache reads and writes'],
+  usage_record_note: ['采集源记录数，未必等于 API 请求数', 'Source records, not guaranteed API request counts'],
   usage_summary_cost: ['已知成本 ≈', 'Known cost ≈'],
   usage_summary_cost_hint: ['来源报告价与估算价', 'Reported and estimated cost'],
   usage_summary_local: ['按本机记录统计', 'From local records'],
   usage_panel_tokens: ['Tokens', 'Tokens'],
-  usage_panel_requests: ['请求数', 'Requests'],
+  usage_panel_requests: ['调用记录数', 'Usage records'],
   usage_panel_cost: ['已知成本', 'Known cost'],
   usage_trend_title: ['用量趋势', 'Usage trend'],
   usage_trend_hint: ['悬浮或点击柱子查看构成', 'Hover or select a bar for details'],
   usage_metric: ['图表指标', 'Chart metric'],
   usage_breakdown: ['图表拆分', 'Chart breakdown'],
-  usage_metric_messages: ['请求', 'Calls'],
+  usage_metric_messages: ['调用记录数', 'Usage records'],
   usage_breakdown_agent: ['采集源', 'Collector'],
   usage_breakdown_type: ['类型', 'Type'],
   usage_token_mix: ['Token 构成', 'Token mix'],
@@ -280,8 +286,70 @@ export const STR = {
   usage_no_records: ['所选范围暂无记录', 'No records in this range'],
   usage_day_empty: ['此日暂无记录', 'No records for this day'],
   usage_unpriced: ['{n} 条记录缺价', '{n} records without pricing'],
+  usage_not_priced: ['未估价', 'Unpriced'],
   usage_reasoning_in_output: ['推理 Token 已包含在输出中', 'Reasoning is included in output'],
   usage_unpriced_partial: ['{n} 条缺价 · 部分汇总', '{n} unpriced · partial'],
+  price_title: ['金额出处', 'Amount sources'],
+  price_reported: ['来源报告', 'Source-reported'],
+  price_estimated: ['估算', 'Estimated'],
+  price_unpriced: ['缺价，未计入金额', 'Unpriced, excluded from amount'],
+  price_records: ['{n} 条记录', '{n} records'],
+  price_reported_hint: ['本机日志给出的金额；不是已扣费凭证。', 'Amount from local logs; not proof of a charge.'],
+  price_estimated_hint: ['按本次价目估算。', 'Estimated using this report’s prices.'],
+  price_disclaimer: ['API 等值含来源报告与估算金额，不是订阅扣费，也不能推算订阅剩余额度。', 'API equivalent combines source-reported and estimated amounts. It is not a subscription charge or a measure of remaining quota.'],
+  price_history_hint: ['估算的历史记录使用本报告的价目快照，不恢复历史账单。来源报告来自本机日志，不是已扣费凭证。', 'Historical estimates use this report’s price snapshot, not historical bills. Source-reported amounts come from local logs, not proof of charges.'],
+  price_catalogue_hint: ['目录条目的前缀不代表实际付费渠道或账号。', 'Catalogue prefixes do not identify the paid channel or account.'],
+  price_raw_names: ['原始名称', 'Raw names'],
+  price_empty_name: ['空名称', 'Empty name'],
+  price_adopted_entry: ['采用条目', 'Adopted entry'],
+  price_attempted_entry: ['尝试匹配的条目（未计入金额）', 'Attempted entry (not included in amount)'],
+  price_match: ['匹配方式', 'Name matching'],
+  price_family: ['借用同系列模型价格（近似）', 'Uses a related model’s price (approximate)'],
+  price_cache_fill: ['缓存单价由另一条目补齐（近似）', 'Cache rate filled from another entry (approximate)'],
+  price_rate_unit: ['单价 / 百万 Token', 'Rates per million tokens'],
+  price_bucket_input: ['输入', 'Input'],
+  price_bucket_output: ['输出', 'Output'],
+  price_bucket_cache_read: ['缓存读取', 'Cache read'],
+  price_bucket_cache_write: ['缓存写入', 'Cache write'],
+  price_no_rate: ['未提供单价', 'No rate provided'],
+  price_origin_upstream: ['LiteLLM 公开价目', 'LiteLLM public prices'],
+  price_origin_supplement: ['内置补充价', 'Built-in supplement'],
+  price_origin_legacy_unknown: ['旧缓存，原始来源不明', 'Legacy cache, original source unknown'],
+  price_match_exact: ['原始名称命中', 'Original name matched'],
+  price_match_case_insensitive: ['忽略大小写后命中', 'Matched ignoring letter case'],
+  price_match_explicit_alias: ['已知别名命中', 'Known alias matched'],
+  price_match_reverse_alias: ['目录使用另一种模型别名', 'Catalogue uses another model alias'],
+  price_match_canonical: ['归并名称后匹配', 'Grouped name matched'],
+  price_match_official_reference: ['采用公开目录中的同模型参考条目；不证明实际付费渠道', 'Uses a same-model reference in the public catalogue; not proof of the paid channel'],
+  price_match_unique_suffix: ['借用同名模型价目（近似）', 'Uses a same-name model’s price (approximate)'],
+  price_match_majority_reference: ['借用同名模型的多数价（近似）', 'Uses the majority price for the same model name (approximate)'],
+  price_missing_unknown_model: ['价目里找不到对应模型，未估算。', 'No matching model in the prices; not estimated.'],
+  price_missing_ambiguous_name: ['名称能对应不同价格，未估算。', 'The name matches different prices; not estimated.'],
+  price_missing_ambiguous_suffix: ['名称能对应不同价格，未估算。', 'The name matches different prices; not estimated.'],
+  price_missing_missing_cache_read: ['缺缓存读取单价，未估算。', 'Cache-read rate missing; not estimated.'],
+  price_missing_missing_cache_write: ['缺缓存写入单价，未估算。', 'Cache-write rate missing; not estimated.'],
+  price_missing_missing_cache_read_and_write: ['缺缓存读取和写入单价，未估算。', 'Cache-read and cache-write rates missing; not estimated.'],
+  price_missing_non_finite_amount: ['金额无法计算，未估算。', 'Amount could not be calculated; not estimated.'],
+  price_snapshot: ['本次价目', 'This report’s prices'],
+  price_cache_state: ['加载时的缓存状态', 'Cache state at load'],
+  price_fetched: ['记录的获取时间', 'Recorded fetch time'],
+  price_fetch_age: ['获取至加载间隔', 'Fetch-to-load age'],
+  price_loaded: ['本次加载时间', 'Loaded at'],
+  price_dataset: ['价目来源', 'Price dataset'],
+  price_time_unknown: ['时间不明', 'Unknown time'],
+  price_age_unknown: ['获取时间不明或时钟异常', 'Fetch time unknown or clock inconsistent'],
+  price_load_hint: ['时间按本机时区显示。加载不是价目生效日，也不表示本轮联网获取；缓存新不代表价格仍有效。', 'Times use this device’s timezone. Load time is not a tariff date or proof of a fetch now; a fresh cache does not guarantee a valid tariff.'],
+  price_source_cache_v2: ['缓存价目', 'Cached prices'],
+  price_source_legacy_cache: ['旧缓存，原始来源不明', 'Legacy cache, original source unknown'],
+  price_source_supplements_only: ['仅内置补充价', 'Built-in supplements only'],
+  price_cache_fresh: ['获取未满 24 小时', 'Fetched less than 24 hours before load'],
+  price_cache_stale: ['获取已满 24 小时', 'Fetched at least 24 hours before load'],
+  price_cache_unknown_age: ['获取时间不明或时钟异常', 'Fetch time unknown or clock inconsistent'],
+  price_cache_missing: ['没有价目缓存', 'Price cache missing'],
+  price_cache_corrupt: ['价目缓存损坏', 'Price cache corrupt'],
+  price_cache_not_loaded: ['未加载价目缓存', 'Price cache not loaded'],
+  price_currency_fallback: ['没有有效汇率，金额显示为「—」；单价暂按 USD 显示。', 'No valid exchange rate; amounts show “—” and unit rates are shown in USD.'],
+  price_export_hint: ['导出保留 USD 原始精度与本报告的价目快照。', 'Exports keep full-precision USD and this report’s price snapshot.'],
 
   // ---- 设置分组 ----
   settings_group_appearance: ['外观', 'Appearance'],
@@ -414,4 +482,61 @@ export function fmtRel(msAgo) {
 export function fmtClock(ms) {
   if (!ms) return '—';
   return new Date(ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+const LEDGER_SCHEMA_VERSION = 1;
+const nonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+const nullableString = (value) => value === null || typeof value === 'string';
+
+function compatibleRate(value) {
+  return Number.isFinite(value?.usd_per_token) && value.usd_per_token >= 0
+    && typeof value.entry === 'string' && ['upstream', 'supplement', 'legacy_unknown'].includes(value.origin);
+}
+
+function compatibleEstimate(value) {
+  return typeof value?.matched_entry === 'string'
+    && ['exact', 'case_insensitive', 'explicit_alias', 'canonical', 'official_reference', 'reverse_alias', 'unique_suffix', 'majority_reference'].includes(value.match_method)
+    && typeof value.family_fallback === 'boolean' && typeof value.cache_fill === 'boolean'
+    && ['input', 'output'].every((key) => compatibleRate(value[key]))
+    && ['cache_read', 'cache_write'].every((key) => value[key] === null || compatibleRate(value[key]));
+}
+
+function compatibleBasis(value) {
+  if (value?.kind === 'reported') return true;
+  if (value?.kind === 'estimated') return compatibleEstimate(value);
+  return value?.kind === 'unpriced'
+    && ['unknown_model', 'ambiguous_name', 'ambiguous_suffix', 'missing_cache_read', 'missing_cache_write', 'missing_cache_read_and_write', 'non_finite_amount'].includes(value.reason)
+    && (value.attempted === null || compatibleEstimate(value.attempted));
+}
+
+export function readLedger(payload) {
+  const ledger = payload?.ledger;
+  if (ledger?.schema_version !== LEDGER_SCHEMA_VERSION || !nonEmptyString(ledger.report_id)
+    || !nonEmptyString(ledger.timezone_offset) || !Number.isInteger(ledger.generated_at_ms)) return null;
+  const snapshot = ledger.price_snapshot;
+  if (!nonEmptyString(snapshot?.version) || !Number.isInteger(snapshot.loaded_at_ms)
+    || !(snapshot.fetched_at_ms === null || Number.isInteger(snapshot.fetched_at_ms))
+    || !nullableString(snapshot.dataset_url)
+    || !['cache_v2', 'legacy_cache', 'supplements_only'].includes(snapshot.source)
+    || !['fresh', 'stale', 'unknown_age', 'missing', 'corrupt', 'not_loaded'].includes(snapshot.cache_state)) return null;
+  if (!Array.isArray(ledger.price_bases)) return null;
+  const ids = new Set();
+  for (const entry of ledger.price_bases) {
+    if (!Number.isSafeInteger(entry?.id) || entry.id < 0 || ids.has(entry.id) || !compatibleBasis(entry.basis)) return null;
+    ids.add(entry.id);
+  }
+  const validAgg = (agg) => ['input', 'output', 'cache_read', 'cache_write', 'reasoning', 'total'].every((key) => Number.isInteger(agg?.[key]))
+    && Number.isInteger(agg.messages) && agg.messages >= 0
+    && ['cost', 'cost_reported', 'cost_estimated'].every((key) => Number.isFinite(agg[key]))
+    && typeof agg.cost_is_estimate === 'boolean';
+  const validRows = (rows, hourly) => Array.isArray(rows) && rows.every((row) => typeof row?.date === 'string'
+    && typeof row.client === 'string' && nonEmptyString(row.model) && typeof row.raw_model === 'string'
+    && nullableString(row.project) && Number.isSafeInteger(row.price_basis_id) && ids.has(row.price_basis_id)
+    && Number.isInteger(row.unpriced_messages) && row.unpriced_messages >= 0 && validAgg(row.agg)
+    && (!hourly || (Number.isInteger(row.hour) && row.hour >= 0 && row.hour < 24)));
+  if (!['today', 'week', 'month'].every((key) => validAgg(ledger[key]))
+    || !Array.isArray(ledger.sources) || !ledger.sources.every((source) => typeof source?.client === 'string'
+      && typeof source.label === 'string' && Number.isInteger(source.records) && source.records >= 0 && nullableString(source.error))
+    || !validRows(ledger.analysis_rows, false) || !validRows(ledger.intraday_rows, true)) return null;
+  return ledger;
 }
