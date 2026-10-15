@@ -92,13 +92,29 @@
 .usage-bucket > span { display: inline-flex; align-items: center; gap: 6px; color: var(--usage-muted); font-size: 12px; }
 .usage-bucket strong { font-size: 18px; font-weight: 650; letter-spacing: -0.03em; }
 .usage-clients { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.usage-models { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.usage-model { min-width: 0; }
+.usage-model-filter { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; padding: 5px 0; border: 0; border-radius: 5px; background: transparent; color: var(--usage-text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.usage-model-filter > span { min-width: 0; overflow-wrap: anywhere; }
+.usage-model-filter strong { flex-shrink: 0; font-weight: 600; }
+.usage-model-filter small { color: var(--usage-muted); font-size: 10px; font-weight: 400; }
+.usage-model-filter:is(:hover, [aria-pressed="true"]) > span { color: var(--usage-blue); text-decoration: underline; text-underline-offset: 3px; }
+.usage-model > .usage-client-track { display: block; margin: 4px 0 8px; }
+.usage-model-totals { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--usage-muted); font-size: 11px; line-height: 1.5; }
+.usage-model-details { margin-top: 7px; color: var(--usage-muted); font-size: 11px; line-height: 1.5; }
+.usage-model-details summary { width: fit-content; cursor: pointer; }
+.usage-model-details dl { display: grid; gap: 5px; margin: 9px 0 0; }
+.usage-model-details dl > div { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 10px; }
+.usage-model-details dd { margin: 0; overflow-wrap: anywhere; }
+.usage-model-details code { display: block; font: inherit; white-space: pre-wrap; }
+.usage-model-details p { margin-top: 7px; }
 .usage-client { display: grid; grid-template-columns: minmax(88px, 0.9fr) minmax(56px, 1fr) auto auto; gap: 8px 10px; align-items: center; font-size: 12px; }
 .usage-client > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-client-track { height: 7px; overflow: hidden; border-radius: 10px; background: color-mix(in srgb, var(--usage-blue) 11%, transparent); }
 .usage-client-track > i { display: block; height: 100%; border-radius: inherit; }
 .usage-client strong { font-weight: 600; white-space: nowrap; }
 .usage-client small { color: var(--usage-muted); white-space: nowrap; }
-.usage-dashboard :is(button, select, input):focus-visible { outline: 2px solid var(--usage-blue); outline-offset: 3px; }
+.usage-dashboard :is(button, select, input, summary):focus-visible { outline: 2px solid var(--usage-blue); outline-offset: 3px; }
 @media (max-width: 1050px) {
   .usage-lower, .usage-kpis { grid-template-columns: 1fr 1fr; }
   .usage-kpis .usage-summary-card:last-child { grid-column: 1 / -1; }

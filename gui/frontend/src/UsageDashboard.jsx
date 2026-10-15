@@ -36,6 +36,7 @@ const RANGES = [
 const tr = (zh, cn, en) => (zh ? cn : en);
 const valueText = (value, metric, currency) => (metric === 'cost' ? formatCurrency(value, currency) : fmtInt(value));
 const monthDay = (date) => date?.slice(5).replace('-', '/') || '—';
+const modelName = (model, zh) => (model === 'unknown' ? tr(zh, '未知模型', 'Unknown model') : model);
 
 function SummaryCard({ title, value, format, note, measured }) {
   return (
@@ -68,17 +69,18 @@ function ExportMenu({ label, valid, onExport }) {
   </div>;
 }
 
-function TrendChart({ days, metric, agent, mode, names, zh, currency, lang }) {
+function TrendChart({ days, metric, agent, model, mode, names, zh, currency, lang }) {
   const reduced = useMotionPreference();
   const t = (key) => STR[key][lang];
   const [hover, setHover] = useState(null);
   const [pin, setPin] = useState(null);
   const bucketKeys = days.map((day) => day.date).join('|');
-  useEffect(() => { setHover(null); setPin(null); }, [bucketKeys, metric, agent, mode]);
+  useEffect(() => { setHover(null); setPin(null); }, [bucketKeys, metric, agent, model, mode]);
   const active = hover ?? pin;
   const selected = active == null ? null : days[active];
-  const max = Math.max(1, ...days.map((day) => usageMetric(day.agg, metric)));
-  const axisText = (n) => (metric === 'tokens' ? fmtTokens(n, zh) : valueText(n, metric, currency));
+  const max = Math.max(1, ...days.map((day) => usageMetric(day.agg, metric, day.unpriced) ?? 0));
+  const allUnpriced = metric === 'cost' && days.some((day) => day.unpriced > 0) && days.every((day) => day.agg.messages <= day.unpriced);
+  const axisText = (n) => (allUnpriced ? '—' : metric === 'tokens' ? fmtTokens(n, zh) : valueText(n, metric, currency));
   const showTypes = !!agent && metric === 'tokens' && mode === 'type';
   const legend = showTypes
     ? TOKEN_PARTS.map(([, cn, en, color]) => [tr(zh, cn, en), color])
@@ -88,12 +90,15 @@ function TrendChart({ days, metric, agent, mode, names, zh, currency, lang }) {
     : [...selected.agents.entries()].filter(([, item]) => usageMetric(item, metric) > 0)
       .sort((a, b) => usageMetric(b[1], metric) - usageMetric(a[1], metric))
       .map(([client, item]) => [names[client] || client, usageMetric(item, metric), agentColor(client)]));
+  let emptyLabel = t('usage_no_records');
+  if (allUnpriced) emptyLabel = t('usage_not_priced');
+  else if (metric === 'cost' && days.some((day) => day.agg.messages > 0)) emptyLabel = tr(zh, 'API 等值为 0', 'API equivalent is zero');
   return <div className="usage-trend" onKeyDown={(event) => { if (event.key === 'Escape') { setHover(null); setPin(null); } }}>
     <div className="usage-plot">
-      <div className="usage-y-axis"><span>{axisText(max)}</span><span>{axisText(max / 2)}</span><span>0</span></div>
+      <div className="usage-y-axis"><span>{axisText(max)}</span><span>{axisText(max / 2)}</span><span>{allUnpriced ? '—' : '0'}</span></div>
       <div className="usage-grid-lines"><i /><i /><i /></div>
       <div className="usage-bars" onMouseLeave={() => setHover(null)}>{days.map((day, index) => {
-        const amount = usageMetric(day.agg, metric);
+        const amount = usageMetric(day.agg, metric, day.unpriced);
         const barParts = showTypes
           ? TOKEN_PARTS.map(([key, , , color]) => [key, day.agg[key], color])
           : [...day.agents.entries()].map(([client, item]) => [client, usageMetric(item, metric), agentColor(client)]);
@@ -108,16 +113,16 @@ function TrendChart({ days, metric, agent, mode, names, zh, currency, lang }) {
       })}</div>
       {selected && <div className="usage-guide" style={{ left: `calc(48px + (100% - 48px) * ${(active + 0.5) / days.length})` }} />}
       <AnimatePresence>{selected && <motion.div className="usage-popover" style={{ left: `clamp(156px, ${(active + 0.5) / days.length * 100}%, calc(100% - 156px))`, x: '-50%' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FADE} role="status">
-        <div className="usage-popover-head"><strong>{selected.date}</strong><strong>{valueText(usageMetric(selected.agg, metric), metric, currency)}</strong></div>
+        <div className="usage-popover-head"><strong>{selected.date}</strong><strong>{valueText(usageMetric(selected.agg, metric, selected.unpriced), metric, currency)}</strong></div>
         {detail.map(([name, amount, color]) => <div className="usage-popover-line" key={name}><i style={{ background: color }} /><span>{name}</span><strong>{valueText(amount, metric, currency)}</strong></div>)}
-        {detail.length === 0 && <small>{t('usage_day_empty')}</small>}
+        {detail.length === 0 && selected.agg.messages === 0 && selected.unpriced === 0 && <small>{t('usage_day_empty')}</small>}
         {metric === 'cost' && selected.unpriced > 0 && <small>{fill(t('usage_unpriced'), { n: selected.unpriced })}</small>}
         {showTypes && selected.agg.reasoning > 0 && <small>{t('usage_reasoning_in_output')}</small>}
       </motion.div>}</AnimatePresence>
     </div>
     <div className="usage-x-axis"><span>{days[0]?.label || monthDay(days[0]?.date)}</span><span>{days.length > 2 ? days[Math.floor(days.length / 2)]?.label || monthDay(days[Math.floor(days.length / 2)]?.date) : ''}</span><span>{days.at(-1)?.label || monthDay(days.at(-1)?.date)}</span></div>
     {legend.length > 0 && <div className="usage-chart-legend">{legend.map(([name, color]) => <span key={name}><i style={{ background: color }} />{name}</span>)}</div>}
-    {!days.some((day) => usageMetric(day.agg, metric) > 0) && <div className="usage-empty">{t('usage_no_records')}</div>}
+    {!days.some((day) => usageMetric(day.agg, metric, day.unpriced) > 0) && <div className="usage-empty">{emptyLabel}</div>}
   </div>;
 }
 
@@ -126,6 +131,8 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
   const t = (key) => STR[key][lang];
   const [range, setRange] = useState('today');
   const [agent, setAgent] = useState('');
+  const [model, setModel] = useState('');
+  const [distribution, setDistribution] = useState('model');
   const [metric, setMetric] = useState('tokens');
   const [mode, setMode] = useState('agent');
   const [customStart, setCustomStart] = useState('');
@@ -133,23 +140,24 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
   const [exportStatus, setExportStatus] = useState('');
   const today = localDate();
   const bounds = usageBounds(range, today, customStart, customEnd);
-  const summary = useMemo(() => aggregateUsage(ledger?.analysis_rows, bounds, agent), [ledger, bounds.start, bounds.end, agent]);
+  const summary = useMemo(() => aggregateUsage(ledger?.analysis_rows, bounds, agent, model), [ledger, bounds.start, bounds.end, agent, model]);
+  const models = useMemo(() => [...new Set([...(ledger?.analysis_rows || []).map((row) => row.model ?? 'unknown'), ...(model ? [model] : [])])].sort(), [ledger, model]);
   const coverage = useMemo(() => usageCoverage(ledger?.sources, agent, summary), [ledger, agent, summary]);
   const trendDays = useMemo(() => {
     if (range !== 'today' && range !== 'yesterday') return summary.days;
-    const buckets = aggregateIntraday(ledger?.intraday_rows, bounds.start, agent);
+    const buckets = aggregateIntraday(ledger?.intraday_rows, bounds.start, agent, model);
     return seriesMatchesTotal(buckets, summary.total, summary.unpriced) ? buckets : summary.days;
-  }, [ledger, range, bounds.start, agent, summary]);
+  }, [ledger, range, bounds.start, agent, model, summary]);
   const agents = (ledger?.sources || []).map((source) => [source.client, source.label]);
   const names = Object.fromEntries(agents);
   useEffect(() => registerNativeCallbacks({ __onExportResult: (status) => setExportStatus(status) }), []);
   if (!ledger) return null;
   const measured = summary.valid && coverage.state !== 'unknown';
-  const clear = () => { setRange('today'); setAgent(''); setCustomStart(''); setCustomEnd(''); };
+  const clear = () => { setRange('today'); setAgent(''); setModel(''); setCustomStart(''); setCustomEnd(''); };
   const exportUsage = (format) => {
     if (!measured) return;
     setExportStatus('');
-    sendCommand({ cmd: 'exportUsage', format, start: bounds.start, end: bounds.end, agent: agent || null, project: null });
+    sendCommand({ cmd: 'exportUsage', format, start: bounds.start, end: bounds.end, agent: agent || null, project: null, model: model || null });
   };
   const rangeNote = bounds.start && bounds.end
     ? (bounds.start.slice(0, 4) === bounds.end.slice(0, 4) ? `${bounds.start.slice(5)} → ${bounds.end.slice(5)}` : `${bounds.start} → ${bounds.end}`)
@@ -158,11 +166,11 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
     ? tr(zh, '采集未完成，不能当成 0', 'Collection incomplete, not a real zero')
     : t('period_invalid');
   const notBill = tr(zh, '不是订阅扣费', 'Not a subscription charge');
-  const priceNote = !measured
-    ? withheld
-    : summary.unpriced > 0
-      ? `${fill(t('usage_unpriced_partial'), { n: summary.unpriced })} · ${notBill}`
-      : notBill;
+  const costKnown = usageMetric(summary.total, 'cost', summary.unpriced) !== null;
+  let priceNote = notBill;
+  if (!measured) priceNote = withheld;
+  else if (!costKnown) priceNote = `${t('usage_not_priced')} · ${fill(t('usage_unpriced'), { n: summary.unpriced })} · ${notBill}`;
+  else if (summary.unpriced > 0) priceNote = `${fill(t('usage_unpriced_partial'), { n: summary.unpriced })} · ${notBill}`;
   const failedText = coverage.failed.map((client) => names[client] || client).join(zh ? '、' : ', ');
   const collectionCopy = coverage.state === 'unknown'
     ? (failedText
@@ -182,7 +190,8 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
     <div className="usage-filters"><div className="usage-filter-left">
       <label className="usage-select"><span>{t('period_range')}</span><select value={range} onChange={(event) => setRange(event.target.value)} aria-label={t('period_range')}>{RANGES.map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}</select></label>
       <label className="usage-select"><span>{t('period_agent')}</span><select value={agent} onChange={(event) => setAgent(event.target.value)} aria-label={t('period_agent')}><option value="">{t('period_all')}</option>{agents.map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
-      {(range !== 'today' || agent) && <button type="button" className="usage-clear" onClick={clear}>{t('period_clear')}</button>}
+      <label className="usage-select"><span>{t('period_model')}</span><select value={model} onChange={(event) => setModel(event.target.value)} aria-label={t('period_model')}><option value="">{t('period_all')}</option>{models.map((name) => <option key={name} value={name}>{modelName(name, zh)}</option>)}</select></label>
+      {(range !== 'today' || agent || model) && <button type="button" className="usage-clear" onClick={clear}>{t('period_clear')}</button>}
     </div>
       <ExportMenu label={t('export_label')} valid={measured} onExport={exportUsage} />
     </div>
@@ -191,9 +200,9 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
     {(coverage.state === 'partial' || coverage.state === 'unknown') && <p className="usage-feedback" role="status"><span>{collectionCopy}</span><button type="button" className="usage-diagnostics" onClick={() => onOpenSettings?.()}>{t('source_diagnostic')}</button></p>}
     {exportMessage && <p className="usage-feedback" role="status">{exportMessage}</p>}
     <div className="usage-kpis">
-      <SummaryCard title={t('usage_summary_tokens')} value={summary.total.total} format={(n) => fmtTokens(n, zh)} note={measured ? rangeNote : withheld} measured={measured} />
-      <SummaryCard title={t('usage_summary_requests')} value={summary.total.messages} format={(n) => fmtInt(Math.round(n))} note={measured ? rangeNote : withheld} measured={measured} />
-      <SummaryCard title={tr(zh, 'API 等值参考', 'API equivalent')} value={summary.total.cost} format={(n) => formatCurrency(n, currency)} note={priceNote} measured={measured} />
+      <SummaryCard title={t('usage_summary_tokens')} value={summary.total.total} format={(n) => fmtTokens(n, zh)} note={measured ? `${rangeNote} · ${t('usage_total_note')}` : withheld} measured={measured} />
+      <SummaryCard title={t('usage_summary_requests')} value={summary.total.messages} format={(n) => fmtInt(Math.round(n))} note={measured ? t('usage_record_note') : withheld} measured={measured} />
+      <SummaryCard title={tr(zh, 'API 等值参考', 'API equivalent')} value={summary.total.cost} format={(n) => formatCurrency(n, currency)} note={priceNote} measured={measured && costKnown} />
     </div>
     <section className="usage-surface usage-chart-card">
       <div className="usage-chart-heading">
@@ -203,7 +212,7 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
           {showChartTypes && <MetricSelector label={t('usage_breakdown')} options={[['agent', t('usage_breakdown_agent')], ['type', t('usage_breakdown_type')]]} value={mode} onChange={setMode} />}
         </div>
       </div>
-      {measured ? <TrendChart days={trendDays} metric={metric} agent={agent} mode={mode} names={names} zh={zh} currency={currency} lang={lang} /> : <p className="usage-placeholder">—</p>}
+      {measured ? <TrendChart days={trendDays} metric={metric} agent={agent} model={model} mode={mode} names={names} zh={zh} currency={currency} lang={lang} /> : <p className="usage-placeholder">—</p>}
     </section>
     <div className="usage-lower">
       <section className="usage-surface usage-buckets-card">
@@ -216,10 +225,33 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
         {measured && summary.total.reasoning > 0 && <p className="usage-reasoning-count">{t('usage_reasoning_in_output')} · {fmtInt(summary.total.reasoning)}</p>}
       </section>
       <section className="usage-surface usage-clients-card">
-        <div className="usage-section-heading"><h2>{tr(zh, '采集源分布', 'By collector')}</h2><p>{tr(zh, '与上面同一筛选', 'Same filters as the totals')}</p></div>
+        <div className="usage-chart-heading">
+          <div className="usage-section-heading"><h2>{distribution === 'model' ? tr(zh, '模型分布', 'By model') : tr(zh, '采集源分布', 'By collector')}</h2><p>{tr(zh, '与上面同一筛选', 'Same filters as the totals')}</p></div>
+          <MetricSelector label={tr(zh, '分布维度', 'Distribution')} options={[['model', t('period_model')], ['client', t('period_agent')]]} value={distribution} onChange={setDistribution} />
+        </div>
         {!measured && <p className="usage-placeholder">—</p>}
         {measured && summary.byClient.length === 0 && <p className="usage-placeholder">{t('usage_no_records')}</p>}
-        {measured && summary.byClient.length > 0 && <div className="usage-clients">{summary.byClient.map((row) => {
+        {measured && distribution === 'model' && <div className="usage-models">{summary.byModel.map((row) => {
+          const share = summary.total.total > 0 ? row.agg.total / summary.total.total * 100 : 0;
+          const name = modelName(row.model, zh);
+          return <div className="usage-model" key={row.model}>
+            <button type="button" className="usage-model-filter" onClick={() => setModel(row.model)} aria-pressed={model === row.model} aria-label={tr(zh, `筛选模型 ${name}`, `Filter model ${name}`)}>
+              <span title={name}>{name}</span><strong>{fmtTokens(row.agg.total, zh)} <small>Tokens</small></strong>
+            </button>
+            <i className="usage-client-track" aria-hidden="true"><i style={{ width: `${share}%`, background: 'var(--usage-blue)' }} /></i>
+            <div className="usage-model-totals"><span>{tr(zh, '占比', 'Share')} {share.toFixed(1)}%</span><span>{t('usage_summary_requests')} {fmtInt(row.agg.messages)}</span><span>{t('metric_cost')} {valueText(usageMetric(row.agg, 'cost', row.unpriced), 'cost', currency)}</span></div>
+            <details className="usage-model-details"><summary>{tr(zh, '原始名称、采集源与缓存', 'Raw names, collectors and cache')}</summary>
+              <dl>
+                <div><dt>{tr(zh, '原始名称', 'Raw names')}</dt><dd>{row.rawModels.map((raw) => <code key={raw}>{raw === '' ? tr(zh, '空名称', 'Empty name') : raw}</code>)}</dd></div>
+                <div><dt>{t('period_agent')}</dt><dd>{row.clients.map((client) => names[client] || client).join(zh ? '、' : ', ')}</dd></div>
+                <div><dt>{tr(zh, '缓存读取', 'Cache read')}</dt><dd>{fmtInt(row.agg.cache_read)}</dd></div>
+                <div><dt>{tr(zh, '缓存写入', 'Cache write')}</dt><dd>{fmtInt(row.agg.cache_write)}</dd></div>
+              </dl>
+              {row.unpriced > 0 && <p>{fill(t('usage_unpriced'), { n: row.unpriced })}</p>}
+            </details>
+          </div>;
+        })}</div>}
+        {measured && distribution === 'client' && summary.byClient.length > 0 && <div className="usage-clients">{summary.byClient.map((row) => {
           const share = summary.total.total > 0 ? row.agg.total / summary.total.total * 100 : 0;
           return <div className="usage-client" key={row.client}>
             <span><i style={{ background: agentColor(row.client) }} />{names[row.client] || row.client}</span>
