@@ -3,6 +3,7 @@
 *.bat text eol=crlf
 *.rs text eol=lf
 *.toml text eol=lf
+*.html text eol=lf
 *.ico binary
 # Vite copies public files byte-for-byte; preserve them and the build output.
 gui/frontend/public/** -text
