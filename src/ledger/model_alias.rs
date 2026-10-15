@@ -41,7 +41,9 @@ pub fn canonical(model: &str) -> String {
     loop {
         let mut changed = false;
         // 渠道变体(:free/:batch/exacto)与 -latest
-        if let Some(stripped) = name.strip_suffix("-latest") {
+        if let Some(stripped) = name.strip_suffix("-latest")
+            && !ALIAS.iter().any(|(from, _)| *from == name)
+        {
             name = stripped.into();
             changed = true;
         }
@@ -260,6 +262,13 @@ mod tests {
         // databricks 的连字符版 + p/点还原后同组
         assert_eq!(canonical("databricks/databricks-glm-5-3-flash"), "glm-5-3-flash");
         assert_eq!(canonical("glm-5-3-251222"), "glm-5-3");
+    }
+
+    #[test]
+    fn explicit_alias_precedes_latest_stripping() {
+        assert_eq!(canonical("glm-flash-latest"), "glm-5.3-flash");
+        assert_eq!(canonical("openrouter/z-ai/GLM-Flash-Latest"), "glm-5.3-flash");
+        assert_eq!(canonical("glm-flash-latest:free"), "glm-5.3-flash");
     }
 
     #[test]
