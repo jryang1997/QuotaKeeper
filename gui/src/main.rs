@@ -51,6 +51,7 @@ struct IpcCommand {
     agent: Option<String>,
     project: Option<String>,
     model: Option<String>,
+    report_id: Option<String>,
     provider: Option<String>,
     models: Option<Vec<String>>,
 }
@@ -73,7 +74,7 @@ enum UserEvent {
     QueryNativePreferences,
     GlobalShortcut,
     ShortcutStatus(bool),
-    Export(String, export::ExportSelection),
+    Export(String, Option<String>, export::ExportSelection),
     OverlayToggle,
     OverlayHide,
     OverlayDrag,
@@ -319,7 +320,11 @@ fn main() -> anyhow::Result<()> {
                             project: command.project,
                             model: command.model,
                         };
-                        let _ = ipc_proxy.send_event(UserEvent::Export(format, selection));
+                        let _ = ipc_proxy.send_event(UserEvent::Export(
+                            format,
+                            command.report_id,
+                            selection,
+                        ));
                     }
                 }
                 "toggleOverlay" => {
@@ -597,15 +602,14 @@ fn main() -> anyhow::Result<()> {
                     .borrow()
                     .evaluate_script(&format!("window.__onLanStatus?.({payload})"));
             }
-            Event::UserEvent(UserEvent::Export(format, selection)) => {
-                let status = if let Some(report) = latest_ledger.as_ref() {
-                    match export::save_report(report, &format, &selection) {
+            Event::UserEvent(UserEvent::Export(format, report_id, selection)) => {
+                let status = match export::pin_report(latest_ledger.as_ref(), report_id.as_deref()) {
+                    Some(report) => match export::save_report(&report, &format, &selection) {
                         Ok(Some(_)) => "saved",
                         Ok(None) => "canceled",
                         Err(_) => "error",
-                    }
-                } else {
-                    "unavailable"
+                    },
+                    None => "refresh_required",
                 };
                 let message = serde_json::to_string(status).unwrap_or_else(|_| "\"error\"".into());
                 let _ = webview
@@ -908,6 +912,28 @@ mod tray_tests {
     use quotakeeper::model::{
         Card, Limit, ProviderId, QuotaSource, Report, Snapshot, Status,
     };
+
+    #[test]
+    fn export_report_id_and_plan_import_models_deserialize_independently() {
+        let command: IpcCommand = serde_json::from_str(
+            r#"{
+            "cmd":"exportUsage","format":"json","reportId":"report-a","model":"gpt-5"
+        }"#,
+        ).unwrap();
+        assert_eq!(command.report_id.as_deref(), Some("report-a"));
+        assert_eq!(command.model.as_deref(), Some("gpt-5"));
+        assert!(command.models.is_none());
+        let command: IpcCommand = serde_json::from_str(
+            r#"{
+            "cmd":"importPlanModels","provider":"codex","models":["gpt-5","gpt-5-mini"]
+        }"#,
+        ).unwrap();
+        assert_eq!(command.models.unwrap(), ["gpt-5", "gpt-5-mini"]);
+        assert!(command.report_id.is_none());
+        let legacy: IpcCommand =
+            serde_json::from_str(r#"{"cmd":"exportUsage","format":"csv"}"#).unwrap();
+        assert!(legacy.report_id.is_none());
+    }
 
     #[test]
     fn alert_levels_exclude_cpa_activity() {

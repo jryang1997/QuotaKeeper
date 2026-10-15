@@ -126,12 +126,11 @@ function TrendChart({ days, metric, agent, model, mode, names, zh, currency, lan
   </div>;
 }
 
-export default function UsageDashboard({ ledger, lang, currency, onOpenSettings }) {
+export default function UsageDashboard({ ledger, stale, model, onModelChange: setModel, lang, currency, onOpenSettings }) {
   const zh = lang === 0;
   const t = (key) => STR[key][lang];
   const [range, setRange] = useState('today');
   const [agent, setAgent] = useState('');
-  const [model, setModel] = useState('');
   const [distribution, setDistribution] = useState('model');
   const [metric, setMetric] = useState('tokens');
   const [mode, setMode] = useState('agent');
@@ -141,7 +140,7 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
   const today = localDate();
   const bounds = usageBounds(range, today, customStart, customEnd);
   const summary = useMemo(() => aggregateUsage(ledger?.analysis_rows, bounds, agent, model), [ledger, bounds.start, bounds.end, agent, model]);
-  const models = useMemo(() => [...new Set([...(ledger?.analysis_rows || []).map((row) => row.model ?? 'unknown'), ...(model ? [model] : [])])].sort(), [ledger, model]);
+  const models = useMemo(() => [...new Set([...(ledger?.analysis_rows || []).map((row) => row.model), ...(model ? [model] : [])])].sort(), [ledger, model]);
   const coverage = useMemo(() => usageCoverage(ledger?.sources, agent, summary), [ledger, agent, summary]);
   const trendDays = useMemo(() => {
     if (range !== 'today' && range !== 'yesterday') return summary.days;
@@ -151,13 +150,16 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
   const agents = (ledger?.sources || []).map((source) => [source.client, source.label]);
   const names = Object.fromEntries(agents);
   useEffect(() => registerNativeCallbacks({ __onExportResult: (status) => setExportStatus(status) }), []);
-  if (!ledger) return null;
+  useEffect(() => { setExportStatus(''); }, [ledger?.report_id]);
+  if (!ledger) return <div className="usage-page usage-dashboard"><p className="usage-feedback" role="status">{t('usage_refresh_required')}</p></div>;
   const measured = summary.valid && coverage.state !== 'unknown';
+  const reportId = !stale && exportStatus !== 'refresh_required' ? ledger.report_id : null;
+  const canExport = measured && !!reportId;
   const clear = () => { setRange('today'); setAgent(''); setModel(''); setCustomStart(''); setCustomEnd(''); };
   const exportUsage = (format) => {
-    if (!measured) return;
+    if (!canExport) return;
     setExportStatus('');
-    sendCommand({ cmd: 'exportUsage', format, start: bounds.start, end: bounds.end, agent: agent || null, project: null, model: model || null });
+    sendCommand({ cmd: 'exportUsage', format, start: bounds.start, end: bounds.end, agent: agent || null, project: null, model: model || null, reportId });
   };
   const rangeNote = bounds.start && bounds.end
     ? (bounds.start.slice(0, 4) === bounds.end.slice(0, 4) ? `${bounds.start.slice(5)} → ${bounds.end.slice(5)}` : `${bounds.start} → ${bounds.end}`)
@@ -179,7 +181,7 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
     : (failedText
       ? tr(zh, `${failedText} 没读成，数字只含已读到的记录。`, `${failedText} failed to read. Figures include only collected records.`)
       : tr(zh, '有采集源没读成，数字只含已读到的记录。', 'A source failed to read. Figures include only collected records.'));
-  const exportMessage = { saved: t('export_saved'), canceled: '', error: t('export_error'), unavailable: t('export_unavailable') }[exportStatus] || '';
+  const exportMessage = stale ? t('export_stale') : { saved: t('export_saved'), canceled: '', error: t('export_error'), unavailable: t('export_unavailable'), refresh_required: t('export_refresh_required') }[exportStatus] || '';
   const showChartTypes = agent && metric === 'tokens';
 
   return <div className="usage-page usage-dashboard">
@@ -193,7 +195,7 @@ export default function UsageDashboard({ ledger, lang, currency, onOpenSettings 
       <label className="usage-select"><span>{t('period_model')}</span><select value={model} onChange={(event) => setModel(event.target.value)} aria-label={t('period_model')}><option value="">{t('period_all')}</option>{models.map((name) => <option key={name} value={name}>{modelName(name, zh)}</option>)}</select></label>
       {(range !== 'today' || agent || model) && <button type="button" className="usage-clear" onClick={clear}>{t('period_clear')}</button>}
     </div>
-      <ExportMenu label={t('export_label')} valid={measured} onExport={exportUsage} />
+      <ExportMenu label={t('export_label')} valid={canExport} onExport={exportUsage} />
     </div>
     {range === 'custom' && <div className="usage-custom"><label>{t('period_from')}<input type="date" value={customStart} max={customEnd || today} onChange={(event) => setCustomStart(event.target.value)} /></label><label>{t('period_to')}<input type="date" value={customEnd} min={customStart || undefined} max={today} onChange={(event) => setCustomEnd(event.target.value)} /></label></div>}
     {!summary.valid && <p className="usage-feedback" role="alert">{t('period_invalid')}</p>}

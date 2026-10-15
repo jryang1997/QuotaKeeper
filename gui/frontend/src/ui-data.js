@@ -215,6 +215,9 @@ export const STR = {
   export_saved: ['文件已保存', 'File saved'],
   export_error: ['导出失败，请重试', 'Export failed, please retry'],
   export_unavailable: ['暂无可导出的数据', 'No data to export yet'],
+  export_refresh_required: ['用量报告已更新，导出已暂停。请点击顶部「刷新」后重试。', 'The usage report changed. Export is paused; use Refresh at the top, then retry.'],
+  export_stale: ['当前显示上次读取的用量，暂不能导出。请点击顶部「刷新」。', 'Showing previously collected usage. Export is disabled; use Refresh at the top.'],
+  usage_refresh_required: ['这份用量数据不兼容，已暂不显示。请点击顶部「刷新」重新读取；订阅额度仍可查看。', 'This usage data is incompatible and has been withheld. Use Refresh at the top; subscription quotas are still available.'],
   cards_custom: ['配额卡片', 'Quota cards'],
   cards_custom_hint: ['固定重要卡片、隐藏无关卡片，并调整各来源颜色', 'Pin key cards, hide irrelevant cards, and set provider colors'],
   card_pin: ['固定', 'Pin'],
@@ -418,4 +421,61 @@ export function fmtRel(msAgo) {
 export function fmtClock(ms) {
   if (!ms) return '—';
   return new Date(ms).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+const LEDGER_SCHEMA_VERSION = 1;
+const nonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+const nullableString = (value) => value === null || typeof value === 'string';
+
+function compatibleRate(value) {
+  return Number.isFinite(value?.usd_per_token) && value.usd_per_token >= 0
+    && typeof value.entry === 'string' && ['upstream', 'supplement', 'legacy_unknown'].includes(value.origin);
+}
+
+function compatibleEstimate(value) {
+  return typeof value?.matched_entry === 'string'
+    && ['exact', 'case_insensitive', 'explicit_alias', 'canonical', 'official_reference', 'reverse_alias', 'unique_suffix', 'majority_reference'].includes(value.match_method)
+    && typeof value.family_fallback === 'boolean' && typeof value.cache_fill === 'boolean'
+    && ['input', 'output'].every((key) => compatibleRate(value[key]))
+    && ['cache_read', 'cache_write'].every((key) => value[key] === null || compatibleRate(value[key]));
+}
+
+function compatibleBasis(value) {
+  if (value?.kind === 'reported') return true;
+  if (value?.kind === 'estimated') return compatibleEstimate(value);
+  return value?.kind === 'unpriced'
+    && ['unknown_model', 'ambiguous_name', 'ambiguous_suffix', 'missing_cache_read', 'missing_cache_write', 'missing_cache_read_and_write', 'non_finite_amount'].includes(value.reason)
+    && (value.attempted === null || compatibleEstimate(value.attempted));
+}
+
+export function readLedger(payload) {
+  const ledger = payload?.ledger;
+  if (ledger?.schema_version !== LEDGER_SCHEMA_VERSION || !nonEmptyString(ledger.report_id)
+    || !nonEmptyString(ledger.timezone_offset) || !Number.isInteger(ledger.generated_at_ms)) return null;
+  const snapshot = ledger.price_snapshot;
+  if (!nonEmptyString(snapshot?.version) || !Number.isInteger(snapshot.loaded_at_ms)
+    || !(snapshot.fetched_at_ms === null || Number.isInteger(snapshot.fetched_at_ms))
+    || !nullableString(snapshot.dataset_url)
+    || !['cache_v2', 'legacy_cache', 'supplements_only'].includes(snapshot.source)
+    || !['fresh', 'stale', 'unknown_age', 'missing', 'corrupt', 'not_loaded'].includes(snapshot.cache_state)) return null;
+  if (!Array.isArray(ledger.price_bases)) return null;
+  const ids = new Set();
+  for (const entry of ledger.price_bases) {
+    if (!Number.isSafeInteger(entry?.id) || entry.id < 0 || ids.has(entry.id) || !compatibleBasis(entry.basis)) return null;
+    ids.add(entry.id);
+  }
+  const validAgg = (agg) => ['input', 'output', 'cache_read', 'cache_write', 'reasoning', 'total'].every((key) => Number.isInteger(agg?.[key]))
+    && Number.isInteger(agg.messages) && agg.messages >= 0
+    && ['cost', 'cost_reported', 'cost_estimated'].every((key) => Number.isFinite(agg[key]))
+    && typeof agg.cost_is_estimate === 'boolean';
+  const validRows = (rows, hourly) => Array.isArray(rows) && rows.every((row) => typeof row?.date === 'string'
+    && typeof row.client === 'string' && nonEmptyString(row.model) && typeof row.raw_model === 'string'
+    && nullableString(row.project) && Number.isSafeInteger(row.price_basis_id) && ids.has(row.price_basis_id)
+    && Number.isInteger(row.unpriced_messages) && row.unpriced_messages >= 0 && validAgg(row.agg)
+    && (!hourly || (Number.isInteger(row.hour) && row.hour >= 0 && row.hour < 24)));
+  if (!['today', 'week', 'month'].every((key) => validAgg(ledger[key]))
+    || !Array.isArray(ledger.sources) || !ledger.sources.every((source) => typeof source?.client === 'string'
+      && typeof source.label === 'string' && Number.isInteger(source.records) && source.records >= 0 && nullableString(source.error))
+    || !validRows(ledger.analysis_rows, false) || !validRows(ledger.intraday_rows, true)) return null;
+  return ledger;
 }

@@ -9,7 +9,7 @@ import './ia.css';
 import './glass.css';
 import './focus.css';
 import './cassette.css';
-import { SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
+import { SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel, readLedger } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
 import UsageDashboard from './UsageDashboard.jsx';
 import LocalUsageSummary from './LocalUsageSummary.jsx';
@@ -188,6 +188,7 @@ function App() {
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
+  const [usageModel, setUsageModel] = useState('');
   const [data, setData] = useState(null);
   const [staleCache, setStaleCache] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -220,7 +221,7 @@ function App() {
   useEffect(() => {
     const unregister = registerNativeCallbacks({
       __onPush: (payload) => {
-        setData(payload);
+        setData({ ...payload, ledger: readLedger(payload) });
         setStaleCache(payload.stale === true);
         if (!refreshRequestedAt.current || (payload.fetched_at_ms >= refreshRequestedAt.current && payload.quota_checked_at_ms >= refreshRequestedAt.current)) {
           refreshRequestedAt.current = 0;
@@ -460,6 +461,9 @@ function App() {
       />}
       {page === 'usage' && <UsageDashboard
         ledger={data.ledger}
+        stale={ledgerStale}
+        model={usageModel}
+        onModelChange={setUsageModel}
         lang={lang}
         currency={{ code: preferences.currency, rate: exchangeRate?.rate }}
         onOpenSettings={() => setPage('settings')}
