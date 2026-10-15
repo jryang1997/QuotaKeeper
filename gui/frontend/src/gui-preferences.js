@@ -2,7 +2,7 @@ import { PROVIDERS } from './ui-data.js';
 import { CURRENCIES } from './currency.js';
 
 export const GUI_PREFERENCES_KEY = 'token-monitor.gui-preferences.v1';
-export const THEME_ORDER = ['system', 'light', 'dark', 'ink', 'sand', 'cassette', 'washi', 'palace', 'aurora', 'amber', 'mocha'];
+export const THEME_ORDER = ['system', 'light', 'dark', 'cassette'];
 export const DEFAULT_GUI_PREFERENCES = {
   lang: 0,
   theme: 'system',

@@ -169,14 +169,7 @@ export default function SettingsPage({
                   { value: 'system', label: t('theme_system'), icon: 'theme-icon-system' },
                   { value: 'light', label: t('theme_light'), icon: 'theme-icon-light' },
                   { value: 'dark', label: t('theme_dark'), icon: 'theme-icon-dark' },
-                  { value: 'ink', label: t('theme_ink'), icon: 'theme-icon-ink' },
-                  { value: 'sand', label: t('theme_sand'), icon: 'theme-icon-sand' },
                   { value: 'cassette', label: t('theme_cassette'), icon: 'theme-icon-cassette' },
-                  { value: 'washi', label: t('theme_washi'), icon: 'theme-icon-washi' },
-                  { value: 'palace', label: t('theme_palace'), icon: 'theme-icon-palace' },
-                  { value: 'aurora', label: t('theme_aurora'), icon: 'theme-icon-aurora' },
-                  { value: 'amber', label: t('theme_amber'), icon: 'theme-icon-amber' },
-                  { value: 'mocha', label: t('theme_mocha'), icon: 'theme-icon-mocha' },
                 ]}
               />
             </SettingsRow>

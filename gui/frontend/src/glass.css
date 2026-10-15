@@ -20,14 +20,6 @@
 @media (max-width: 1050px) { :root { --sidebar-w: 184px; } }
 @media (max-width: 900px) { :root { --sidebar-w: 152px; } }
 
-.app[data-palette='ink'] {
-  --glass-highlight: rgba(255, 255, 255, 0.22);
-  --glass-highlight-soft: rgba(255, 255, 255, 0.09);
-}
-.app[data-palette='sand'] {
-  --glass-highlight: rgba(255, 253, 246, 0.66);
-  --glass-highlight-soft: rgba(255, 253, 246, 0.28);
-}
 
 /* ---------- Dock:底部液态玻璃胶囊,全应用唯一折射位 ---------- */
 

@@ -24,7 +24,7 @@ The Windows desktop app uses Rust and WebView2. Navigation has three destination
 - **Subscriptions** shows every quota window, with remaining quota by default and an optional used view. Reset times and subscription expiry stay separate. Old readings retain their observation time; a passed reset waits for refresh without refilling the quota. Unconnected and hidden providers are folded together.
 - **Token usage** starts with local today, week, and month totals. The detail page applies the same date and source filters to totals, requests, API equivalents, trends, token buckets, and source distribution. CSV and JSON exports use those filters. API equivalents are reference amounts, not subscription charges; unpriced records stay visible.
 - **Desktop presence** includes the tray, quota overlay, quota threshold and reset alerts, and expiry reminders. Settings can enable a read-only LAN quota page.
-- Chinese and English, existing themes, independent quota and ledger collection. Quotas refresh every 60 seconds; local records refresh every 5 seconds. One provider failure does not block the others.
+- Chinese and English, with System, Light, Dark, and Cassette Future themes. Removed theme preferences fall back to System. Quotas refresh every 60 seconds; local records refresh every 5 seconds. One provider failure does not block the others.
 
 Achievements, PNG share cards, editable module boards, work-habit analysis, and CLI upgrades have been removed. The [product research](docs/research/product-focus-2026-10-15.md) records the scope decision and Magpie primary sources. The existing TUI remains available with frozen functionality.
 

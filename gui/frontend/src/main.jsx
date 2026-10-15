@@ -7,7 +7,6 @@ import './app.css';
 import './usage-dashboard.css';
 import './ia.css';
 import './glass.css';
-import './themes.css';
 import './focus.css';
 import './cassette.css';
 import { SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
@@ -349,7 +348,7 @@ function App() {
 
   useLayoutEffect(() => {
     if (preferences.theme === 'system') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = ['dark', 'ink', 'cassette', 'palace', 'aurora', 'amber', 'mocha'].includes(preferences.theme) ? 'dark' : 'light';
+    else document.documentElement.dataset.theme = ['dark', 'cassette'].includes(preferences.theme) ? 'dark' : 'light';
     document.documentElement.lang = lang === 0 ? 'zh-CN' : 'en';
   }, [preferences.theme, lang]);
 
