@@ -764,6 +764,7 @@ fn main() -> anyhow::Result<()> {
                                     }
                                 }
                                 latest_snapshot = snapshot;
+                                lan::publish(&latest_snapshot);
                                 quota_error = None;
                                 latest_quota_fetched_at_ms = r.fetched_at_ms;
                             }
@@ -795,7 +796,6 @@ fn main() -> anyhow::Result<()> {
                         latest_ledger_fetched_at_ms = r.fetched_at_ms;
                     }
                     if let Some(ledger) = latest_ledger.as_ref() {
-                        let monthly_value = ipc::monthly_value_dto(ledger);
                         let payload = ipc::push(
                             latest_ledger_fetched_at_ms,
                             latest_quota_fetched_at_ms,
@@ -805,13 +805,6 @@ fn main() -> anyhow::Result<()> {
                             ledger,
                             latest_goat_usage,
                             latest_deepseek_balance.clone(),
-                        );
-                        lan::publish(
-                            &latest_snapshot,
-                            Some(ledger),
-                            latest_goat_usage.as_ref(),
-                            Some(monthly_value.month_api_equivalent_usd),
-                            Some(monthly_value.list_price_multiple),
                         );
                         let js = format!("window.__onPush && window.__onPush({payload});");
                         // WebView 未就绪时 evaluate_script 出错;下轮采集会自然重推

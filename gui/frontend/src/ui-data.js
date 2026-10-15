@@ -301,7 +301,7 @@ export const STR = {
   share_mod_summary: ['今日之最', 'Highlights'],
   share_mod_achievements: ['成就', 'Achievements'],
   lan_title: ['局域网看板', 'LAN dashboard'],
-  lan_hint: ['手机/平板浏览器访问，Standby 式只读看板', 'Read-only Standby-style board for phones and tablets'],
+  lan_hint: ['手机浏览器打开，只看各窗口还剩多少。可在浏览器菜单里添加到主屏幕。', 'Open it on your phone. Each window shows how much is left. Add it to the home screen from the browser menu.'],
   lan_on: ['开启', 'On'],
   lan_off: ['关闭', 'Off'],
   lan_running: ['运行中 · 手机访问', 'Running · open on your device'],

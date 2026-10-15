@@ -1,8 +1,4 @@
-//! 局域网 Standby 看板:GUI 进程内起只读 HTTP 服务,手机/平板浏览器访问。
-//!
-//! 仅两个 GET 端点:`/` 返回内嵌单文件页面,`/api/summary` 返回摘要 JSON。
-//! 不暴露任何密钥/凭证;监听 0.0.0.0(手机必须),开关默认关。
-//! 手写 TcpListener(零新依赖):解析请求行 → 路由 → 写响应,请求体直接丢弃。
+//! 局域网手机页只看各窗口还剩多少。默认关,监听 0.0.0.0,不暴露密钥。
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
@@ -12,175 +8,172 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use quotakeeper::model::{Card, QuotaSource, Snapshot};
-use quotakeeper::ui::notify::level_for;
+use quotakeeper::model::{status_for, Card, QuotaSource, Snapshot, Status};
 
-/// 主循环每轮数据落定时写入;HTTP 线程只读。
 #[derive(Default)]
-pub struct LanState {
-    pub snapshot: Option<Snapshot>,
-    pub ledger: Option<Arc<quotakeeper::ledger::LedgerReport>>,
-    pub goat_tokens: Option<u64>,
-    pub goat_requests: Option<u64>,
-    pub monthly_api_value_usd: Option<f64>,
-    pub monthly_multiple: Option<f64>,
-    pub generated_at_ms: i64,
+struct LanState {
+    snapshot: Option<Snapshot>,
 }
 
-pub static STATE: RwLock<LanState> = RwLock::new(LanState {
-    snapshot: None,
-    ledger: None,
-    goat_tokens: None,
-    goat_requests: None,
-    monthly_api_value_usd: None,
-    monthly_multiple: None,
-    generated_at_ms: 0,
-});
+static STATE: RwLock<LanState> = RwLock::new(LanState { snapshot: None });
 
 static REQUESTS_SERVED: AtomicU64 = AtomicU64::new(0);
 
-/// 主循环调用:整体替换共享状态(零拷贝,只克隆 Arc)。
-pub fn publish(
-    snapshot: &Snapshot,
-    ledger: Option<&Arc<quotakeeper::ledger::LedgerReport>>,
-    goat_usage: Option<&quotakeeper::goat::UsageSummary>,
-    monthly_api_value_usd: Option<f64>,
-    monthly_multiple: Option<f64>,
-) {
+pub fn publish(snapshot: &Snapshot) {
+    let snapshot = snapshot.clone();
     let mut state = STATE.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.snapshot = Some(snapshot.clone());
-    state.ledger = ledger.cloned();
-    state.goat_tokens = goat_usage.map(|usage| usage.total_tokens);
-    state.goat_requests = goat_usage.map(|usage| usage.total_count as u64);
-    state.monthly_api_value_usd = monthly_api_value_usd;
-    state.monthly_multiple = monthly_multiple;
-    state.generated_at_ms = snapshot.generated_at_ms;
+    state.snapshot = Some(snapshot);
 }
 
 pub const PORT_BASE: u16 = 8420;
 const PORT_MAX_OFFSET: u16 = 9;
 
-#[derive(Serialize)]
+/// `stale` 用电脑上的时钟,不用手机时钟。
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum Glance {
+    Waiting,
+    Ready { stale: bool, cards: Vec<GlanceCard> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LanRing {
-    pub title: String,
-    pub plan_type: String,
-    pub label: &'static str,
-    pub used_pct: f64,
-    pub resets_in_ms: Option<i64>,
-    pub level: u8,
+struct GlanceCard {
+    title: String,
+    plan: String,
+    windows: Vec<RemainingWindow>,
 }
 
-#[derive(Serialize, Clone, Copy)]
+/// 色调跟着已用百分比,不跟着剩余。非正的重置时长不出现。
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LanPeriod {
-    pub tokens: i64,
-    pub messages: u64,
-    pub cost: f64,
+struct RemainingWindow {
+    label: WindowLabel,
+    remaining_pct: u8,
+    level: WindowLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resets_in_ms: Option<ResetInMs>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LanSummary {
-    pub ok: bool,
-    pub generated_at_ms: i64,
-    /// 24 小时桶(本地时),今日视图的时段柱
-    pub hourly: Vec<i64>,
-    pub today: LanPeriod,
-    /// 近 7 天(today-6 → today),与主窗用量页「近 7 天」同口径
-    pub d7: LanPeriod,
-    /// 近 30 天(today-29 → today),与主窗用量页「近 30 天」同口径
-    pub d30: LanPeriod,
-    pub month: LanPeriod,
-    pub burn_rate: Option<f64>,
-    pub monthly_api_value_usd: Option<f64>,
-    pub monthly_multiple: Option<f64>,
-    pub rings: Vec<LanRing>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+enum WindowLabel {
+    #[serde(rename = "5H")]
+    FiveHour,
+    #[serde(rename = "WEEK")]
+    Week,
+    #[serde(rename = "MONTH")]
+    Month,
+    #[serde(rename = "DAY")]
+    Day,
 }
 
-fn period_of(agg: &quotakeeper::ledger::Agg) -> LanPeriod {
-    LanPeriod {
-        tokens: agg.total(),
-        messages: agg.messages,
-        cost: agg.cost(),
-    }
-}
-
-/// 末尾 N 天聚合(daily_totals 旧→新、空日也保留,故 rev().take(N) 即「含今天的近 N 天」)。
-fn period_of_last_days(days: &[quotakeeper::ledger::DailyTotal], count: usize) -> LanPeriod {
-    let mut agg = quotakeeper::ledger::Agg::default();
-    for day in days.iter().rev().take(count) {
-        agg.merge(&day.agg);
-    }
-    period_of(&agg)
-}
-
-pub fn summary() -> LanSummary {
-    let state = STATE.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let zero = LanPeriod { tokens: 0, messages: 0, cost: 0.0 };
-    let (hourly, today, d7, d30, month) = if let Some(ledger) = state.ledger.as_ref() {
-        (
-            ledger.hourly.to_vec(),
-            period_of(&ledger.today),
-            period_of_last_days(&ledger.daily_totals, 7),
-            period_of_last_days(&ledger.daily_totals, 30),
-            period_of(&ledger.month),
-        )
-    } else {
-        (
-            Vec::new(),
-            zero,
-            zero,
-            zero,
-            zero,
-        )
-    };
-    let mut rings = Vec::new();
-    if let Some(snapshot) = state.snapshot.as_ref() {
-        for card in &snapshot.cards {
-            if let Card::Live(report) = card {
-                if report.source == QuotaSource::CpaLocal {
-                    continue; // CPA 本地活动卡无周期环,同托盘/悬浮窗口径
-                }
-                for limit in &report.limits {
-                    rings.push(LanRing {
-                        title: report.provider.title().to_string(),
-                        plan_type: report.plan_type.clone(),
-                        label: limit_label(&limit.label),
-                        used_pct: limit.used_pct,
-                        resets_in_ms: limit.resets_in_ms,
-                        level: level_for(limit.used_pct),
-                    });
-                }
-            }
+impl WindowLabel {
+    fn rank(self) -> u8 {
+        match self {
+            Self::FiveHour => 0,
+            Self::Day => 1,
+            Self::Week => 2,
+            Self::Month => 3,
         }
     }
-    LanSummary {
-        ok: true,
-        generated_at_ms: state.generated_at_ms,
-        hourly,
-        today,
-        d7,
-        d30,
-        month,
-        burn_rate: state.ledger.as_ref().and_then(|ledger| ledger.burn_rate),
-        monthly_api_value_usd: state.monthly_api_value_usd,
-        monthly_multiple: state.monthly_multiple,
-        rings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum WindowLevel {
+    Ok,
+    Warn,
+    Out,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+struct ResetInMs(u64);
+
+const MANIFEST: &str = r##"{"name":"QuotaKeeper","short_name":"剩余","start_url":"/","display":"standalone","background_color":"#000000","theme_color":"#000000"}"##;
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn glance(snapshot: &Snapshot, now_ms: i64) -> Glance {
+    let mut cards = Vec::new();
+    for card in &snapshot.cards {
+        let Card::Live(report) = card else {
+            continue;
+        };
+        if report.source == QuotaSource::CpaLocal {
+            continue;
+        }
+        let mut keyed = Vec::new();
+        for (index, limit) in report.limits.iter().enumerate() {
+            if !limit.used_pct.is_finite() {
+                continue;
+            }
+            let used = limit.used_pct.clamp(0.0, 100.0);
+            let remaining = (100.0 - used).round().clamp(0.0, 100.0) as u8;
+            let level = match status_for(used) {
+                Status::Ok => WindowLevel::Ok,
+                Status::Warning => WindowLevel::Warn,
+                Status::Exhausted => WindowLevel::Out,
+            };
+            let resets_in_ms = match limit.resets_in_ms {
+                Some(ms) if ms > 0 => Some(ResetInMs(ms as u64)),
+                _ => None,
+            };
+            keyed.push((
+                index,
+                RemainingWindow {
+                    label: limit_label(&limit.label),
+                    remaining_pct: remaining,
+                    level,
+                    resets_in_ms,
+                },
+            ));
+        }
+        keyed.sort_by(|a, b| {
+            a.1.remaining_pct
+                .cmp(&b.1.remaining_pct)
+                .then(a.1.label.rank().cmp(&b.1.label.rank()))
+                .then(a.0.cmp(&b.0))
+        });
+        let windows: Vec<RemainingWindow> = keyed.into_iter().map(|(_, window)| window).collect();
+        if windows.is_empty() {
+            continue;
+        }
+        cards.push(GlanceCard {
+            title: report.provider.title().to_string(),
+            plan: report.plan_type.clone(),
+            windows,
+        });
+    }
+    Glance::Ready {
+        stale: now_ms.saturating_sub(snapshot.generated_at_ms) > 120_000,
+        cards,
     }
 }
 
-/// 环标签归类成 5H/WEEK/MONTH/DAY(与悬浮窗同口径;认不出保留原文)。
-fn limit_label(raw: &str) -> &'static str {
+fn summary() -> Glance {
+    let snapshot = {
+        let state = STATE.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot.clone()
+    };
+    match snapshot.as_ref() {
+        Some(snapshot) => glance(snapshot, now_ms()),
+        None => Glance::Waiting,
+    }
+}
+
+fn limit_label(raw: &str) -> WindowLabel {
     let label = raw.to_lowercase();
     if label.contains("5h") || label.contains("5 hour") || label.contains("5 小时") {
-        "5H"
+        WindowLabel::FiveHour
     } else if (label.contains("7") && label.contains("day")) || label.contains("week") {
-        "WEEK"
+        WindowLabel::Week
     } else if label.contains("month") {
-        "MONTH"
+        WindowLabel::Month
     } else {
-        "DAY"
+        WindowLabel::Day
     }
 }
 
@@ -316,6 +309,11 @@ fn route(path: &str) -> (&'static str, &'static str, Vec<u8>) {
             Ok(body) => ("200 OK", "application/json", body),
             Err(_) => ("500 Internal Server Error", "application/json", b"{\"ok\":false}".to_vec()),
         },
+        "/manifest.webmanifest" => (
+            "200 OK",
+            "application/manifest+json",
+            MANIFEST.as_bytes().to_vec(),
+        ),
         "/healthz" => ("200 OK", "text/plain; charset=utf-8", b"ok".to_vec()),
         _ => ("404 Not Found", "text/plain; charset=utf-8", b"not found".to_vec()),
     }
@@ -362,18 +360,21 @@ fn standby_html() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quotakeeper::model::{Balance, Card, Limit, ProviderId, QuotaSource, Report, Snapshot, Status};
 
     /// STATE 是进程级单例:涉及 publish 的测试与空状态断言互斥执行。
     static STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn limit_labels_map_to_window_slots() {
-        assert_eq!(limit_label("5h used"), "5H");
-        assert_eq!(limit_label("5 HOUR LIMIT"), "5H");
-        assert_eq!(limit_label("7 days"), "WEEK");
-        assert_eq!(limit_label("Weekly limit"), "WEEK");
-        assert_eq!(limit_label("Monthly limit"), "MONTH");
-        assert_eq!(limit_label("Today"), "DAY");
+        assert_eq!(limit_label("5h used"), WindowLabel::FiveHour);
+        assert_eq!(limit_label("5 HOUR LIMIT"), WindowLabel::FiveHour);
+        assert_eq!(limit_label("7 days"), WindowLabel::Week);
+        assert_eq!(limit_label("7 days Opus"), WindowLabel::Week);
+        assert_eq!(limit_label("Weekly limit"), WindowLabel::Week);
+        assert_eq!(limit_label("Monthly limit"), WindowLabel::Month);
+        assert_eq!(limit_label("Today"), WindowLabel::Day);
+        assert_eq!(limit_label("nope"), WindowLabel::Day);
     }
 
     #[test]
@@ -387,33 +388,8 @@ mod tests {
     fn summary_is_safe_without_state() {
         let _guard = STATE_LOCK.lock().unwrap();
         *STATE.write().unwrap() = LanState::default();
-        let summary = summary();
-        assert!(summary.ok);
-        assert!(summary.rings.is_empty());
-        assert_eq!(summary.today.tokens, 0);
-        assert_eq!(summary.d7.tokens, 0);
-        assert_eq!(summary.d30.tokens, 0);
-        assert!(summary.hourly.is_empty());
-    }
-
-    #[test]
-    fn period_of_last_days_sums_recent_window() {
-        use quotakeeper::ledger::{Agg, DailyTotal};
-        let days: Vec<DailyTotal> = (0..10)
-            .map(|i| DailyTotal {
-                date: format!("2026-10-{i:02}"),
-                tokens: (i + 1) * 100,
-                cost: (i + 1) as f64,
-                messages: 1,
-                agg: Agg { input: (i + 1) * 100, messages: 1, cost_reported: (i + 1) as f64, ..Agg::default() },
-            })
-            .collect();
-        // 末尾 7 天:400..1000 → 4900
-        assert_eq!(period_of_last_days(&days, 7).tokens, 4_900);
-        assert_eq!(period_of_last_days(&days, 7).messages, 7);
-        assert_eq!(period_of_last_days(&days, 7).cost, 49.0);
-        // 30 天窗口超出范围 = 全部
-        assert_eq!(period_of_last_days(&days, 30).tokens, 5_500);
+        assert_eq!(summary(), Glance::Waiting);
+        assert_eq!(serde_json::to_string(&summary()).unwrap(), r#"{"state":"waiting"}"#);
     }
 
     #[test]
@@ -450,29 +426,247 @@ mod tests {
     #[test]
     fn publish_feeds_summary() {
         let _guard = STATE_LOCK.lock().unwrap();
-        use quotakeeper::model::ProviderId;
         let snapshot = Snapshot {
             generated_at_ms: 123,
-            cards: vec![Card::Live(quotakeeper::model::Report {
+            cards: vec![Card::Live(Report {
                 provider: ProviderId::Codex,
                 source: QuotaSource::CodexAppServer,
                 plan_type: "plus".into(),
-                limits: vec![quotakeeper::model::Limit {
+                limits: vec![Limit {
                     label: "5h".into(),
                     used_pct: 42.0,
                     resets_in_ms: Some(3_600_000),
-                    status: quotakeeper::model::Status::Ok,
+                    status: Status::Ok,
                 }],
                 subscription_ends_at_ms: None,
                 balance: None,
             })],
         };
-        publish(&snapshot, None, None, Some(108.0), Some(2.7));
-        let summary = summary();
-        assert_eq!(summary.rings.len(), 1);
-        assert_eq!(summary.rings[0].label, "5H");
-        assert_eq!(summary.rings[0].used_pct, 42.0);
-        assert_eq!(summary.monthly_multiple, Some(2.7));
-        assert_eq!(summary.generated_at_ms, 123);
+        publish(&snapshot);
+        let Glance::Ready { stale, cards } = summary() else {
+            panic!("expected ready");
+        };
+        assert_eq!(stale, now_ms().saturating_sub(123) > 120_000);
+        let Glance::Ready { stale: false, cards: near_cards } = glance(&snapshot, 123) else {
+            panic!("near now should not be stale");
+        };
+        assert_eq!(cards, near_cards);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].title, "Codex");
+        assert_eq!(cards[0].plan, "plus");
+        assert_eq!(
+            cards[0].windows,
+            vec![RemainingWindow {
+                label: WindowLabel::FiveHour,
+                remaining_pct: 58,
+                level: WindowLevel::Ok,
+                resets_in_ms: Some(ResetInMs(3_600_000)),
+            }]
+        );
+        let wire = serde_json::to_string(&summary()).unwrap();
+        assert!(!wire.contains("generatedAt"));
+        assert!(!wire.contains("monthly"));
+        let replacement = Snapshot {
+            generated_at_ms: 123,
+            cards: vec![Card::Live(Report {
+                provider: ProviderId::MiniMax,
+                source: QuotaSource::MinimaxRemainsApi,
+                plan_type: String::new(),
+                limits: vec![Limit {
+                    label: "7 days".into(),
+                    used_pct: 20.0,
+                    resets_in_ms: Some(86_400_000),
+                    status: Status::Ok,
+                }],
+                subscription_ends_at_ms: None,
+                balance: None,
+            })],
+        };
+        publish(&replacement);
+        let Glance::Ready { cards, .. } = summary() else {
+            panic!("expected ready");
+        };
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].title, "MiniMax Coding");
+        assert_eq!(cards[0].windows[0].remaining_pct, 80);
+    }
+
+    #[test]
+    fn glance_keeps_remaining_sort_omissions_and_passed_resets() {
+        let generated_at_ms = 1_700_000_000_000;
+        let snapshot = Snapshot {
+            generated_at_ms,
+            cards: vec![
+                Card::Live(Report {
+                    provider: ProviderId::Goat,
+                    source: QuotaSource::CommandCodeApi,
+                    plan_type: "pro".into(),
+                    limits: vec![
+                        Limit {
+                            label: "5 hours".into(),
+                            used_pct: 42.0,
+                            resets_in_ms: Some(3_600_000),
+                            status: Status::Ok,
+                        },
+                        Limit {
+                            label: "7 days Opus".into(),
+                            used_pct: 91.0,
+                            resets_in_ms: Some(-5_000),
+                            status: Status::Warning,
+                        },
+                        Limit {
+                            label: "nope".into(),
+                            used_pct: f64::NAN,
+                            resets_in_ms: Some(10),
+                            status: Status::Ok,
+                        },
+                    ],
+                    subscription_ends_at_ms: Some(9_999_999),
+                    balance: Some(Balance { amount: 12.0, currency: "USD".into() }),
+                }),
+                Card::Missing { provider: ProviderId::Claude },
+                Card::Live(Report {
+                    provider: ProviderId::Antigravity,
+                    source: QuotaSource::CpaLocal,
+                    plan_type: "CPA 凭证可用".into(),
+                    limits: vec![Limit {
+                        label: "Today vs 7-day activity".into(),
+                        used_pct: 10.0,
+                        resets_in_ms: Some(50_000),
+                        status: Status::Ok,
+                    }],
+                    subscription_ends_at_ms: None,
+                    balance: None,
+                }),
+                Card::Live(Report {
+                    provider: ProviderId::Codex,
+                    source: QuotaSource::CodexAppServer,
+                    plan_type: "plus".into(),
+                    limits: vec![
+                        Limit {
+                            label: "Monthly".into(),
+                            used_pct: 100.0,
+                            resets_in_ms: Some(0),
+                            status: Status::Ok,
+                        },
+                        Limit {
+                            label: "5h".into(),
+                            used_pct: 80.4,
+                            resets_in_ms: Some(1_000),
+                            status: Status::Warning,
+                        },
+                    ],
+                    subscription_ends_at_ms: None,
+                    balance: None,
+                }),
+                Card::Live(Report {
+                    provider: ProviderId::MiniMax,
+                    source: QuotaSource::MinimaxRemainsApi,
+                    plan_type: String::new(),
+                    limits: vec![
+                        Limit {
+                            label: "7 days".into(),
+                            used_pct: 20.0,
+                            resets_in_ms: Some(86_400_000),
+                            status: Status::Ok,
+                        },
+                        Limit {
+                            label: "7 days Opus".into(),
+                            used_pct: 20.0,
+                            resets_in_ms: Some(86_400_000),
+                            status: Status::Ok,
+                        },
+                    ],
+                    subscription_ends_at_ms: None,
+                    balance: None,
+                }),
+            ],
+        };
+        let Glance::Ready { stale: false, cards } = glance(&snapshot, generated_at_ms) else {
+            panic!("fresh sample should be ready and not stale");
+        };
+        let Glance::Ready { stale: false, cards: edge } = glance(&snapshot, generated_at_ms + 120_000) else {
+            panic!("120s is not stale");
+        };
+        let Glance::Ready { stale: true, cards: late } = glance(&snapshot, generated_at_ms + 120_001) else {
+            panic!("120s + 1ms is stale");
+        };
+        assert_eq!(cards, edge);
+        assert_eq!(cards, late);
+        assert!(matches!(glance(&snapshot, generated_at_ms - 1), Glance::Ready { stale: false, .. }));
+        assert_eq!(
+            cards.iter().map(|card| card.title.as_str()).collect::<Vec<_>>(),
+            vec!["Command Code GOAT", "Codex", "MiniMax Coding"]
+        );
+        assert!(cards.iter().all(|card| !card.title.contains("Claude") && !card.title.contains("Antigravity")));
+        assert_eq!(
+            cards[0].windows,
+            vec![
+                RemainingWindow {
+                    label: WindowLabel::Week,
+                    remaining_pct: 9,
+                    level: WindowLevel::Warn,
+                    resets_in_ms: None,
+                },
+                RemainingWindow {
+                    label: WindowLabel::FiveHour,
+                    remaining_pct: 58,
+                    level: WindowLevel::Ok,
+                    resets_in_ms: Some(ResetInMs(3_600_000)),
+                },
+            ]
+        );
+        assert_eq!(
+            cards[1].windows,
+            vec![
+                RemainingWindow {
+                    label: WindowLabel::Month,
+                    remaining_pct: 0,
+                    level: WindowLevel::Out,
+                    resets_in_ms: None,
+                },
+                RemainingWindow {
+                    label: WindowLabel::FiveHour,
+                    remaining_pct: 20,
+                    level: WindowLevel::Warn,
+                    resets_in_ms: Some(ResetInMs(1_000)),
+                },
+            ]
+        );
+        assert_eq!(
+            cards[2].windows,
+            vec![
+                RemainingWindow {
+                    label: WindowLabel::Week,
+                    remaining_pct: 80,
+                    level: WindowLevel::Ok,
+                    resets_in_ms: Some(ResetInMs(86_400_000)),
+                },
+                RemainingWindow {
+                    label: WindowLabel::Week,
+                    remaining_pct: 80,
+                    level: WindowLevel::Ok,
+                    resets_in_ms: Some(ResetInMs(86_400_000)),
+                },
+            ]
+        );
+        let ready = Glance::Ready { stale: false, cards };
+        let json = serde_json::to_string(&ready).unwrap();
+        for needle in ["usedPct", "hourly", "burnRate", "monthly", "subscription", "balance", "Opus"] {
+            assert!(!json.contains(needle), "{needle} in {json}");
+        }
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value["cards"][0]["windows"][0].get("resetsInMs").is_none());
+        assert!(value["cards"][1]["windows"][0].get("resetsInMs").is_none());
+        assert_eq!(value["cards"][0]["windows"][1]["resetsInMs"], 3_600_000);
+        assert_eq!(value["cards"][1]["windows"][1]["resetsInMs"], 1_000);
+    }
+
+    #[test]
+    fn standby_page_is_remaining_only() {
+        let html = standby_html();
+        assert!(html.contains("剩余"));
+        assert!(!html.contains("30 天活跃时段"));
+        assert!(!html.contains("viewUsage"));
     }
 }
