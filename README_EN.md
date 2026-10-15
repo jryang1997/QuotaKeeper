@@ -2,7 +2,7 @@
 
 # QuotaKeeper
 
-Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — in your terminal or on your Windows desktop. Local-first; no relay server involved.
+Subscription quota and local token usage on Windows. See what remains and what you have used. Read-only collection keeps agent configuration untouched.
 
 ![GUI quota page](assets/screenshots/gui-overview.png)
 
@@ -19,14 +19,14 @@ Subscription quota, token ledger, burn rate and heatmaps for AI coding CLIs — 
 
 For heavy users of AI coding CLIs (Claude Code, Codex, OpenCode, z.ai GLM, Kimi, DeepSeek…): quotas are pulled directly from each provider's official/login-state endpoints, the token ledger reads local session files, and USD pricing uses LiteLLM's public price list (refreshed in the background every 24 hours, with offline cache). Everything stays on your machine — no telemetry, no upload.
 
-A single-binary Rust TUI (ratatui) plus a Windows desktop shell (WebView2):
+The Windows desktop app uses Rust and WebView2. Navigation has three destinations: Subscriptions, Token usage, and Settings.
 
-Desktop GUI (four pages): **Quota** (a one-screen quota strip plus full provider cards), **Usage** (period summary, a 20-module editable board and an **achievements wall**), **Share** (PNG share card and LAN dashboard) and **Settings** (appearance / sources & keys / desktop & alerts / benchmark & currency / about), alongside an always-on-top three-ring overlay, a tray icon and achievement toasts.
+- **Subscriptions** shows every quota window, with remaining quota by default and an optional used view. Reset times and subscription expiry stay separate. Old readings retain their observation time; a passed reset waits for refresh without refilling the quota. Unconnected and hidden providers are folded together.
+- **Token usage** starts with local today, week, and month totals. The detail page applies the same date and source filters to totals, requests, API equivalents, trends, token buckets, and source distribution. CSV and JSON exports use those filters. API equivalents are reference amounts, not subscription charges; unpriced records stay visible.
+- **Desktop presence** includes the tray, quota overlay, quota threshold and reset alerts, and expiry reminders. Settings can enable a read-only LAN quota page.
+- Chinese and English, existing themes, independent quota and ledger collection. Quotas refresh every 60 seconds; local records refresh every 5 seconds. One provider failure does not block the others.
 
-- **Quota page** — one card per subscription: 5h / weekly / monthly windows with █░ progress bars and pace-based exhaustion estimates; system toast notifications on 80% / 100% / reset crossings (deduplicated, optional night silence).
-- **Usage page** — last 60 minutes, today / ISO-week / month totals, agent / session / project / model breakdowns, stacked 24h / 14d trends, monthly API-equivalent cost vs. plan price benchmark, CSV / JSON export.
-- **Heatmap page** — 26-week GitHub-style contribution grid + work-hours profile.
-- Bilingual (zh/en, `l`), four themes (`p`), 60s auto-refresh. Quota sources fail independently; the ledger is fully offline-capable.
+Achievements, PNG share cards, editable module boards, work-habit analysis, and CLI upgrades have been removed. The [product research](docs/research/product-focus-2026-10-15.md) records the scope decision and Magpie primary sources. The existing TUI remains available with frozen functionality.
 
 ## Data sources
 
@@ -41,7 +41,8 @@ Desktop GUI (four pages): **Quota** (a one-screen quota strip plus full provider
 | Claude Pro/Max | official `oauth/usage` endpoint | Claude Code login (`~/.claude/.credentials.json`) |
 | Cursor | usage-summary (undocumented endpoint) | Cursor login (state.vscdb / `cursor-agent login`) |
 | GLM Coding | z.ai / bigmodel monitor endpoint | `GLM_API_KEY`; global region also needs `GLM_API_BASE=https://api.z.ai` |
-| Kimi Coding (in development) | coding usage endpoint | `KIMI_CODE_API_KEY` (Kimi For Coding, not a Moonshot platform key) |
+| Kimi Coding | coding usage endpoint | `KIMI_CODE_API_KEY` (Kimi For Coding, not a Moonshot platform key) |
+| MiniMax Coding | official coding_plan remains endpoint | Credential Manager `TuiTokenMonitor/MiniMax` / `MINIMAX_CODING_API_KEY` |
 
 GLM/Kimi key inputs are not yet wired into Settings; set the environment variable and restart. DeepSeek API balance is displayed separately from subscription quota.
 
@@ -57,7 +58,7 @@ External requests honor `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`. Loopback req
 
 ## Install
 
-### TUI
+### TUI (existing version, feature-frozen)
 
 Requires Rust 1.88+ (edition 2024).
 
@@ -87,13 +88,14 @@ Needs the WebView2 Runtime (preinstalled on Win10/11). Frontend assets are embed
 ## Privacy
 
 All data stays local. No telemetry. API keys go only to the Windows Credential Manager. The app never mutates CLI-owned state (login files are read-only; OAuth tokens are never refreshed on your behalf).
+The LAN display is off by default. When enabled, devices on that local network can read remaining quota; keys are not exposed.
 
 ## Verification
 
 ```sh
 cargo test                                   # fixture replay, in-memory SQLite, multi-frame zstd, headless rendering
 cargo test --manifest-path gui/Cargo.toml    # GUI shell tests
-npm --prefix gui/frontend test                # GUI layout, preferences and bridge contracts
+npm --prefix gui/frontend test                # quota boundaries, filtered usage, preferences and currency
 cargo run --example ledger_smoke
 ```
 

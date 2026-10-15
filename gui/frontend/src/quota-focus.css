@@ -1,0 +1,167 @@
+.quota-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.quota-focus .quota-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.quota-focus .quota-card {
+  height: auto;
+  min-height: 0;
+  align-self: start;
+}
+
+.quota-focus .quota-head { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px 9px; }
+.quota-focus .quota-title { font-family: var(--font-family-body); font-size: 14px; text-transform: none; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quota-focus .quota-menu-wrap { margin-left: 0; }
+.quota-account-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
+.quota-account-meta .quota-plan-type { max-width: 100%; font-size: 10px; }
+.quota-account-meta .quota-expiry { margin-left: 0; }
+
+.quota-observed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.quota-observed time,
+.quota-view-label,
+.quota-folded-count {
+  font-family: var(--font-family-code);
+  font-variant-numeric: tabular-nums;
+}
+
+.quota-observed time { color: var(--color-text-primary); }
+
+.quota-view-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quota-stale-label,
+.quota-reset-stale { color: var(--color-warning); }
+
+.quota-focus .quota-limit-pct.is-ok { color: var(--color-success); }
+.quota-focus .quota-limit-pct.is-warning { color: var(--color-warning); }
+.quota-focus .quota-limit-pct.is-exhausted { color: var(--color-error); }
+.quota-focus .quota-limit-pct.is-activity { color: var(--color-text-primary); }
+
+.quota-focus .quota-card-activity {
+  background: var(--color-background-card);
+}
+
+.quota-focus .quota-expiry-expired { color: var(--color-error); }
+
+.quota-reset-awaiting,
+.quota-reset-stale { font-family: var(--font-family-code); }
+
+.quota-no-window,
+.quota-none,
+.quota-section-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.quota-section-note { font-size: var(--font-size-xs); }
+
+.quota-balance,
+.quota-activity,
+.quota-empty-live {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.quota-folded {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-background-card);
+}
+
+.quota-folded summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 12px 16px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.quota-folded summary::after { content: '+'; margin-left: auto; font-size: 18px; }
+.quota-folded[open] summary::after { content: '−'; }
+.quota-folded summary:focus-visible { outline: 2px solid var(--color-text-blue); outline-offset: 2px; }
+
+.quota-folded-count.is-failure { color: var(--color-error); }
+
+.quota-folded[open] summary { border-bottom: 1px solid var(--color-border); }
+
+.quota-folded-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 16px 16px;
+  list-style: none;
+}
+
+.quota-folded-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-folded-row strong {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.quota-folded-kind {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.quota-folded button,
+.quota-folded-settings {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--color-text-blue);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.quota-repair {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.quota-repair span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-text-primary);
+}
+
+.app[data-density='compact'] .quota-focus { gap: 10px; }
+.app[data-density='compact'] .quota-focus .quota-grid { gap: 10px; }

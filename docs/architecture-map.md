@@ -1,6 +1,6 @@
-# 架构地图（2026-10-03）
+# 架构地图（2026-10-15）
 
-面向后续改造与提升的导航文档。基线提交 `d356b14`（master）。三套测试套件当前全绿：核心 crate 179、GUI 壳 11、前端 25。
+面向后续维护的导航文档。产品收口取舍见 [ADR 0002](adr/0002-readonly-quota-and-token-focus.md)。测试与运行结果记录在对应研究文档中，不在此缓存测试数量。
 
 ## 一句话定位
 
@@ -10,16 +10,16 @@ Rust 单核心库 + 两个前端外壳的本地 AI coding 用量监测台：**�
 
 | 单元 | 路径 | 角色 |
 |---|---|---|
-| `tui-token-monitor`（核心库 + TUI 二进制） | `src/` | 配额采集、账本归一化、聚合、定价、TUI 渲染、通知状态机。**所有业务逻辑都在这里**，以 `lib.rs` 暴露为库 |
-| `tui-token-monitor-gui`（桌面壳） | `gui/src/` | wry+tao 外壳，复用核心库；只做 DTO 序列化、IPC、导出、托盘、单实例、启动缓存。**不含业务口径** |
-| 前端 | `gui/frontend/src/` | React 19 + StyleX + motion + Vite；4 页（配额/用量/分享/设置）；产物经 `include_dir!` 内嵌进 GUI exe |
+| `quotakeeper`（核心库与 TUI） | `src/` | 配额采集、账本归一化、聚合、定价、TUI 渲染、通知状态机。TUI 功能冻结。 |
+| `quotakeeper-gui`（桌面壳） | `gui/src/` | wry 与 tao 外壳、DTO、IPC、导出、托盘、单实例、启动缓存和局域网只读服务。 |
+| 前端 | `gui/frontend/src/` | React 19、motion 与 Vite。订阅额度、Token 用量、设置三页，产物内嵌进 GUI。 |
 
-关键复用关系：GUI 通过 `tui-token-monitor = { path = ".." }` 依赖核心库（`gui/Cargo.toml`），直接调用 `backend::fetch_snapshot`、`ledger::collect`、`goat`、`deepseek_balance`。**TUI 和 GUI 共享同一套采集与聚合代码，只有渲染层不同。**
+GUI 通过 `quotakeeper = { path = ".." }` 复用核心库，调用 `backend::fetch_snapshot`、`ledger::collect` 与 `deepseek_balance::fetch`。TUI 和 GUI 共用采集口径，GUI 只推送当前页面需要的数据。
 
 ## 核心数据流
 
 ```
-配额（8 provider 并行）                    账本（6 源）
+配额（9 provider 并行）                    账本（6 源）
 backend::fetch_snapshot()                 ledger::collect(now)
   std::thread::scope 并发                    JSONL/zstd 源: 文件级 mtime+size 缓存
   每家一个 fetch_report → Report             SQLite 源: 每轮只读 SELECT
@@ -27,7 +27,7 @@ backend::fetch_snapshot()                 ledger::collect(now)
   全 Missing 才 bail                         → Pricing::estimate 补 cost
         │                                    → aggregate() 聚合出所有视图
         ▼                                            │
-     Snapshot{ cards: [Card; 8] }                    ▼
+     Snapshot{ cards: [Card; 9] }                    ▼
         │                                    LedgerReport{ today/week/month,
         │                                      by_agent/by_model/by_session/
         │                                      by_project, trend_24h, by_day,
@@ -45,18 +45,18 @@ backend::fetch_snapshot()                 ledger::collect(now)
 
 ## 关键类型（改造时的锚点）
 
-- **配额侧**（`src/model.rs`）：`ProviderId`（8 值枚举，固定展示顺序）、`Report`（一家一张卡：source/limits/plan/subscription_ends_at）、`Limit`（label/used_pct(0-100)/resets_in_ms/status）、`Card::{Live,Missing}`、`Snapshot`。不变量：`status_for` 是唯一状态推导入口（≥100 Exhausted / ≥80 Warning）；缺失 provider 恒为 `Card::Missing`，UI 永不缺卡。
+- **配额侧**（`src/model.rs`）：`ProviderId`、`Report`、`Limit`、`Card::{Live,Missing}` 与 `Snapshot`。`used_pct` 是已用百分比，`resets_in_ms` 是采集时刻的相对时间。`quota-data.js` 只扣一次经过时间；缺失、空窗口和活动均值分别处理，不推算成剩余额度。
 - **账本侧**（`src/ledger/types.rs`）：`TokenBreakdown`（input/output/cache_read/cache_write **四桶互不重叠**，reasoning 是 output 的信息性子集不另计）、`UsageRecord`（client/model/ts_ms/tokens/cost/cost_is_estimate/session/project/duration_ms/ttft_ms）、`Agg`（累加器，`cost_reported` 与 `cost_estimated` 分列）。
 - **账本报告**（`src/ledger/mod.rs` `LedgerReport`）：所有 UI 视图的数据都在这一个结构里预聚合好，TUI 和 GUI 都消费它。**这是账本侧改造的中枢。**
-- **IPC DTO**（`gui/src/ipc.rs`）：`PushDto` 是推给前端的顶层契约（fetched_at/quota_error/cards/goat_usage/deepseek_balance/monthly_value/ledger）；`LedgerDto`、`CardDto`、`AggDto` 等一一对应核心类型，camelCase，只做序列化不改口径。
+- **IPC DTO**（`gui/src/ipc.rs`）：`PushDto` 带读取时间、配额错误、卡片、DeepSeek 余额和账本。`LedgerDto` 只保留 sources、today、week、month、analysis_rows、intraday_rows、generated_at_ms；字段沿用 snake_case。导出直接读 Rust 账本，不依赖浏览器缓存。
 
 ## 文件地图（按子系统）
 
 ### 配额采集（每家一个适配器文件）
 - `src/backend.rs` — 并发编排 + OMP 兜底 + Card 填充（`fetch_snapshot`）
-- `src/opencode_go.rs` `src/goat.rs` `src/claude_quota.rs` `src/codex_app_server.rs` `src/cursor_quota.rs` `src/glm_quota.rs` `src/kimi_quota.rs` — 各 provider 的 `fetch_report`
+- `src/opencode_go.rs`、`src/goat.rs`、`src/claude_quota.rs`、`src/codex_app_server.rs`、`src/cursor_quota.rs`、`src/glm_quota.rs`、`src/kimi_quota.rs`、`src/minimax_quota.rs` 负责各 provider 的 `fetch_report`。
 - `src/deepseek_balance.rs` — DeepSeek API 余额（与订阅配额不同口径，单独余额卡）
-- `src/pace.rs` — 匀速外推预计耗尽（`forecast`，只对已知窗口时长+reset 的额度）
+- `src/pace.rs` 保留 TUI 的原有预测。GUI 通知使用 `AlertTracker::quota_only`，不计算或发送窗口名称推算的耗尽预测。
 - **新增一家服务商**：加 `ProviderId` 变体 + `title`/`missing_hints` → 新建 `xxx_quota.rs` 出 `fetch_report` → 在 `backend.rs` 的 `thread::scope` 里加一路 → `ipc.rs` 加 slug → 前端 `ui-data.js` 的 `PROVIDERS`/`SOURCE_PATHS`/logo。
 
 ### 账本（`src/ledger/`）
@@ -78,17 +78,17 @@ backend::fetch_snapshot()                 ledger::collect(now)
 - `src/http.rs` — 出站 HTTP 统一入口：环境代理 + 环回强制直连不重定向（CPA 管理密钥不经代理）
 
 ### GUI 壳（`gui/src/`）
-- `main.rs`（730 行）— wry+tao 事件循环、`app://` 自定义协议、IPC handler（`IpcCommand`）、托盘、全局快捷键
-- `ipc.rs`（643 行）— DTO 序列化契约
+- `main.rs` 负责事件循环、自定义协议、IPC、托盘、快捷键、悬浮窗和 LAN 服务。
+- `ipc.rs` 只序列化当前界面需要的数据。
 - `refresh.rs` — 刷新引擎；`cache.rs` — 启动回放缓存；`export.rs` — CSV/JSON（Windows 保存对话框，CSV 对公式前缀加单引号）；`desktop.rs` — 自启注册表/全局快捷键；`single_instance.rs` — 单实例
 
 ### 前端（`gui/frontend/src/`）
-- `main.jsx` — React 入口、导航、页面路由（quota/usage/share/settings）、数据状态、成就 toast
-- `QuotaPage.jsx`（额度带 + 服务商卡片）`UsageDashboard.jsx`（摘要行 + 模块板）`SettingsPage.jsx`（五组 + 目录）`SharePage.jsx`（分享卡 / 局域网看板）
-- `Achievements.jsx` + `achievements.js`（成就定义/评估/弹窗/toast，纯前端 localStorage）
-- `ModuleBoard.jsx`/`PanelBodies.jsx`/`panel-layout.js`（模块板：`editing` 开关控制拖拽与工具条，`bare` 模块自带标题）
-- `gui-bridge.js`（`window.external.invoke` 封装）、`ui-data.js`（provider/颜色/文案/格式化，含 `fill()` 参数化文案）、`usage-data.js`、`gui-preferences.js`（本地偏好）、`currency.js`、`motion-tuning.js`、`panel-layout.js`
-- `app.css`（壳与旧页）、`usage-dashboard.css`（用量页）、`ia.css`（2026-10 新结构：额度带/设置目录/成就/分享 tab/编辑开关）
+- `main.jsx` 负责导航 quota、usage、settings，原生回调和读取状态。
+- `LocalUsageSummary.jsx` 在额度首屏展示本机今日、本周、本月摘要。`QuotaPage.jsx` 固定展示额度卡，`quota-data.js` 统一百分比与重置投影。
+- `UsageDashboard.jsx` 使用固定布局；`usage-data.js` 根据日期和采集源统一聚合摘要、趋势、Token 桶和采集源分布。
+- `SettingsPage.jsx` 包含外观、采集源与凭据、桌面通知、关于四组；`LanSettings.jsx` 控制只读局域网展示。
+- `gui-bridge.js` 封装 `window.ipc.postMessage`；`ui-data.js` 放共享文案与格式，`gui-preferences.js` 放本地偏好。
+- `app.css`、`themes.css` 保留用户外观；`quota-focus.css`、`focus.css`、`usage-dashboard.css` 服务当前页面，`ia.css` 保留设置目录、菜单和命令面板。
 - 前端测试 `*.test.mjs` 跑 `node --test`
 
 ## 工程基建

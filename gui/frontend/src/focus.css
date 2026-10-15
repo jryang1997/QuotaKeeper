@@ -1,0 +1,27 @@
+.main > .page-content { flex-shrink: 0; }
+.local-usage-summary { margin-bottom: 22px; padding: 22px 24px; border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-background-card); }
+.local-usage-summary header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.local-usage-summary header p { margin: 7px 0 0; font-size: 12px; line-height: 1.6; color: var(--color-text-secondary); }
+.local-usage-summary header button { flex-shrink: 0; padding: 8px 10px; border: 0; border-radius: 8px; color: var(--color-text-blue); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.local-usage-summary header button:hover { background: var(--color-overlay-hover); }
+.local-usage-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 22px; }
+.local-usage-values > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.local-usage-values > div + div { border-left: 1px solid var(--color-border); padding-left: 24px; }
+.local-usage-values > div > span { font-size: 12px; color: var(--color-text-secondary); }
+.local-usage-values strong { font-size: clamp(22px, 2.5vw, 32px); font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.local-usage-values small { font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--color-text-secondary); }
+.local-usage-note { margin: 16px 0 0; color: var(--color-warning); font-size: 12px; line-height: 1.5; }
+.data-freshness { display: flex; flex-wrap: wrap; gap: 7px 22px; margin: 5px 0 18px; font-size: 11px; line-height: 1.6; color: var(--color-text-secondary); }
+.data-freshness .is-stale { color: var(--color-warning); }
+@media (max-width: 660px) {
+  .local-usage-summary { padding: 18px 16px; }
+  .local-usage-summary header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .local-usage-summary header button { padding-left: 0; }
+  .local-usage-values { gap: 12px; margin-top: 16px; }
+  .local-usage-values > div + div { padding-left: 12px; }
+  .local-usage-values strong { font-size: 23px; }
+  .local-usage-values small { display: block; margin-top: 4px; }
+  .toolbar-theme { display: none; }
+  .main-toolbar { flex-wrap: wrap; gap: 8px; }
+  .settings-provider-head { flex-wrap: wrap; }
+}

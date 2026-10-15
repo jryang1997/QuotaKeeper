@@ -83,16 +83,6 @@ struct SubscriptionsResp {
     data: Option<SubData>,
 }
 
-/// 官方当前账期用量汇总,与 dashboard「Current billing month」同源.
-/// wire 实测(2026-09-28):无参 GET 即返回 periodBasis=billing-period 的账期累计;
-/// totalTokens 为服务端 in+out 合计,别自算.
-#[derive(Deserialize, Clone, Copy, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageSummary {
-    pub total_count: f64,
-    pub total_tokens: u64,
-    pub total_cost: f64,
-}
 
 /// 读 key:应用凭据优先,再用环境变量或官方 CLI 登录态.不回显内容.
 fn api_key() -> anyhow::Result<String> {
@@ -280,11 +270,6 @@ pub fn fetch_report() -> anyhow::Result<Report> {
     build_report(&credits, &subs, now_ms)
 }
 
-/// 官方当前账期用量汇总;无登录态/断网/端点变更一律 Err,调用方回退本机账本.
-pub fn fetch_usage_summary() -> anyhow::Result<UsageSummary> {
-    let key = api_key()?;
-    get_json("/alpha/usage/summary", &key)
-}
 
 #[cfg(test)]
 mod tests {
@@ -408,24 +393,6 @@ mod tests {
         assert!(window_limit("5 hours", negative, NOW_MS).is_none());
     }
 
-    /// 真实 usage summary 响应形状回归(2026-09-28 实测,已脱敏).
-    #[test]
-    fn usage_summary_parses_live_shape() {
-        let doc: UsageSummary = serde_json::from_str(
-            r#"{"totalCount":5752,"totalCost":59.05022897839999,"averageCost":0.010266034245201668,"successRate":100,"completedCount":5752,"failedCount":0,"totalTokensIn":1050023401,"totalTokensOut":4664676,"totalTokens":1054688077,"totalCredits":59.05022897839999,"totalFreeCredits":0,"totalMonthlyCredits":59.05022897839999,"totalPurchasedCredits":0,"periodBasis":"billing-period"}"#,
-        )
-        .unwrap();
-        assert_eq!(doc.total_tokens, 1_054_688_077);
-        assert_eq!(doc.total_count, 5752.0);
-        assert!((doc.total_cost - 59.05022897839999).abs() < 1e-9);
-    }
-
-    #[test]
-    fn usage_summary_rejects_missing_fields() {
-        for doc in ["{}", r#"{"totalTokens":42}"#] {
-            assert!(serde_json::from_str::<UsageSummary>(doc).is_err());
-        }
-    }
 
     #[test]
     fn plan_names_follow_cmduse_order() {

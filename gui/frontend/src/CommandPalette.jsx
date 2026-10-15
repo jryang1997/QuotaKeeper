@@ -7,15 +7,14 @@ import { filterCommands, moveIndex } from './command-palette.js';
 import { CONTROL_SPRING, FADE } from './motion-tuning.js';
 import { useMotionPreference } from './ui-motion.jsx';
 
-const GROUP_ORDER = ['page', 'settings', 'module', 'provider', 'action'];
+const GROUP_ORDER = ['page', 'settings', 'provider', 'action'];
 const GROUP_LABEL = {
   page: 'jump_group_page',
   settings: 'jump_group_settings',
-  module: 'jump_group_module',
   provider: 'jump_group_provider',
   action: 'jump_group_action',
 };
-const GROUP_TAG = { page: 'PAGE', settings: 'SET', module: 'MOD', provider: 'PLAN', action: 'DO' };
+const GROUP_TAG = { page: 'PAGE', settings: 'SET', provider: 'PLAN', action: 'DO' };
 
 export default function CommandPalette({ open, onClose, commands, lang }) {
   const t = (key) => STR[key][lang];

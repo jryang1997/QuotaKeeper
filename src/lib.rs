@@ -1,4 +1,3 @@
-pub mod agents_scan;
 pub mod backend;
 pub mod claude_quota;
 pub mod codex_app_server;

@@ -1,14 +1,12 @@
-// 设置页:五组(外观 / 数据源与凭据 / 桌面与通知 / 基准与货币 / 关于与维护)。
 // 规则:颜色与全局偏好归设置,布局与显隐归所在页面;每个概念只有这一处编辑面。
 import { sendCommand } from './gui-bridge.js';
-import { bumpFunCounter } from './fun-counters.js';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Spinner } from '@astryxdesign/core/Spinner';
-import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, QUOTA_REPAIR, SOURCE_PATHS, SOURCE_REPAIR, STR, fmtCost, fmtInt } from './ui-data.js';
+import { PROVIDERS, PROVIDER_COLOR_DEFAULTS, QUOTA_HINT, QUOTA_REPAIR, SOURCE_PATHS, SOURCE_REPAIR, STR, fmtInt } from './ui-data.js';
 import { CURRENCIES, formatCurrency } from './currency.js';
 import { SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
+import LanSettings from './LanSettings.jsx';
 
-const GROUP_IDS = ['appearance', 'sources', 'desktop', 'benchmark', 'about'];
+const GROUP_IDS = ['appearance', 'sources', 'desktop', 'about'];
 
 function SettingsChoice({ label, value, onChange, options }) {
   return (
@@ -82,103 +80,6 @@ function scrollToSection(id) {
   node.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-const AGENT_STATUS = { ok: 'is-ok', update: 'is-update', warn: 'is-warn', off: 'is-off' };
-
-function defaultInstall(agent) {
-  return agent.installs?.find((install) => install.isDefault) || agent.installs?.[0];
-}
-
-function agentStatus(agent, t) {
-  if (!agent.installed) return { label: t('agents_not_installed'), kind: 'off' };
-  const install = defaultInstall(agent);
-  if (!install?.version) return { label: t('agents_unreadable'), kind: 'warn' };
-  if (agent.upgradable) return { label: t('agents_outdated'), kind: 'update' };
-  return { label: t('agents_up_to_date'), kind: 'ok' };
-}
-
-function AgentsSection({ lang, agents, scanning, updating, feedback, onScan, onUpdate }) {
-  const t = (key) => STR[key][lang];
-  const [confirming, setConfirming] = useState(null);
-  useEffect(() => {
-    if (!agents && !scanning) onScan();
-    // 挂载时自动检测一次;结果由 __onAgentsScanned 回推
-  }, []);
-  const upgradable = (agent) => !!(agent.upgradable && defaultInstall(agent)?.updateCommand);
-  const upgradableAgents = (agents || []).filter(upgradable);
-  const titleOf = (id) => agents?.find((agent) => agent.id === id)?.title || id;
-  return (
-    <div className="settings-subsection">
-      <div className="settings-subhead">
-        <div>
-          <h3>{t('agents_title')}</h3>
-          <p>{t('agents_hint')}</p>
-        </div>
-        <div className="settings-agents-toolbar">
-          <button type="button" onClick={() => { setConfirming(null); onScan(); }} disabled={scanning}>
-            {scanning ? <><Spinner size="sm" /> {t('agents_scanning')}</> : t('agents_scan')}
-          </button>
-          <button
-            type="button"
-            disabled={scanning || !!updating || upgradableAgents.length === 0}
-            onClick={() => setConfirming(confirming === 'all' ? null : 'all')}
-          >
-            {t('agents_upgrade_all')} · {upgradableAgents.length}
-          </button>
-        </div>
-      </div>
-      {(agents || []).map((agent) => {
-        const status = agentStatus(agent, t);
-        const install = defaultInstall(agent);
-        const busy = updating === agent.id || updating === 'all';
-        return (
-          <div className={`settings-agent-row${agent.installed ? '' : ' is-off'}`} key={agent.id}>
-            <div className="settings-agent-line">
-              <strong>{agent.title}</strong>
-              <span className={`settings-agent-badge ${AGENT_STATUS[status.kind]}`}>{status.label}</span>
-              <span className="settings-agent-version">
-                {install?.version ? (status.kind === 'update' ? `${install.version} → ${agent.latest}` : install.version) : ''}
-              </span>
-              {install?.updateCommand && !busy && status.kind === 'update' && (
-                <button type="button" className="settings-agent-upgrade" onClick={() => setConfirming(agent.id)}>{t('agents_upgrade')}</button>
-              )}
-              {busy && <span className="settings-agent-busy"><Spinner size="sm" /> {t('agents_running')}</span>}
-            </div>
-            {install && <small className="settings-agent-path">{install.path}</small>}
-            {install && !install.updateCommand && install.version && status.kind !== 'off' && (
-              <small className="settings-agent-path is-manual">{t('agents_manual')}</small>
-            )}
-            {confirming === agent.id && install?.updateCommand && (
-              <div className="settings-agent-confirm">
-                <span>{t('agents_confirm_hint')}</span>
-                <code>{install.updateCommand}</code>
-                <div>
-                  <button type="button" onClick={() => { setConfirming(null); onUpdate(agent.id); }}>{t('agents_confirm')}</button>
-                  <button type="button" onClick={() => setConfirming(null)}>{t('agents_cancel')}</button>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {confirming === 'all' && (
-        <div className="settings-agent-confirm">
-          <span>{t('agents_confirm_hint')}</span>
-          {upgradableAgents.map((agent) => <code key={agent.id}>{defaultInstall(agent).updateCommand}</code>)}
-          <div>
-            <button type="button" onClick={() => { setConfirming(null); onUpdate('all'); }}>{t('agents_confirm')}</button>
-            <button type="button" onClick={() => setConfirming(null)}>{t('agents_cancel')}</button>
-          </div>
-        </div>
-      )}
-      {(agents || []).length === 0 && !scanning && <p className="settings-agent-path" role="status">{t('agents_empty')}</p>}
-      {feedback?.results?.map(([id, ok, message]) => (
-        <p className={ok ? 'settings-agent-feedback is-ok' : 'settings-agent-feedback is-fail'} role="status" key={id}>
-          {titleOf(id)}: {ok ? t('agents_update_ok') : t('agents_update_fail')}{!ok && message ? ` · ${message}` : ''}
-        </p>
-      ))}
-    </div>
-  );
-}
 
 // 一张服务商密钥行:状态 + 输入 + 保存/移除;三家用同一形状,不再各写一遍。
 function ProviderKeyRow({ lang, provider, title, hint, placeholder, stored, feedback, onSave, onDelete, status, onOpenDetails }) {
@@ -218,51 +119,16 @@ function ProviderKeyRow({ lang, provider, title, hint, placeholder, stored, feed
 }
 
 export default function SettingsPage({
-  lang, preferences, currency, monthlyValue, nativeError, sources = [], cards = [],
-  agents, agentsScanning, agentUpdating, agentFeedback, onScanAgents, onUpdateAgent,
+  lang, preferences, currency, nativeError, sources = [], cards = [],
   goKeyStored, goKeyFeedback, onSaveGoKey, onDeleteGoKey,
   goatKeyStored, goatKeyFeedback, onSaveGoatKey, onDeleteGoatKey,
   deepseekKeyStored, deepseekKeyFeedback, onSaveDeepSeekKey, onDeleteDeepSeekKey,
-  onPreferenceChange, onResetAppearance, onShowWelcome, onOpenShare,
+  onPreferenceChange, onResetAppearance, onShowWelcome, lan, onLanToggle,
 }) {
   const t = (key) => STR[key][lang];
   const zh = lang === 0;
-  const initialBenchmark = monthlyValue?.list_price_benchmark_usd ?? monthlyValue?.default_list_price_benchmark_usd ?? 40;
-  const [benchmarkOverride, setBenchmarkOverride] = useState(null);
-  const [planDraft, setPlanDraft] = useState(initialBenchmark.toFixed(2));
-  const [planError, setPlanError] = useState('');
-  const [saved, setSaved] = useState(false);
   const [openSource, setOpenSource] = useState('');
   const active = useSectionSpy();
-  useEffect(() => {
-    setBenchmarkOverride(null);
-    setPlanDraft(initialBenchmark.toFixed(2));
-  }, [initialBenchmark]);
-
-  const benchmark = benchmarkOverride?.amount ?? initialBenchmark;
-  const isCustom = benchmarkOverride?.isCustom ?? monthlyValue?.benchmark_is_custom ?? false;
-  const saveBenchmark = (event) => {
-    event.preventDefault();
-    const amount = Number(planDraft);
-    if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) {
-      setPlanError(t('settings_invalid_price'));
-      setSaved(false);
-      return;
-    }
-    sendCommand({ cmd: 'setPlanBenchmark', amount });
-    setBenchmarkOverride({ amount, isCustom: true });
-    setPlanError('');
-    setSaved(true);
-  };
-  const resetBenchmark = () => {
-    const amount = monthlyValue?.default_list_price_benchmark_usd ?? 40;
-    sendCommand({ cmd: 'resetPlanBenchmark' });
-    setBenchmarkOverride({ amount, isCustom: false });
-    setPlanDraft(amount.toFixed(2));
-    setPlanError('');
-    setSaved(true);
-  };
-
   const cardByProvider = useMemo(() => Object.fromEntries((cards || []).map((card) => [card.provider, card])), [cards]);
   const otherProviders = PROVIDERS.filter((id) => !['opencode-go', 'goat', 'deepseek'].includes(id));
 
@@ -270,7 +136,6 @@ export default function SettingsPage({
     ['appearance', t('settings_group_appearance')],
     ['sources', t('settings_group_sources')],
     ['desktop', t('settings_group_desktop')],
-    ['benchmark', t('settings_group_benchmark')],
     ['about', t('settings_group_about')],
   ];
 
@@ -367,6 +232,13 @@ export default function SettingsPage({
                   </label>
                 ))}
               </div>
+            </SettingsRow>
+            <SettingsRow title={t('settings_currency')} hint={t('settings_currency_hint')}>
+              <select className="settings-currency-select" value={preferences.currency} onChange={(event) => onPreferenceChange('currency', event.target.value)} aria-label={t('settings_currency')}>
+                {CURRENCIES.map((code) => <option key={code} value={code}>{code} · {new Intl.DisplayNames([zh ? 'zh-CN' : 'en'], { type: 'currency' }).of(code)}</option>)}
+              </select>
+              <p className="settings-currency-rate" role="status">{preferences.currency === 'USD' ? t('settings_currency_usd') : currency?.rate > 0 ? `${t('settings_currency_rate')} 1 USD ≈ ${formatCurrency(1, currency)} · ${currency.date || '—'}${currency.stale ? ` · ${t('settings_currency_stale')}` : ''}` : currency?.error ? t('settings_currency_error') : t('settings_currency_loading')}</p>
+              <small className="settings-currency-source">{t('settings_currency_source')} <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a></small>
             </SettingsRow>
           </SettingsSection>
 
@@ -465,15 +337,6 @@ export default function SettingsPage({
               {sources.length === 0 && <p className="settings-agent-path" role="status">{t('settings_sources_empty')}</p>}
             </div>
 
-            <AgentsSection
-              lang={lang}
-              agents={agents}
-              scanning={agentsScanning}
-              updating={agentUpdating}
-              feedback={agentFeedback}
-              onScan={onScanAgents}
-              onUpdate={onUpdateAgent}
-            />
           </SettingsSection>
 
           <SettingsSection id="desktop" title={t('settings_group_desktop')} hint={t('settings_desktop_hint')}>
@@ -481,7 +344,7 @@ export default function SettingsPage({
               <SettingsChoice label={t('settings_close_behavior')} value={preferences.closeBehavior} onChange={(value) => onPreferenceChange('closeBehavior', value)} options={[{ value: 'tray', label: t('settings_close_tray') }, { value: 'exit', label: t('settings_close_exit') }]} />
             </SettingsRow>
             <SettingsRow title={t('settings_overlay')} hint={t('settings_overlay_hint')}>
-              <button type="button" className="settings-inline-action" onClick={() => { bumpFunCounter('overlay'); sendCommand({ cmd: 'toggleOverlay' }); }}>{t('settings_overlay_toggle')}</button>
+              <button type="button" className="settings-inline-action" onClick={() => sendCommand({ cmd: 'toggleOverlay' })}>{t('settings_overlay_toggle')}</button>
             </SettingsRow>
             <SettingsRow title={t('settings_shortcut')} hint={t('settings_shortcut_hint')}>
               <SettingsChoice label={t('settings_shortcut')} value={preferences.globalShortcut} onChange={(value) => onPreferenceChange('globalShortcut', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
@@ -493,57 +356,15 @@ export default function SettingsPage({
             <SettingsRow title={t('settings_notifications')} hint={t('settings_notifications_hint')}>
               <SettingsChoice label={t('settings_notifications')} value={preferences.notifications} onChange={(value) => onPreferenceChange('notifications', value)} options={[{ value: 'on', label: t('settings_alerts_on') }, { value: 'off', label: t('settings_alerts_off') }]} />
             </SettingsRow>
-            <SettingsRow title={t('settings_pace_alerts')} hint={t('settings_pace_alerts_hint')}>
-              <SettingsChoice label={t('settings_pace_alerts')} value={preferences.paceAlerts} onChange={(value) => onPreferenceChange('paceAlerts', value)} options={[{ value: true, label: t('settings_alerts_on') }, { value: false, label: t('settings_alerts_off') }]} />
-            </SettingsRow>
             <SettingsRow title={t('settings_quiet_hours')} hint={t('settings_quiet_hours_hint')}>
               <SettingsChoice label={t('settings_quiet_hours')} value={preferences.quietHours} onChange={(value) => onPreferenceChange('quietHours', value)} options={[{ value: false, label: t('settings_alerts_off') }, { value: true, label: t('settings_alerts_on') }]} />
             </SettingsRow>
-            <SettingsRow title={t('lan_title')} hint={t('settings_lan_pointer')}>
-              <button type="button" className="settings-inline-action" onClick={onOpenShare}>{t('settings_lan_pointer_action')}</button>
-            </SettingsRow>
-          </SettingsSection>
-
-          <SettingsSection id="benchmark" title={t('settings_group_benchmark')} hint={t('settings_plan_hint')}>
-            <SettingsRow title={t('settings_currency')} hint={t('settings_currency_hint')}>
-              <select className="settings-currency-select" value={preferences.currency} onChange={(event) => onPreferenceChange('currency', event.target.value)} aria-label={t('settings_currency')}>
-                {CURRENCIES.map((code) => <option key={code} value={code}>{code} · {new Intl.DisplayNames([zh ? 'zh-CN' : 'en'], { type: 'currency' }).of(code)}</option>)}
-              </select>
-              <p className="settings-currency-rate" role="status">{preferences.currency === 'USD' ? t('settings_currency_usd') : currency?.rate > 0 ? `${t('settings_currency_rate')} 1 USD ≈ ${formatCurrency(1, currency)} · ${currency.date || '—'}${currency.stale ? ` · ${t('settings_currency_stale')}` : ''}` : currency?.error ? t('settings_currency_error') : t('settings_currency_loading')}</p>
-              <small className="settings-currency-source">{t('settings_currency_source')} <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a></small>
-            </SettingsRow>
-            <form className="settings-plan-form" onSubmit={saveBenchmark}>
-              <label htmlFor="settings-plan-input">{t('settings_monthly')} (USD)</label>
-              <div className="settings-plan-input-wrap">
-                <span>$</span>
-                <input
-                  id="settings-plan-input"
-                  type="number"
-                  min="0.01"
-                  max="1000000"
-                  step="0.01"
-                  required
-                  value={planDraft}
-                  onChange={(event) => { setPlanDraft(event.target.value); setSaved(false); setPlanError(''); }}
-                  aria-label={`${t('settings_monthly')} (USD)`}
-                />
-                <span className="settings-plan-period">/ mo</span>
-              </div>
-              <div className="settings-plan-actions">
-                <button className="settings-save" type="submit">{saved ? t('settings_saved') : t('settings_save')}</button>
-                <button className="settings-reset" type="button" onClick={resetBenchmark} disabled={!isCustom}>{t('settings_default')}</button>
-              </div>
-              {planError && <p className="settings-form-error" role="alert">{planError}</p>}
-            </form>
-            <div className="settings-plan-note">
-              <span className="settings-plan-note-dot" />
-              {isCustom ? `${t('settings_monthly')}: ${fmtCost(benchmark)}` : `${t('settings_default')}: ${fmtCost(benchmark)}`}{preferences.currency !== 'USD' && currency?.rate > 0 ? ` ≈ ${formatCurrency(benchmark, currency)}` : ''}
-            </div>
+            <LanSettings lang={lang} lan={lan} onToggle={onLanToggle} />
           </SettingsSection>
 
           <SettingsSection id="about" title={t('settings_group_about')} hint={t('settings_about_hint')}>
             <SettingsRow title={t('settings_version')}>
-              <span className="settings-version">Token Monitor · v0.1</span>
+              <span className="settings-version">QuotaKeeper · v0.1</span>
             </SettingsRow>
             <SettingsRow title={t('welcome_reopen')} hint={t('welcome_intro')}>
               <button type="button" className="settings-inline-action" onClick={onShowWelcome}>{t('welcome_reopen')}</button>

@@ -15,6 +15,7 @@ pub struct AlertTracker {
     quota: HashMap<(ProviderId, String), u8>,
     expiry: HashMap<ProviderId, u8>,
     pace: HashMap<(ProviderId, String), bool>,
+    quota_only: bool,
 }
 
 #[derive(Default)]
@@ -42,6 +43,10 @@ pub struct PaceAlert {
 }
 
 impl AlertTracker {
+    pub fn quota_only() -> Self {
+        Self { quota_only: true, ..Self::default() }
+    }
+
     /// The first successful snapshot establishes a baseline; later snapshots emit transitions.
     pub fn update(&mut self, snapshot: &Snapshot, now_ms: i64) -> AlertBatch {
         let mut batch = AlertBatch::default();
@@ -68,17 +73,20 @@ impl AlertTracker {
             }
             for limit in &report.limits {
                 let key = (provider, limit.label.clone());
-                let title = format!("{name} · {}", limit.label);
                 let level = level_for(limit.used_pct);
                 let prior = self.quota.get(&key).copied().unwrap_or(0);
                 if self.initialized
                     && let Some(event) = transition(prior, level)
                 {
                     batch.quota.push(QuotaAlert {
-                        title: title.clone(),
+                        title: format!("{name} · {}", limit.label),
                         used_pct: limit.used_pct,
                         event,
                     });
+                }
+                if self.quota_only {
+                    quota.insert(key, level);
+                    continue;
                 }
                 quota.insert(key.clone(), level);
 
@@ -90,7 +98,7 @@ impl AlertTracker {
                     && let (Some(value), Some(exhaust_in_ms)) = (forecast, exhaust_in_ms)
                 {
                     batch.pace.push(PaceAlert {
-                        title,
+                        title: format!("{name} · {}", limit.label),
                         delta_points: value.delta_points,
                         exhaust_in_ms,
                     });
@@ -337,6 +345,18 @@ mod tests {
         );
         assert!(matches!(reset.quota[0].event, ToastEvent::Reset));
         assert!(reset.expiry.is_empty());
+    }
+
+    #[test]
+    fn quota_only_tracker_keeps_threshold_and_expiry_alerts_without_forecasts() {
+        let now = 1_790_000_000_000;
+        let mut tracker = AlertTracker::quota_only();
+        tracker.update(&snapshot(20.0, Some(now + 8 * 86_400_000), QuotaSource::CodexAppServer), now);
+        let alerts = tracker.update(&snapshot(85.0, Some(now + 7 * 86_400_000), QuotaSource::CodexAppServer), now);
+        assert_eq!(alerts.quota.len(), 1);
+        assert!(matches!(alerts.quota[0].event, ToastEvent::Warn));
+        assert_eq!(alerts.expiry[0].provider, "Codex");
+        assert!(alerts.pace.is_empty());
     }
 
     #[test]

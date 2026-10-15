@@ -1,0 +1,23 @@
+ts	phase	decision	why	evidence	result
+2026-10-15T00:00:00Z	frame	收拢到订阅余量和本机Token消耗两项任务	用户明确要求做减法并授权自主实施	README.md;gui/frontend/src/main.jsx	open
+2026-10-15T05:29:40.359Z	frame	首行时间仅代表任务日期，以本行记录实际决策时刻	首行的零点不是实测时间	.audit/product-focus.tsv:2	corrected
+2026-10-15T05:29:40.359Z	design	选择额度页加本机Token摘要，Token历史独立筛选	两类数据来自不同来源，首屏同时可见且不误归属	docs/research/product-focus-2026-10-15.md	implementation started
+2026-10-15T05:29:40.359Z	baseline	保存改前界面并运行现有测试	先确认重复读数和界面干扰再删减	artifact://4;examples/quota_smoke.rs	frontend 39 passed; core 200 passed,4 ignored; baseline screenshot viewed
+2026-10-15T05:36:42.665Z	shell	取消默认欢迎弹窗并允许采集前进入设置	首次使用必须可以直接配置凭据	gui/frontend/src/main.jsx;gui/frontend/src/ui-data.js	browser observed settingsBeforeData true and four settings groups
+2026-10-15T05:36:42.665Z	payload	删掉未使用的排行榜和成就推送字段及重复GOAT统计请求	页面删减同步减少序列化分配和远端请求	gui/src/ipc.rs;gui/src/refresh.rs	implemented;native smoke pending
+2026-10-15T05:38:07.519Z	baseline	更正第5行证据，quota_smoke尚未运行	基线仅包含测试结果和浏览器截图，不能用示例源码证明执行	artifact://4;C:/Users/Jerry/AppData/Local/Temp/omp-sshots-15a6cebe9448b6fe.webp	frontend 39 passed;baseline screenshot observed; live collector pending
+2026-10-15T05:43:50.793Z	collection	实跑本机配额和Token采集	确认精简界面仍有真实数据可显示	examples/quota_smoke.rs;examples/ledger_smoke.rs	quota4 live,5 missing;ledger5 sources active,Claude has no session files
+2026-10-15T05:43:50.793Z	quota	修正缺失百分比被Number(null)转换成满额	未知值必须保持未知	gui/frontend/src/quota-data.test.mjs	bug reproduced before;9 quota tests passed after
+2026-10-15T05:43:50.793Z	native	额度通知走不计算预测的tracker模式	不再为已删除的预测提醒分配数据	src/ui/notify.rs;gui/src/main.rs	core194 passed,2 ignored;GUI17 passed
+2026-10-15T06:19:08.226Z	final-tests	完成最终代码行为测试	区分最终计数和早期运行	artifact://109;cargo test --quiet;GUI cargo test	frontend30 passed;core192 passed,2 ignored;GUI17 passed
+2026-10-15T06:19:08.226Z	review-fixes	修复未知窗口首屏误报零及未知筛选仍可导出	未知读数与确认零必须一致	gui/frontend/src/LocalUsageSummary.jsx;gui/frontend/src/UsageDashboard.jsx;agent://FocusStandardsReview	before summary0/export enabled;after unknown/export disabled;confirmed zero remains exportable;review closed
+2026-10-15T06:19:08.226Z	native-layout	修复底部导航遮挡未接入展开按钮	内容flex压缩使已有底部留白失效	gui/frontend/src/focus.css;native CDP click	before blocked by nav.dock;after6 rows open,summary bottom663.75<dock top678
+2026-10-15T06:19:08.226Z	final-build	构建并运行最终嵌入资源	最后的标题、完整性和布局修正均进入exe	cargo build --release;native CDP main-Dme0tO6f.js;.audit/focus-final-native-zh.png	release built;4 live cards;fresh data;failed Claude unknown and export disabled;0 runtime JS errors
+2026-10-15T06:19:08.226Z	filter-proof	原生本月Codex统计逐项核对本地记录	过滤必须覆盖所有Token桶	gui-last-push.json selected rows;native bucket text	input15738356,output1549011,cache_read376550400,cache_write0;exact match
+2026-10-15T06:19:08.226Z	ui-proof	验证英文、窄窗、主题和无数据设置入口	已补齐此前待验证项	browser720px/420px;native English;.audit/focus-final-native-en.png	all3 pages no horizontal overflow;Cassette checked;cold settings visible before push;native language restored to Chinese
+2026-10-15T06:19:08.226Z	lan-proof	实开用户已启用的局域网看板	保留现有开关状态并核对真实只读展示	live /api/summary;420px browser page	4 cards;live status;no horizontal overflow;0 controls;no JS errors
+2026-10-15T06:19:08.226Z	attention	区分自动化脚本错误和产品错误	第一轮注入QA参数错误产生一次页面异常，未当作产品通过证据	final fresh native process errors.entries=[]	resolved by corrected observation;final process clean
+2026-10-15T06:19:08.226Z	attention	保留用户主题改动并记录包体积提示	不覆盖用户已有样式；不把构建警告称为失败	gui/frontend/src/app.css;gui/frontend/src/themes.css;Vite build output	user files untouched;some legacy CSS retained;main JS674kB warning remains
+2026-10-15T06:24:16.990Z	review-close	完成标准、需求和审计复核	两项数据口径问题已修复并获独立复核	agent://FocusStandardsReview;agent://FocusSpecTrailReview	closed;no factual misstatement;rows12-20 are one batch append timestamp
+2026-10-15T06:24:16.990Z	handoff	关闭验证实例并启动普通桌面程序	交付最终exe，移除调试入口与临时脚本	PID34116 MainWindowTitle=QuotaKeeper,Responding=True;release exe	ordinary app running;debug instance exited0;preview stopped;baseline.mjs/start-native.ps1 removed
+2026-10-15T06:24:16.990Z	models	子代理优先使用Grok4.7	沿用用户指定模型偏好	FocusStandardsReview model self-report magpie/grok/grok-4.7	Grok4.7 reviewer used;root remains GPT

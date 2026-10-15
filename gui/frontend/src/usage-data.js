@@ -3,6 +3,8 @@ export const EMPTY_USAGE_AGG = Object.freeze({
   reasoning: 0, messages: 0, cost: 0, total: 0,
 });
 
+const AGG_KEYS = Object.keys(EMPTY_USAGE_AGG);
+
 export function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -22,33 +24,47 @@ export function usageBounds(range, today = localDate(), customStart = '', custom
 }
 
 function addAgg(target, source) {
-  for (const key of Object.keys(EMPTY_USAGE_AGG)) target[key] += Number(source?.[key] || 0);
+  for (const key of AGG_KEYS) target[key] += Number(source?.[key] || 0);
 }
 
 function freshAgg() { return { ...EMPTY_USAGE_AGG }; }
+
+function byClientRows(clientMap) {
+  return [...clientMap.values()].sort((a, b) => b.agg.total - a.agg.total || b.agg.messages - a.agg.messages || String(a.client).localeCompare(String(b.client)));
+}
 
 export function aggregateUsage(rows, bounds, agent = '') {
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(bounds.start) && /^\d{4}-\d{2}-\d{2}$/.test(bounds.end) && bounds.start <= bounds.end;
   const total = freshAgg();
   const dayMap = new Map();
+  const clientMap = new Map();
   let unpriced = 0;
-  if (!valid) return { valid: false, total, days: [], unpriced };
+  const empty = { valid: false, total, days: [], byClient: [], unpriced };
+  if (!valid) return empty;
   const count = Math.round((new Date(`${bounds.end}T12:00:00`) - new Date(`${bounds.start}T12:00:00`)) / 86_400_000) + 1;
-  if (!Number.isFinite(count) || count < 1 || count > 366) return { valid: false, total, days: [], unpriced };
+  if (!Number.isFinite(count) || count < 1 || count > 366) return empty;
 
   for (const row of rows || []) {
     if (row.date < bounds.start || row.date > bounds.end || (agent && row.client !== agent)) continue;
     addAgg(total, row.agg);
-    unpriced += Number(row.unpriced_messages || 0);
+    const rowUnpriced = Number(row.unpriced_messages || 0);
+    unpriced += rowUnpriced;
     let day = dayMap.get(row.date);
     if (!day) {
       day = { date: row.date, agg: freshAgg(), agents: new Map(), unpriced: 0 };
       dayMap.set(row.date, day);
     }
     addAgg(day.agg, row.agg);
-    day.unpriced += Number(row.unpriced_messages || 0);
+    day.unpriced += rowUnpriced;
     if (!day.agents.has(row.client)) day.agents.set(row.client, freshAgg());
     addAgg(day.agents.get(row.client), row.agg);
+    let client = clientMap.get(row.client);
+    if (!client) {
+      client = { client: row.client, agg: freshAgg(), unpriced: 0 };
+      clientMap.set(row.client, client);
+    }
+    addAgg(client.agg, row.agg);
+    client.unpriced += rowUnpriced;
   }
 
   const days = [];
@@ -56,7 +72,7 @@ export function aggregateUsage(rows, bounds, agent = '') {
     const date = dateOffset(bounds.start, index);
     days.push(dayMap.get(date) || { date, agg: freshAgg(), agents: new Map(), unpriced: 0 });
   }
-  return { valid: true, total, days, unpriced };
+  return { valid: true, total, days, byClient: byClientRows(clientMap), unpriced };
 }
 
 export function aggregateIntraday(rows, date, agent = '') {
@@ -81,34 +97,29 @@ export function usageMetric(agg, metric) {
   return metric === 'cost' ? agg.cost : metric === 'messages' ? agg.messages : agg.total;
 }
 
-// 缓存命中率:input 口径不含缓存(采集侧已扣),命中占全部提示词的比例.
-// 无输入(如纯输出)或无数据返回 null,由调用方显示占位.
-export function cacheHitRate(agg) {
-  const prompt = Number(agg?.input || 0) + Number(agg?.cache_read || 0);
-  if (prompt <= 0) return null;
-  return Number(agg.cache_read || 0) / prompt;
+const COST_TOLERANCE = 1e-6;
+
+export function seriesMatchesTotal(buckets, total, unpriced = 0) {
+  const rolled = freshAgg();
+  let rolledUnpriced = 0;
+  for (const bucket of buckets || []) {
+    addAgg(rolled, bucket?.agg);
+    rolledUnpriced += Number(bucket?.unpriced || 0);
+  }
+  return rolledUnpriced === Number(unpriced || 0) && AGG_KEYS.every((key) => {
+    const actual = rolled[key];
+    const expected = Number(total?.[key] || 0);
+    return key === 'cost' ? Math.abs(actual - expected) <= COST_TOLERANCE : actual === expected;
+  });
 }
 
-// 时长展示:亚秒给毫秒,10 秒内一位小数,再往上取整秒.
-export function fmtDurationMs(ms) {
-  if (ms == null || ms <= 0) return '—';
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 1000)}s`;
-}
-
-// 速度榜行:tok/s = 计时段合计输出 / 计时总长;ttft 只对有 ttft 样本的调用取均值.
-// 仅收有计时样本的模型,按 tok/s 降序(最快在前才有榜单的趣味).
-export function speedBoard(models, limit = 6) {
-  const timed = (models || [])
-    .filter((m) => m.speed && m.speed.duration_ms_total > 0 && m.speed.timed_calls > 0)
-    .map((m) => ({
-      model: m.model,
-      timedCalls: m.speed.timed_calls,
-      ttftMs: m.speed.ttft_samples > 0 ? m.speed.ttft_ms_total / m.speed.ttft_samples : null,
-      tokPerSec: m.speed.output_total / (m.speed.duration_ms_total / 1000),
-    }))
-    .sort((a, b) => b.tokPerSec - a.tokPerSec);
-  const rest = (models || []).length - timed.length;
-  return { rows: timed.slice(0, limit), unTimed: Math.max(0, rest) };
+export function usageCoverage(sources, agent, summary) {
+  if (!summary?.valid) return { state: 'invalid', failed: [] };
+  if (!Array.isArray(sources) || sources.length === 0) return { state: 'unknown', failed: [] };
+  const relevant = agent ? sources.filter((source) => source?.client === agent) : sources;
+  if (relevant.length === 0) return { state: 'unknown', failed: [] };
+  const failed = relevant.filter((source) => source?.error).map((source) => source.client);
+  const recorded = Number(summary.total?.total || 0) !== 0 || Number(summary.total?.messages || 0) !== 0;
+  if (failed.length === 0) return { state: recorded ? 'complete' : 'empty', failed };
+  return { state: recorded ? 'partial' : 'unknown', failed };
 }

@@ -7,7 +7,6 @@
 //! (window.external.invoke)。前端资源由 include_dir 编入,自定义协议
 //! `app://` 提供；GNU 构建另需同目录的 WebView2Loader.dll（build.rs 自动复制）。
 
-pub mod agents;
 pub mod cache;
 pub mod desktop;
 pub mod export;
@@ -37,10 +36,8 @@ use refresh::Refreshed;
 #[serde(rename_all = "camelCase")]
 struct IpcCommand {
     cmd: String,
-    amount: Option<f64>,
     enabled: Option<bool>,
     quiet_hours: Option<bool>,
-    pace_alerts: Option<bool>,
     close_behavior: Option<String>,
     global_shortcut: Option<bool>,
     autostart: Option<bool>,
@@ -55,7 +52,6 @@ struct IpcCommand {
     project: Option<String>,
     provider: Option<String>,
     models: Option<Vec<String>>,
-    image: Option<String>,
 }
 
 enum UserEvent {
@@ -64,7 +60,6 @@ enum UserEvent {
     Quit,
     SetNotifications {
         enabled: bool,
-        pace_alerts: bool,
         quiet_hours: bool,
         lang: u8,
     },
@@ -78,18 +73,12 @@ enum UserEvent {
     GlobalShortcut,
     ShortcutStatus(bool),
     Export(String, export::ExportSelection),
-    AgentsScanned(String),
-    AgentUpdateFinished {
-        results: Vec<(String, bool, String)>,
-        payload: String,
-    },
     OverlayToggle,
     OverlayHide,
     OverlayDrag,
     OverlaySwitch(i32),
     ProviderKeyReveal(String),
     PlanModelsImport(String, Vec<String>),
-    SaveShareImage(String),
     SetLanDashboard(bool),
 }
 
@@ -269,25 +258,12 @@ fn main() -> anyhow::Result<()> {
             };
             match command.cmd.as_str() {
                 "refresh" => refresh::spawn(ipc_tx.clone()),
-                "setPlanBenchmark" => {
-                    if let Some(amount) = command.amount
-                        && quotakeeper::settings::save_monthly_plan_benchmark(amount).is_ok()
-                    {
-                        refresh::spawn_ledger(ipc_tx.clone());
-                    }
-                }
-                "resetPlanBenchmark" => {
-                    if quotakeeper::settings::reset_monthly_plan_benchmark().is_ok() {
-                        refresh::spawn_ledger(ipc_tx.clone());
-                    }
-                }
                 "quit" => {
                     let _ = ipc_proxy.send_event(UserEvent::Quit);
                 }
                 "setNotifications" => {
                     let _ = ipc_proxy.send_event(UserEvent::SetNotifications {
                         enabled: command.enabled.unwrap_or(false),
-                        pace_alerts: command.pace_alerts.unwrap_or(false),
                         quiet_hours: command.quiet_hours.unwrap_or(false),
                         lang: command.lang.unwrap_or(0),
                     });
@@ -344,7 +320,6 @@ fn main() -> anyhow::Result<()> {
                         let _ = ipc_proxy.send_event(UserEvent::Export(format, selection));
                     }
                 }
-                "scanAgents" => agents::scan(ipc_proxy.clone()),
                 "toggleOverlay" => {
                     let _ = ipc_proxy.send_event(UserEvent::OverlayToggle);
                 }
@@ -362,18 +337,8 @@ fn main() -> anyhow::Result<()> {
                         let _ = ipc_proxy.send_event(UserEvent::PlanModelsImport(provider, models));
                     }
                 }
-                "saveShareImage" => {
-                    if let Some(image) = command.image {
-                        let _ = ipc_proxy.send_event(UserEvent::SaveShareImage(image));
-                    }
-                }
                 "setLanDashboard" => {
                     let _ = ipc_proxy.send_event(UserEvent::SetLanDashboard(command.enabled.unwrap_or(false)));
-                }
-                "runAgentUpdate" => {
-                    if let Some(agent) = command.agent.as_deref().filter(|id| !id.is_empty()) {
-                        agents::update(ipc_proxy.clone(), agent.to_string());
-                    }
                 }
                 _ => {}
             }
@@ -390,9 +355,8 @@ fn main() -> anyhow::Result<()> {
     let mut overlay_dirty = true;
     let mut latest_snapshot = fallback_snapshot();
     let mut quota_error = None;
-    let mut alert_tracker = quotakeeper::ui::notify::AlertTracker::default();
+    let mut alert_tracker = quotakeeper::ui::notify::AlertTracker::quota_only();
     let mut notify_enabled = false;
-    let mut pace_alerts_enabled = false;
     let mut quiet_hours = false;
     let mut close_behavior = String::from("tray");
     let mut notify_lang = 0;
@@ -400,7 +364,6 @@ fn main() -> anyhow::Result<()> {
     let mut latest_quota_checked_at_ms = 0_u64;
     let mut latest_ledger: Option<std::sync::Arc<quotakeeper::ledger::LedgerReport>> = None;
     let mut latest_ledger_fetched_at_ms = 0_u64;
-    let mut latest_goat_usage = None::<quotakeeper::goat::UsageSummary>;
     let mut latest_deepseek_balance = quotakeeper::deepseek_balance::BalanceState::MissingKey;
     let webview = std::cell::RefCell::new(webview);
     let mut overlay: Option<(tao::window::Window, wry::WebView)> = None;
@@ -486,12 +449,10 @@ fn main() -> anyhow::Result<()> {
             }
             Event::UserEvent(UserEvent::SetNotifications {
                 enabled,
-                pace_alerts,
                 quiet_hours: quiet,
                 lang,
             }) => {
                 notify_enabled = enabled;
-                pace_alerts_enabled = pace_alerts;
                 quiet_hours = quiet;
                 notify_lang = lang;
             }
@@ -623,17 +584,6 @@ fn main() -> anyhow::Result<()> {
                     payload
                 ));
             }
-            Event::UserEvent(UserEvent::SaveShareImage(image)) => {
-                let status = match export::save_png(&image) {
-                    Ok(Some(_)) => "saved",
-                    Ok(None) => "canceled",
-                    Err(_) => "error",
-                };
-                let message = serde_json::to_string(status).unwrap_or_else(|_| "\"error\"".into());
-                let _ = webview
-                    .borrow()
-                    .evaluate_script(&format!("window.__onShareImageSaved?.({message})"));
-            }
             Event::UserEvent(UserEvent::SetLanDashboard(enabled)) => {
                 let _ = quotakeeper::settings::save_lan_dashboard_enabled(enabled);
                 lan_server = None; // Drop 即停
@@ -659,21 +609,6 @@ fn main() -> anyhow::Result<()> {
                 let _ = webview
                     .borrow()
                     .evaluate_script(&format!("window.__onExportResult?.({message})"));
-            }
-            Event::UserEvent(UserEvent::AgentsScanned(payload)) => {
-                let _ = webview
-                    .borrow()
-                    .evaluate_script(&format!("window.__onAgentsScanned?.({payload});"));
-            }
-            Event::UserEvent(UserEvent::AgentUpdateFinished {
-                results,
-                payload,
-                ..
-            }) => {
-                let report = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
-                let _ = webview.borrow().evaluate_script(&format!(
-                    "window.__onAgentUpdateResult?.({{results:{report}}});window.__onAgentsScanned?.({payload});"
-                ));
             }
             // 本地用量每 5 秒刷新,配额每 60 秒刷新。
             Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
@@ -751,17 +686,6 @@ fn main() -> anyhow::Result<()> {
                                             );
                                         }
                                     }
-                                    if pace_alerts_enabled {
-                                        for alert in alerts.pace {
-                                            let minutes = alert.exhaust_in_ms / 60_000;
-                                            let message = if notify_lang == 1 {
-                                                format!("Current pace is {:.0} points ahead; quota may run out in {minutes} min", alert.delta_points)
-                                            } else {
-                                                format!("比匀速快 {:.0} 个百分点；预计 {minutes} 分钟后耗尽", alert.delta_points)
-                                            };
-                                            quotakeeper::ui::notify::toast(&alert.title, &message);
-                                        }
-                                    }
                                 }
                                 latest_snapshot = snapshot;
                                 lan::publish(&latest_snapshot);
@@ -785,9 +709,6 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
-                    if let Some(usage) = r.goat_usage {
-                        latest_goat_usage = usage;
-                    }
                     if let Some(balance) = r.deepseek_balance {
                         latest_deepseek_balance = balance;
                     }
@@ -803,7 +724,6 @@ fn main() -> anyhow::Result<()> {
                             quota_error.clone(),
                             &latest_snapshot,
                             ledger,
-                            latest_goat_usage,
                             latest_deepseek_balance.clone(),
                         );
                         let js = format!("window.__onPush && window.__onPush({payload});");

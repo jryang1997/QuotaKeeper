@@ -9,7 +9,7 @@
 cargo test                                   # 核心 crate 测试
 cargo test --manifest-path gui/Cargo.toml    # GUI 壳测试
 cd gui/frontend && npm ci && npm run build   # GUI 前端构建
-cd gui/frontend && npm test                   # 面板布局、偏好、通信契约测试
+cd gui/frontend && npm test                   # 配额边界、用量筛选、偏好和金额格式
 ```
 
 ## 提交规矩
@@ -24,7 +24,7 @@ cd gui/frontend && npm test                   # 面板布局、偏好、通信�
 - 新配额卡放 `src/<name>_quota.rs`,产出 `model::Report`;在 `model::ProviderId::all()`、`backend::fetch_snapshot`、`gui/src/ipc.rs` 三处接线,Missing 卡必须给出准确的双语修复提示(`missing_hint`)。
 - 所有出站 HTTP 走 `crate::http::get/post`(统一系统代理),必须带超时。
 - UI 文案集中在 `src/ui/i18n.rs`,中英双语缺一不可。
-- GUI 页面分别在 `gui/frontend/src/*Page.jsx`;共享显示文案与格式在 `ui-data.js`。面板布局规则与存储校验在 `panel-layout.js`,面板内容在 `PanelBodies.jsx`,WebView 消息统一走 `gui-bridge.js`。新增交互先在所属模块修改,不要把逻辑塞回 `main.jsx`。
+- GUI 页面分别在 `gui/frontend/src/*Page.jsx`；额度显示投影在 `quota-data.js`，日期和采集源聚合在 `usage-data.js`。共享文案与格式在 `ui-data.js`，WebView 消息统一走 `gui-bridge.js`。采用固定阅读布局，不恢复模块编辑、成就或分享图片。
 - 不修改用户 CLI 的自有状态文件;一切登录态只读。
 
 ## 文档

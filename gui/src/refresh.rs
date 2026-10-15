@@ -1,21 +1,16 @@
-//! 刷新引擎:GUI 侧后台采集,复用主 crate 的 backend/goat/ledger。
-//!
 //! 配额与用量分开采集,经 mpsc 回传,主线程合并最新快照后推给 WebView。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use quotakeeper::{backend, deepseek_balance, goat, ledger, model};
+use quotakeeper::{backend, deepseek_balance, ledger, model};
 
 use model::Snapshot;
 
 pub struct Refreshed {
     pub fetched_at_ms: u64,
     pub quota: Option<Result<Snapshot, String>>,
-    /// 配额轮询时的 GOAT 官方账期用量;None = 本次未采集(账本轮询).
-    /// 内层 Some/None = 官方汇总成功/失败(失败时前端回退本机口径).
-    pub goat_usage: Option<Option<goat::UsageSummary>>,
     pub deepseek_balance: Option<deepseek_balance::BalanceState>,
     pub ledger: Option<Box<ledger::LedgerReport>>,
 }
@@ -60,13 +55,10 @@ pub fn spawn_quota(tx: mpsc::Sender<Refreshed>) {
     std::thread::spawn(move || {
         loop {
             let quota = backend::fetch_snapshot().map_err(|e| e.to_string());
-            // 无 key 时本地秒失败,不发网络请求;失败置 None 由前端回退本机口径.
-            let goat_usage = Some(goat::fetch_usage_summary().ok());
             let deepseek_balance = Some(deepseek_balance::fetch());
             let _ = tx.send(Refreshed {
                 fetched_at_ms: now_ms(),
                 quota: Some(quota),
-                goat_usage,
                 deepseek_balance,
                 ledger: None,
             });
@@ -92,7 +84,6 @@ pub fn spawn_ledger(tx: mpsc::Sender<Refreshed>) {
         let _ = tx.send(Refreshed {
             fetched_at_ms: now_ms(),
             quota: None,
-            goat_usage: None,
             deepseek_balance: None,
             ledger: Some(Box::new(rep)),
         });

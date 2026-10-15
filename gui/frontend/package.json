@@ -11,9 +11,7 @@
   "dependencies": {
     "@astryxdesign/core": "0.6.3",
     "@astryxdesign/theme-neutral": "0.6.3",
-    "@zumer/snapdom": "^3.2.0",
     "motion": "^13.4.4",
-    "qrcode-generator": "^2.0.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -51,44 +51,50 @@
 }
 
 /* --------------------------------------------------------------------------
-   2. 宫墙 PALACE — 禁城漆器:深漆红黑底、鎏金主色、玉青/藕荷/朱砂辅色
+   2. 宫墙 PALACE — 以朱红为绝对主角的紫禁城夜巡配色(2026-10 重设计,参考故宫
+   红墙实测与《中国传统色》通行色卡:宫墙红 #B43844、朱砂 #FF4C00、琉璃黄
+   #F2BE45、石青 #1685A9、石绿、汉白玉暖白)。
+   层次 = 暗朱墙体做底、朱砂做主强调、金琉璃/石青/石绿彩画作辅、汉白玉做文字。
    -------------------------------------------------------------------------- */
 .app[data-palette='palace'] {
-  --color-background-body: #1e0f10;
-  --color-background-card: #2b1617;
-  --color-background-surface: #341c1d;
-  --color-background-muted: #241113;
-  --color-text-primary: #f3e8d4;
-  --color-text-secondary: #b59d80;
-  --color-text-blue: #d9a852;      /* 鎏金 */
-  --color-text-green: #7fb896;     /* 玉青 */
-  --color-text-purple: #b48ac8;    /* 藕荷 */
-  --color-text-orange: #e0604a;    /* 朱砂 */
-  --color-success: #7fb896;
-  --color-warning: #e6b45a;
-  --color-error: #e2584d;
-  --color-border: #4a2b28;
-  --color-border-emphasized: #8f6a3e;
-  --color-overlay-hover: #e9c47c12;
-  --color-overlay-pressed: #e9c47c24;
-  --sum-purple: #b48ac8;
-  --sum-orange: #e0a44e;
+  --color-background-body: #2E0F0A;
+  --color-background-card: #3C140E;
+  --color-background-surface: #471A12;
+  --color-background-muted: #350F0B;
+  --color-text-primary: #F6EDE1;   /* 汉白玉 */
+  --color-text-secondary: #B99284; /* 褪色陶土 */
+  --color-text-blue: #F2563E;      /* 朱砂:主强调(宫墙的朱红亮化) */
+  --color-text-green: #58B583;     /* 石绿:彩画撞色 */
+  --color-text-purple: #4FA8CD;    /* 石青:蓝铜矿 */
+  --color-text-orange: #F2BE45;    /* 琉璃黄/明黄 */
+  --color-success: #58B583;
+  --color-warning: #EDC25E;
+  --color-error: #D9382A;          /* 胭脂/辰砂深红 */
+  --color-border: #56231B;
+  --color-border-emphasized: #B4503C;
+  --color-overlay-hover: #F2563E12;
+  --color-overlay-pressed: #F2563E24;
+  --sum-purple: #4FA8CD;
+  --sum-orange: #F2BE45;
+  /* 顶部一抹琉璃金辉光(夕阳打在瓦上),右下朱红余温;红墙极轻颗粒纹理 */
   background:
-    radial-gradient(ellipse 62% 44% at 50% -14%, rgba(217, 168, 82, 0.1), transparent 58%),
-    radial-gradient(ellipse 46% 36% at 88% 112%, rgba(224, 96, 74, 0.07), transparent 55%),
+    radial-gradient(ellipse 62% 44% at 50% -14%, rgba(242, 190, 69, 0.10), transparent 58%),
+    radial-gradient(ellipse 46% 36% at 88% 112%, rgba(242, 86, 62, 0.07), transparent 55%),
+    repeating-linear-gradient(0deg, rgba(255, 235, 215, 0.014) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 4px),
     var(--color-background-body);
 }
 
 /* 卡片顶缘鎏金发丝线,漆器描金 */
 .app[data-palette='palace'] :is(.quota-card, .panel-card, .settings-card, .usage-summary-card, .quota-overview) {
   box-shadow:
-    inset 0 1px 0 rgba(217, 168, 82, 0.16),
+    inset 0 1px 0 rgba(242, 190, 69, 0.15),
     0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .app[data-palette='palace'] {
-  --glass-highlight: rgba(233, 196, 124, 0.26);
-  --glass-highlight-soft: rgba(233, 196, 124, 0.1);
+  --glass-highlight: rgba(246, 237, 225, 0.24);
+  --glass-highlight-soft: rgba(246, 237, 225, 0.1);
 }
 
 /* --------------------------------------------------------------------------

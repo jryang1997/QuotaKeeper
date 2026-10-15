@@ -72,14 +72,13 @@
 }
 
 /* 核心标题与大数字磷光微光 */
-.app[data-palette='cassette'] :is(.page-title, .quota-head h2, .usage-stat-value, .share-kpi, .ach-title, .eyebrow) {
+.app[data-palette='cassette'] :is(.page-title, .quota-head h2, .usage-stat-value, .eyebrow) {
   text-shadow: 0 0 7px rgba(0, 255, 102, 0.42);
   letter-spacing: 0.03em;
 }
 
 /* ---------- 3. 像素切角与边框系统 (Stepped Pixel Borders) ---------- */
 
-/* 消除所有圆角，统一为硬朗像素与 4px 阶梯切角 (排除 .panel-card 避免破坏绝对定位网格) */
 .app[data-palette='cassette'] :is(
   .quota-card,
   .usage-surface,
@@ -87,10 +86,7 @@
   .quota-strip,
   .quota-overview,
   .glass-panel,
-  .share-block,
   .lan-board,
-  .ach-card,
-  .ach-tile,
   .welcome-panel,
   .command-palette-modal
 ) {
@@ -110,103 +106,12 @@
   position: relative;
 }
 
-/* Bento 看板卡片：必须保持 position: absolute 锁死网格坐标，绝不能受 relative 污染造成阶梯散落 */
-.app[data-palette='cassette'] .panel-card {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  border-radius: 0 !important;
-  clip-path: polygon(
-    0 6px, 6px 0,
-    calc(100% - 6px) 0, 100% 6px,
-    100% calc(100% - 6px), calc(100% - 6px) 100%,
-    6px 100%, 0 calc(100% - 6px)
-  ) !important;
-  border: 1px solid #1a4227 !important;
-  background: var(--color-background-card) !important;
-  box-shadow:
-    inset 1px 1px 0 rgba(0, 255, 102, 0.16),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.7),
-    0 4px 16px rgba(0, 0, 0, 0.6) !important;
-}
-
-.app[data-palette='cassette'] .module-board.is-narrow .panel-card {
-  position: relative !important;
-  left: auto !important;
-  top: auto !important;
-}
-
-/* 拖拽与缩放中的高能反馈 */
-.app[data-palette='cassette'] .panel-card.is-dragging {
-  z-index: 50 !important;
-  cursor: grabbing !important;
-  will-change: transform !important;
-  border-color: #00ff66 !important;
-  box-shadow:
-    0 0 24px rgba(0, 255, 102, 0.45),
-    0 16px 40px rgba(0, 0, 0, 0.95),
-    inset 1px 1px 0 #00ff66 !important;
-}
-
-.app[data-palette='cassette'] .panel-card.is-resizing {
-  z-index: 50 !important;
-  border-color: #ffb800 !important;
-  box-shadow:
-    0 0 20px rgba(255, 184, 0, 0.4),
-    0 16px 40px rgba(0, 0, 0, 0.95),
-    inset 1px 1px 0 #ffb800 !important;
-}
-
-/* 拖拽落点幽灵框与对齐吸附线 */
-.app[data-palette='cassette'] .panel-ghost {
-  border-radius: 0 !important;
-  border: 2px dashed #00ff66 !important;
-  background: rgba(0, 255, 102, 0.09) !important;
-  box-shadow: 0 0 16px rgba(0, 255, 102, 0.25), inset 0 0 10px rgba(0, 255, 102, 0.12) !important;
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  z-index: 20 !important;
-}
-
-.app[data-palette='cassette'] .panel-align-v,
-.app[data-palette='cassette'] .panel-align-h {
-  border-color: #00ff66 !important;
-  opacity: 0.9 !important;
-  box-shadow: 0 0 8px #00ff66 !important;
-}
-
-/* 缩放手柄：卡带机硬朗斜纹指示格 */
-.app[data-palette='cassette'] .panel-resize {
-  border-radius: 0 !important;
-  width: 28px !important;
-  height: 28px !important;
-  cursor: nwse-resize !important;
-  touch-action: none !important;
-}
-
-.app[data-palette='cassette'] .panel-resize::after {
-  opacity: 0.75 !important;
-  background: repeating-linear-gradient(135deg, #00ff66 0px, #00ff66 2px, transparent 2px, transparent 4px) !important;
-  width: 10px !important;
-  height: 10px !important;
-  right: 5px !important;
-  bottom: 5px !important;
-}
-
-.app[data-palette='cassette'] .panel-card:hover .panel-resize::after,
-.app[data-palette='cassette'] .panel-resize:focus-visible::after {
-  opacity: 1 !important;
-  filter: drop-shadow(0 0 4px #00ff66) !important;
-}
 
 /* 卡片悬浮：磷光激活 */
 .app[data-palette='cassette'] :is(
   .quota-card,
-  .panel-card,
   .usage-surface,
-  .settings-card,
-  .ach-card
+  .settings-card
 ):hover {
   border-color: #00ff66 !important;
   box-shadow:
@@ -247,11 +152,6 @@
   .nav-item,
   .dock-item,
   .usage-segment button,
-  .quota-strip-row,
-  .settings-agent-upgrade,
-  .settings-agents-toolbar button,
-  .share-tabs button,
-  .share-palettes button,
   .lan-board-switch button
 ) {
   border-radius: 0 !important;

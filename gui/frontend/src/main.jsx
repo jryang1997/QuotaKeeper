@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
@@ -8,15 +8,16 @@ import './usage-dashboard.css';
 import './ia.css';
 import './glass.css';
 import './themes.css';
+import './focus.css';
 import './cassette.css';
-import { PROVIDERS, SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
+import { SOURCE_PATHS, SOURCE_REPAIR, QUOTA_REPAIR, STR, fmtRel } from './ui-data.js';
 import QuotaPage from './QuotaPage.jsx';
-import UsageDashboard, { USAGE_MODULE_LABELS } from './UsageDashboard.jsx';
+import UsageDashboard from './UsageDashboard.jsx';
+import LocalUsageSummary from './LocalUsageSummary.jsx';
 import SettingsPage from './SettingsPage.jsx';
 import { DEFAULT_GUI_PREFERENCES, THEME_ORDER, readGuiPreferences, saveGuiPreferences } from './gui-preferences.js';
 import { fetchExchangeRate, readExchangeRates } from './currency.js';
 import { registerNativeCallbacks, sendCommand } from './gui-bridge.js';
-import SharePage from './SharePage.jsx';
 import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
 import { MotionProvider, PopoverSurface, useMotionPreference, SelectionGroup, SelectionHighlight } from './ui-motion.jsx';
 import { CONTROL_SPRING, FADE } from './motion-tuning.js';
@@ -25,17 +26,12 @@ import { Text } from '@astryxdesign/core/Text';
 import { Button } from '@astryxdesign/core/Button';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Toast } from '@astryxdesign/core/Toast';
-import { AchievementToasts, AchievementsModal, useAchievements } from './Achievements.jsx';
-import { bumpFunCounter } from './fun-counters.js';
 import CommandPalette from './CommandPalette.jsx';
 import { makeCommand } from './command-palette.js';
 import { LiquidGlassFilter } from './GlassLens.jsx';
 
-const PageTransition = lazy(() => import('./PageTransition.jsx'));
-
-const NAV_ITEMS = ['quota', 'usage', 'share', 'settings'];
-const GROUP_LABELS = [['appearance', 'settings_group_appearance'], ['sources', 'settings_group_sources'], ['desktop', 'settings_group_desktop'], ['benchmark', 'settings_group_benchmark'], ['about', 'settings_group_about']];
-const EDITABLE_PAGES = { quota: true, usage: true };
+const NAV_ITEMS = ['quota', 'usage', 'settings'];
+const GROUP_LABELS = [['appearance', 'settings_group_appearance'], ['sources', 'settings_group_sources'], ['desktop', 'settings_group_desktop'], ['about', 'settings_group_about']];
 
 function NavIcon({ page }) {
   if (page === 'quota') {
@@ -46,12 +42,7 @@ function NavIcon({ page }) {
     // 带轴圆帽柱:轴一次画到位,三根柱节奏降序,读作「用量」
     return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M8 17v-4" /><path d="M13 17V8" /><path d="M18 17v-7" /></svg>;
   }
-  if (page === 'settings') {
-    // lucide 现代齿轮:外环由 8 组对称圆弧构成,光学中心与圆孔重合
-    return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>;
-  }
-  // 分享:三节点连线,读作「卡片 → 分享出去」
-  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></svg>;
+  return <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>;
 }
 
 function PrimaryNav({ lang, page, onNavigate, variant }) {
@@ -180,11 +171,11 @@ function SourceWelcome({ data, lang, onDone }) {
   </motion.section></motion.div>;
 }
 
-const WELCOME_DONE_KEY = 'token-monitor.welcome-done.v1';
+
 
 function App() {
   const [preferences, setPreferences] = useState(readGuiPreferences);
-  const [showWelcome, setShowWelcome] = useState(() => { try { return window.localStorage.getItem(WELCOME_DONE_KEY) !== '1'; } catch { return true; } });
+  const [showWelcome, setShowWelcome] = useState(false);
   const [nativeError, setNativeError] = useState('');
   const [goKeyStored, setGoKeyStored] = useState(false);
   const [goKeyFeedback, setGoKeyFeedback] = useState('');
@@ -192,16 +183,9 @@ function App() {
   const [goatKeyFeedback, setGoatKeyFeedback] = useState('');
   const [deepseekKeyStored, setDeepSeekKeyStored] = useState(false);
   const [deepseekKeyFeedback, setDeepSeekKeyFeedback] = useState('');
-  const [agents, setAgents] = useState(null);
-  const [agentsScanning, setAgentsScanning] = useState(false);
-  const [agentUpdating, setAgentUpdating] = useState(null);
-  const [agentFeedback, setAgentFeedback] = useState(null);
   const [planModels, setPlanModels] = useState({});
-  const [shareStatus, setShareStatus] = useState(null);
   const [lan, setLan] = useState({ enabled: false, port: null, url: null });
-  const [achOpen, setAchOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
-  const [editing, setEditing] = useState({ quota: false, usage: false });
   const lang = preferences.lang;
   const reducedMotion = useMotionPreference(preferences.motion === 'reduced');
   const [page, setPage] = useState('quota');
@@ -214,7 +198,6 @@ function App() {
   const refreshRequestedAt = useRef(0);
   const mainRef = useRef(null);
   const scrollByPage = useRef({});
-  const achievements = useAchievements(data?.ledger, lang, { monthlyValue: data?.monthly_value });
   useLayoutEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollByPage.current[page] || 0;
   }, [page]);
@@ -265,10 +248,6 @@ function App() {
       __onPlanModelsSaved: ({ ok }) => {
         if (ok) sendCommand({ cmd: 'queryNativePreferences' });
       },
-      __onShareImageSaved: (status) => {
-        setShareStatus(status);
-        setTimeout(() => setShareStatus((current) => (current === status ? null : current)), 4000);
-      },
       __onLanStatus: (status) => {
         setLan(status || { enabled: false, port: null, url: null });
       },
@@ -300,14 +279,6 @@ function App() {
           });
         } else setNativeError('');
       },
-      __onAgentsScanned: (payload) => {
-        setAgents(Array.isArray(payload) ? payload : []);
-        setAgentsScanning(false);
-      },
-      __onAgentUpdateResult: ({ results }) => {
-        setAgentUpdating(null);
-        setAgentFeedback({ ok: Array.isArray(results) && results.length > 0 && results.every(([, ok]) => ok), results });
-      },
     });
     sendCommand({ cmd: 'queryNativePreferences' });
     return unregister;
@@ -320,20 +291,9 @@ function App() {
     sendCommand({ cmd: 'refresh' });
   }, []);
 
-  const scanAgents = useCallback(() => {
-    setAgentsScanning(true);
-    sendCommand({ cmd: 'scanAgents' });
-  }, []);
-
-  const updateAgent = useCallback((id) => {
-    setAgentUpdating(id);
-    setAgentFeedback(null);
-    sendCommand({ cmd: 'runAgentUpdate', agent: id });
-  }, []);
 
   const updatePreference = useCallback((key, value) => {
     if (key === 'autostart') sendCommand({ cmd: 'setAutostart', autostart: value });
-    if (key === 'lang') bumpFunCounter('lang');
     setPreferences((current) => {
       const next = { ...current, [key]: value };
       saveGuiPreferences(next);
@@ -343,7 +303,7 @@ function App() {
 
   const resetAppearance = useCallback(() => {
     setPreferences((current) => {
-      const next = { ...DEFAULT_GUI_PREFERENCES, notifications: current.notifications, paceAlerts: current.paceAlerts, quietHours: current.quietHours, closeBehavior: current.closeBehavior, globalShortcut: current.globalShortcut, autostart: current.autostart, pinnedCards: current.pinnedCards, hiddenCards: current.hiddenCards, providerColors: current.providerColors, sidebarHidden: current.sidebarHidden };
+      const next = { ...DEFAULT_GUI_PREFERENCES, notifications: current.notifications, quietHours: current.quietHours, closeBehavior: current.closeBehavior, globalShortcut: current.globalShortcut, autostart: current.autostart, pinnedCards: current.pinnedCards, hiddenCards: current.hiddenCards, providerColors: current.providerColors, sidebarHidden: current.sidebarHidden };
       saveGuiPreferences(next);
       return next;
     });
@@ -359,7 +319,6 @@ function App() {
 
   const dismissWelcome = useCallback(() => {
     setShowWelcome(false);
-    try { window.localStorage.setItem(WELCOME_DONE_KEY, '1'); } catch { /* session only */ }
   }, []);
 
   const toggleCard = useCallback((key, provider) => {
@@ -372,8 +331,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    sendCommand({ cmd: 'setNotifications', enabled: preferences.notifications === 'on', paceAlerts: preferences.paceAlerts, quietHours: preferences.quietHours, lang: preferences.lang });
-  }, [preferences.notifications, preferences.paceAlerts, preferences.quietHours, preferences.lang]);
+    sendCommand({ cmd: 'setNotifications', enabled: preferences.notifications === 'on', quietHours: preferences.quietHours, lang: preferences.lang });
+  }, [preferences.notifications, preferences.quietHours, preferences.lang]);
 
   useEffect(() => {
     sendCommand({ cmd: 'setCloseBehavior', closeBehavior: preferences.closeBehavior });
@@ -399,7 +358,6 @@ function App() {
       const target = event.target;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        bumpFunCounter('palette');
         setJumpOpen((value) => !value);
         return;
       }
@@ -415,8 +373,7 @@ function App() {
       if (event.altKey || event.ctrlKey || event.metaKey || target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
       if (event.key === '1') setPage('quota');
       else if (event.key === '2') setPage('usage');
-      else if (event.key === '3') setPage('share');
-      else if (event.key === '4') setPage('settings');
+      else if (event.key === '3') setPage('settings');
       else if (event.key.toLowerCase() === 'r' && !refreshing) refresh();
       else if (event.key.toLowerCase() === 'p') cycleTheme();
       else return;
@@ -428,53 +385,48 @@ function App() {
 
   const t = useCallback((k) => STR[k][lang], [lang]);
 
-  // 跳转目标先切页,等页面挂载后再滚动/高亮;卡片用与额度带相同的高亮动画。
   const jumpTo = useCallback((pageKey, selector) => {
     setPage(pageKey);
-    window.setTimeout(() => {
+    window.requestAnimationFrame(() => {
       const node = document.querySelector(selector);
       if (!node) return;
-      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (selector.startsWith('[data-provider')) {
-        node.classList.add('is-flash');
-        window.setTimeout(() => node.classList.remove('is-flash'), 1200);
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
       }
-    }, 280);
+      node.scrollIntoView({ behavior: 'instant', block: 'center' });
+      node.focus({ preventScroll: true });
+    });
   }, []);
 
   const commands = useMemo(() => {
     const list = [];
     for (const key of NAV_ITEMS) list.push(makeCommand({ id: `page-${key}`, group: 'page', label: t(`nav_${key}`), hint: `${NAV_ITEMS.indexOf(key) + 1}`, keywords: key, run: () => setPage(key) }));
     for (const [id, key] of GROUP_LABELS) list.push(makeCommand({ id: `settings-${id}`, group: 'settings', label: t(key), run: () => jumpTo('settings', `#${id}`) }));
-    for (const [id, key] of USAGE_MODULE_LABELS) list.push(makeCommand({ id: `module-${id}`, group: 'module', label: t(key), hint: t('nav_usage'), keywords: id, run: () => jumpTo('usage', `[data-panel-id="${id}"]`) }));
-    for (const card of (data?.cards || [])) list.push(makeCommand({ id: `provider-${card.provider}`, group: 'provider', label: card.title.split(' ·')[0], hint: t('nav_quota'), keywords: card.provider, run: () => jumpTo('quota', `[data-provider="${card.provider}"]`) }));
+    for (const card of (data?.cards || []).filter((card) => !preferences.hiddenCards.includes(card.provider))) list.push(makeCommand({ id: `provider-${card.provider}`, group: 'provider', label: card.title.split(' ·')[0], hint: t('nav_quota'), keywords: card.provider, run: () => jumpTo('quota', `[data-provider="${card.provider}"]`) }));
     if (data?.deepseek_balance) list.push(makeCommand({ id: 'provider-deepseek', group: 'provider', label: 'DeepSeek API', hint: t('nav_quota'), keywords: 'deepseek', run: () => jumpTo('quota', '[data-provider="deepseek"]') }));
     list.push(makeCommand({ id: 'action-refresh', group: 'action', label: t('action_refresh'), keywords: 'refresh r', run: refresh }));
     list.push(makeCommand({ id: 'action-sidebar', group: 'action', label: preferences.sidebarHidden ? t('sidebar_show') : t('sidebar_hide'), keywords: 'sidebar toggle b', run: () => updatePreference('sidebarHidden', !preferences.sidebarHidden) }));
     list.push(makeCommand({ id: 'action-theme', group: 'action', label: t('action_theme'), keywords: 'theme p', run: cycleTheme }));
-    list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => { bumpFunCounter('overlay'); sendCommand({ cmd: 'toggleOverlay' }); } }));
-    list.push(makeCommand({ id: 'action-achievements', group: 'action', label: t('action_achievements'), keywords: 'achievements', run: () => setAchOpen(true) }));
-    if (EDITABLE_PAGES[page]) list.push(makeCommand({ id: 'action-edit', group: 'action', label: t('action_edit'), hint: t(`nav_${page}`), keywords: 'edit layout', run: () => setPageEditing(page, !editing[page]) }));
+    list.push(makeCommand({ id: 'action-overlay', group: 'action', label: t('action_overlay'), keywords: 'overlay', run: () => sendCommand({ cmd: 'toggleOverlay' }) }));
     return list;
-  }, [t, data, page, editing, jumpTo, refresh, cycleTheme, preferences.sidebarHidden, updatePreference]);
+  }, [t, data, jumpTo, refresh, cycleTheme, preferences.sidebarHidden, preferences.hiddenCards, updatePreference]);
 
   const quotaAge = data?.quota_fetched_at_ms ? now - data.quota_fetched_at_ms : null;  const ledgerAge = data?.fetched_at_ms ? now - data.fetched_at_ms : null;
-  const quotaStale = data && (data.quotaError || quotaAge == null || quotaAge > 120_000);
-  const ledgerStale = data && (ledgerAge == null || ledgerAge > 20_000);
+  const quotaStale = Boolean(data && (staleCache || data.quotaError || quotaAge == null || quotaAge > 120_000));
+  const ledgerStale = Boolean(data && (staleCache || ledgerAge == null || ledgerAge > 20_000));
   const currency = { code: preferences.currency, rate: exchangeRate?.rate, date: exchangeRate?.date, stale: exchangeRate?.stale, error: exchangeError };
-  const setPageEditing = (key, value) => setEditing((current) => ({ ...current, [key]: value }));
   const pageContent = page === 'settings' ? (
     <SettingsPage
       lang={lang}
       preferences={preferences}
       currency={currency}
-      monthlyValue={data?.monthly_value}
       sources={data?.ledger?.sources || []}
       cards={data?.cards || []}
       onPreferenceChange={updatePreference}
       onResetAppearance={resetAppearance}
       onShowWelcome={() => setShowWelcome(true)}
-      onOpenShare={() => setPage('share')}
+      lan={lan}
+      onLanToggle={(enabled) => sendCommand({ cmd: 'setLanDashboard', enabled })}
       nativeError={nativeError}
       goKeyStored={goKeyStored}
       goKeyFeedback={goKeyFeedback}
@@ -488,19 +440,12 @@ function App() {
       deepseekKeyFeedback={deepseekKeyFeedback}
       onSaveDeepSeekKey={(deepseekApiKey) => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'setDeepSeekApiKey', deepseekApiKey }); }}
       onDeleteDeepSeekKey={() => { setDeepSeekKeyFeedback(''); sendCommand({ cmd: 'deleteDeepSeekApiKey' }); }}
-      agents={agents}
-      agentsScanning={agentsScanning}
-      agentUpdating={agentUpdating}
-      agentFeedback={agentFeedback}
-      onScanAgents={scanAgents}
-      onUpdateAgent={updateAgent}
     />
   ) : data ? (
     <>
-      {page === 'quota' && (data.cards?.length ? <QuotaPage
+      {page === 'quota' && <LocalUsageSummary ledger={data.ledger} lang={lang} stale={ledgerStale} onOpenUsage={() => setPage('usage')} />}
+      {page === 'quota' && <QuotaPage
         cards={data.cards}
-        ledger={data.ledger}
-        goatUsage={data.goat_usage}
         deepseekBalance={data.deepseek_balance}
         quotaFetchedAtMs={data.quota_fetched_at_ms}
         quotaStale={quotaStale}
@@ -508,30 +453,21 @@ function App() {
         lang={lang}
         preferences={preferences}
         planModels={planModels}
-        editing={editing.quota}
-        onToggleEditing={(value) => setPageEditing('quota', value)}
         onRestoreCard={restoreCard}
         onTogglePin={(provider) => toggleCard('pinnedCards', provider)}
         onToggleHidden={(provider) => toggleCard('hiddenCards', provider)}
         onOpenSettings={() => setPage('settings')}
         onPreferenceChange={updatePreference}
-      /> : <Card className="empty-card"><Text type="supporting">{t('empty_quota')}</Text></Card>)}
+      />}
       {page === 'usage' && <UsageDashboard
         ledger={data.ledger}
-        monthlyValue={data.monthly_value}
-        achItems={achievements.items}
         lang={lang}
         currency={{ code: preferences.currency, rate: exchangeRate?.rate }}
         onOpenSettings={() => setPage('settings')}
-        onOpenAchievements={() => setAchOpen(true)}
-        editing={editing.usage}
-        onToggleEditing={(value) => setPageEditing('usage', value)}
       />}
-      {page === 'share' && <SharePage ledger={data.ledger} monthlyValue={data.monthly_value} lang={lang} shareStatus={shareStatus} lan={lan} onLanToggle={(enabled) => sendCommand({ cmd: 'setLanDashboard', enabled })} />}
     </>
   ) : null;
 
-  const stale = quotaStale || ledgerStale;
   return (
     <MotionProvider reduceMotion={reducedMotion}><div
       className="app"
@@ -576,10 +512,6 @@ function App() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
             <kbd>Ctrl K</kbd>
           </button>
-          {EDITABLE_PAGES[page] && <button type="button" className={`toolbar-edit${editing[page] ? ' is-on' : ''}`} aria-pressed={editing[page]} title={t('edit_layout_hint')} onClick={() => setPageEditing(page, !editing[page])}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>
-            <span>{editing[page] ? t('edit_layout_done') : t('edit_layout')}</span>
-          </button>}
           <button className="toolbar-theme" type="button" onClick={cycleTheme} title={`${t('theme_quick')} (P)`} aria-label={`${t('theme_quick')}: ${t(`theme_${preferences.theme}`)}`}>
             <span className={`toolbar-theme-swatch toolbar-theme-${preferences.theme}`} aria-hidden="true" />
             <span>{t(`theme_${preferences.theme}`)}</span>
@@ -588,6 +520,10 @@ function App() {
             {t('refresh')}
           </Button>
         </div>
+        {data && page !== 'settings' && <div className="data-freshness" role="status">
+          <span className={quotaStale ? 'is-stale' : ''}>{lang === 0 ? '订阅额度' : 'Quotas'} · {quotaAge == null ? t('freshness_waiting') : `${fmtRel(quotaAge)}${lang === 0 ? '前读取' : ' ago'}`}{quotaStale && ` · ${t('freshness_stale')}`}</span>
+          <span className={ledgerStale ? 'is-stale' : ''}>{lang === 0 ? '本机记录' : 'Local records'} · {ledgerAge == null ? t('freshness_waiting') : `${fmtRel(ledgerAge)}${lang === 0 ? '前读取' : ' ago'}`}{ledgerStale && ` · ${t('freshness_stale')}`}</span>
+        </div>}
         {staleCache && (
           <div className="banner-cache" role="status">
             <Spinner size="sm" /> <Text type="supporting">{t('cache_replay')}</Text>
@@ -598,10 +534,8 @@ function App() {
             <Toast kind="error">{t('quota_error')}: {data.quotaError}</Toast>
           </div>
         )}
-        {!data ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (
-          <Suspense fallback={<div className="page-content">{pageContent}</div>}>
-            <PageTransition page={page} reduceMotion={preferences.motion === 'reduced'}>{pageContent}</PageTransition>
-          </Suspense>
+        {!data && page !== 'settings' ? <Card className="empty-card" role="status"><Spinner size="sm" /> <Text type="supporting">{t('loading')}</Text></Card> : (
+          <div className="page-content">{pageContent}</div>
         )}
       </main>
       <DockNav
@@ -611,8 +545,6 @@ function App() {
         status={{ data, refreshing, quotaStale, ledgerStale, quotaAge, ledgerAge }}
       />
       <AnimatePresence>{showWelcome && data?.ledger && data.quota_checked_at_ms > 0 && <SourceWelcome key="welcome" data={data} lang={lang} onDone={dismissWelcome} />}</AnimatePresence>
-      <AnimatePresence>{achOpen && <AchievementsModal key="achievements" items={achievements.items} lang={lang} state={achievements.state} onClose={() => setAchOpen(false)} />}</AnimatePresence>
-      <AchievementToasts items={achievements.toasts} lang={lang} onDismiss={achievements.dismiss} />
       <CommandPalette open={jumpOpen} onClose={() => setJumpOpen(false)} commands={commands} lang={lang} />
     </div>
     </MotionProvider>

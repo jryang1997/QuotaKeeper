@@ -878,7 +878,7 @@ html[data-theme='dark'] { color-scheme: dark; }
 .toolbar-theme-sand { background: #eee4d2; }
 .toolbar-theme-cassette { background: linear-gradient(135deg, #00ff66 45%, #060d08 55%); border-color: #00ff66; box-shadow: 0 0 6px rgba(0, 255, 102, 0.4); }
 .toolbar-theme-washi { background: linear-gradient(135deg, #fbf8ef 45%, #bc4a3a 55%); border-color: #bfae8e; }
-.toolbar-theme-palace { background: linear-gradient(135deg, #d9a852 45%, #2b1617 55%); border-color: #8f6a3e; }
+.toolbar-theme-palace { background: linear-gradient(135deg, #f2563e 45%, #f2be45 55%); border-color: #b4503c; }
 .toolbar-theme-aurora { background: linear-gradient(135deg, #56e0c8 45%, #122033 55%); border-color: #2f6f78; }
 .toolbar-theme-amber { background: linear-gradient(135deg, #ffae42 45%, #171106 55%); border-color: #8a6a2c; box-shadow: 0 0 6px rgba(255, 174, 66, 0.35); }
 .toolbar-theme-mocha { background: linear-gradient(135deg, #d08a52 45%, #191210 55%); border-color: #6a5443; }
@@ -891,7 +891,7 @@ html[data-theme='dark'] { color-scheme: dark; }
 .theme-icon-sand { background: #e9ddc8; }
 .theme-icon-cassette { background: linear-gradient(135deg, #00ff66 45%, #060d08 55%); border: 1px solid #00ff66; box-shadow: 0 0 4px rgba(0, 255, 102, 0.35); }
 .theme-icon-washi { background: linear-gradient(135deg, #fbf8ef 45%, #bc4a3a 55%); border-color: #bfae8e; }
-.theme-icon-palace { background: linear-gradient(135deg, #d9a852 45%, #2b1617 55%); border-color: #8f6a3e; }
+.theme-icon-palace { background: linear-gradient(135deg, #f2563e 45%, #f2be45 55%); border-color: #b4503c; }
 .theme-icon-aurora { background: linear-gradient(135deg, #56e0c8 45%, #122033 55%); border-color: #2f6f78; }
 .theme-icon-amber { background: linear-gradient(135deg, #ffae42 45%, #171106 55%); border-color: #8a6a2c; box-shadow: 0 0 4px rgba(255, 174, 66, 0.3); }
 .theme-icon-mocha { background: linear-gradient(135deg, #d08a52 45%, #191210 55%); border-color: #6a5443; }
