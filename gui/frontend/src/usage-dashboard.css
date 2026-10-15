@@ -52,7 +52,7 @@
 .usage-dashboard .usage-summary-card > span { font-size: 14px; }
 .usage-dashboard .usage-summary-card strong { overflow-wrap: anywhere; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.18; font-weight: 650; letter-spacing: -0.035em; }
 .usage-dashboard .usage-summary-card small { color: var(--usage-muted); font-size: 11px; line-height: 1.35; }
-.usage-price-summary { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px; }
+.usage-price-summary { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px; font-size: 12px; }
 .usage-price-disclosure { min-width: 0; padding: 16px 22px; font-size: 13px; line-height: 1.55; }
 .usage-price-disclosure > summary { width: fit-content; cursor: pointer; font-weight: 600; }
 .usage-price-content { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
@@ -76,7 +76,7 @@
 .usage-price-rates > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
 .usage-price-rates dt { color: var(--usage-muted); }
 .usage-price-rates dd { display: flex; flex-direction: column; min-width: 0; gap: 2px; margin: 0; }
-.usage-price-rates small, .usage-price-rates code { color: var(--usage-muted); font-size: 11px; }
+.usage-price-rates small, .usage-price-rates code { color: var(--usage-muted); font-size: 12px; }
 .usage-chart-card, .usage-buckets-card, .usage-clients-card { min-width: 0; padding: 22px 23px 18px; }
 .usage-chart-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .usage-chart-heading p, .usage-section-heading p, .usage-reasoning-count { margin-top: 4px; color: var(--usage-muted); font-size: 12px; line-height: 1.45; }
