@@ -30,7 +30,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, Default, PartialEq)]
 pub struct ModelPrice {
     input: f64,
     output: f64,
@@ -40,13 +40,172 @@ pub struct ModelPrice {
     cache_write: Option<f64>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PriceOrigin {
+    Upstream,
+    Supplement,
+    LegacyUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchMethod {
+    Exact,
+    CaseInsensitive,
+    ExplicitAlias,
+    Canonical,
+    OfficialReference,
+    ReverseAlias,
+    UniqueSuffix,
+    MajorityReference,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct AdoptedRate {
+    pub usd_per_token: f64,
+    pub entry: String,
+    pub origin: PriceOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct EstimateBasis {
+    pub matched_entry: String,
+    pub match_method: MatchMethod,
+    pub family_fallback: bool,
+    pub cache_fill: bool,
+    pub input: AdoptedRate,
+    pub output: AdoptedRate,
+    pub cache_read: Option<AdoptedRate>,
+    pub cache_write: Option<AdoptedRate>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnpricedReason {
+    UnknownModel,
+    AmbiguousName,
+    AmbiguousSuffix,
+    MissingCacheRead,
+    MissingCacheWrite,
+    MissingCacheReadAndWrite,
+    NonFiniteAmount,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PriceBasis {
+    Reported,
+    Estimated(EstimateBasis),
+    Unpriced {
+        reason: UnpricedReason,
+        attempted: Option<EstimateBasis>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceQuote {
+    pub amount: Option<f64>,
+    pub basis: PriceBasis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotSource {
+    CacheV2,
+    LegacyCache,
+    SupplementsOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheState {
+    Fresh,
+    Stale,
+    UnknownAge,
+    Missing,
+    Corrupt,
+    NotLoaded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PriceSnapshot {
+    pub version: String,
+    pub loaded_at_ms: i64,
+    pub fetched_at_ms: Option<i64>,
+    pub dataset_url: Option<String>,
+    pub source: SnapshotSource,
+    pub cache_state: CacheState,
+}
+
+impl PriceSnapshot {
+    fn supplements(loaded_at_ms: i64, cache_state: CacheState) -> Self {
+        Self {
+            version: String::new(),
+            loaded_at_ms,
+            fetched_at_ms: None,
+            dataset_url: None,
+            source: SnapshotSource::SupplementsOnly,
+            cache_state,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Entry {
+    price: ModelPrice,
+    origin: PriceOrigin,
+}
+
+struct MatchedEntry<'a> {
+    name: &'a str,
+    entry: &'a Entry,
+    method: MatchMethod,
+    family_fallback: bool,
+}
+
+impl MatchedEntry<'_> {
+    fn rate(&self, usd_per_token: f64) -> AdoptedRate {
+        AdoptedRate {
+            usd_per_token,
+            entry: self.name.into(),
+            origin: self.entry.origin,
+        }
+    }
+
+    fn basis(&self) -> EstimateBasis {
+        let p = self.entry.price;
+        EstimateBasis {
+            matched_entry: self.name.into(),
+            match_method: self.method,
+            family_fallback: self.family_fallback,
+            cache_fill: false,
+            input: self.rate(p.input),
+            output: self.rate(p.output),
+            cache_read: p.cache_read.map(|rate| self.rate(rate)),
+            cache_write: p.cache_write.map(|rate| self.rate(rate)),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Pricing {
-    entries: HashMap<String, ModelPrice>,
-    case_insensitive: HashMap<String, ModelPrice>,
+    snapshot: PriceSnapshot,
+    entries: HashMap<String, Entry>,
+    case_insensitive: HashMap<String, String>,
     ambiguous_names: HashSet<String>,
-    unique_suffixes: HashMap<String, ModelPrice>,
+    unique_suffixes: HashMap<String, (String, MatchMethod)>,
     ambiguous_suffixes: HashSet<String>,
+}
+
+impl Default for Pricing {
+    fn default() -> Self {
+        build(
+            HashMap::new(),
+            PriceOrigin::LegacyUnknown,
+            PriceSnapshot::supplements(now_ms(), CacheState::NotLoaded),
+        )
+    }
 }
 
 /// canonical 家族 → LiteLLM 目录里厂商官方条目的 provider 前缀。
@@ -61,12 +220,28 @@ const OFFICIAL_PREFIXES: [(&str, &str); 5] = [
     ("minimax-", "minimax"),
 ];
 
-#[derive(Debug, Default, Deserialize, serde::Serialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct CacheDoc {
-    #[serde(default)]
-    fetched_at_ms: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dataset_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fetched_at_ms: Option<i64>,
     models: HashMap<String, ModelPrice>,
+}
+
+impl CacheDoc {
+    fn valid_v2(&self) -> bool {
+        self.schema_version == Some(2)
+            && self
+                .dataset_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("https://"))
+            && self.fetched_at_ms.is_some_and(|time| time > 0)
+            && !self.models.is_empty()
+            && self.models.values().all(valid_price)
+    }
 }
 
 pub fn cache_path(home: &Path) -> PathBuf {
@@ -82,63 +257,119 @@ pub fn spawn_refresher(home: &Path) {
     let home = home.to_path_buf();
     let _ = std::thread::Builder::new()
         .name("pricing-refresh".into())
-        .spawn(move || loop {
-            if let Some(fresh) = fetch() {
-                let _ = write_cache(&cache_path(&home), now_ms(), &fresh);
+        .spawn(move || {
+            loop {
+                if let Some(fresh) = fetch() {
+                    let _ = write_cache(&cache_path(&home), &fresh);
+                }
+                std::thread::sleep(REFRESH_INTERVAL);
             }
-            std::thread::sleep(REFRESH_INTERVAL);
         });
 }
 
 impl Pricing {
     /// 只读本地缓存;冷启动/离线使用补充价,网络刷新由 spawn_refresher 负责。
     pub fn load(home: &Path) -> Pricing {
-        let path = cache_path(home);
-        if let Some((_, pricing)) = read_cache(&path) {
-            return pricing;
+        let loaded_at_ms = now_ms();
+        match read_cache(&cache_path(home), loaded_at_ms) {
+            Ok((entries, origin, snapshot)) => build(entries, origin, snapshot),
+            Err(state) => build(
+                HashMap::new(),
+                PriceOrigin::LegacyUnknown,
+                PriceSnapshot::supplements(loaded_at_ms, state),
+            ),
         }
-        build(HashMap::new())
     }
 
-    pub fn estimate(&self, model: &str, t: &TokenBreakdown) -> Option<f64> {
-        let price_of = |p: &ModelPrice| -> Option<f64> {
-            let mut cost = t.input as f64 * p.input + t.output as f64 * p.output;
-            if t.cache_read > 0 {
-                cost += t.cache_read as f64 * p.cache_read?;
-            }
-            if t.cache_write > 0 {
-                cost += t.cache_write as f64 * p.cache_write?;
-            }
-            cost.is_finite().then_some(cost)
+    pub fn snapshot(&self) -> &PriceSnapshot {
+        &self.snapshot
+    }
+
+    pub fn quote(&self, model: &str, t: &TokenBreakdown) -> PriceQuote {
+        let matched = match self.lookup(model) {
+            Ok(matched) => matched,
+            Err(reason) => match self.official_entry(model) {
+                Some(matched) => matched,
+                None => {
+                    return PriceQuote {
+                        amount: None,
+                        basis: PriceBasis::Unpriced {
+                            reason,
+                            attempted: None,
+                        },
+                    };
+                }
+            },
         };
-        if let Some(p) = self.lookup(model) {
-            // 主价完整直接用;缺消耗桶(cache_read/cache_write 无价)时用官方
-            // 条目补缺桶,渠道价完整的桶一律保留,不整条换价;官方也缺则 None.
-            let needs_fill = (t.cache_read > 0 && p.cache_read.is_none())
-                || (t.cache_write > 0 && p.cache_write.is_none());
-            if !needs_fill {
-                return price_of(p);
+        let mut basis = matched.basis();
+        let missing_read = t.cache_read > 0 && basis.cache_read.is_none();
+        let missing_write = t.cache_write > 0 && basis.cache_write.is_none();
+        if (missing_read || missing_write)
+            && let Some(reference) = self.official_entry(model)
+        {
+            if missing_read && let Some(rate) = reference.entry.price.cache_read {
+                basis.cache_read = Some(reference.rate(rate));
+                basis.cache_fill = true;
             }
-            if let Some(o) = self.official_entry(model) {
-                let mut eff = *p;
-                if eff.cache_read.is_none() {
-                    eff.cache_read = o.cache_read;
-                }
-                if eff.cache_write.is_none() {
-                    eff.cache_write = o.cache_write;
-                }
-                return price_of(&eff);
+            if missing_write && let Some(rate) = reference.entry.price.cache_write {
+                basis.cache_write = Some(reference.rate(rate));
+                basis.cache_fill = true;
             }
-            return price_of(p);
         }
-        // 查找整体落空(后缀歧义等):官方条目兜底(同 canonical 即同模型,
-        // 不存在选错价;官方条目也不在则维持 None).
-        let o = self.official_entry(model)?;
-        price_of(o)
+        let missing = match (
+            t.cache_read > 0 && basis.cache_read.is_none(),
+            t.cache_write > 0 && basis.cache_write.is_none(),
+        ) {
+            (true, true) => Some(UnpricedReason::MissingCacheReadAndWrite),
+            (true, false) => Some(UnpricedReason::MissingCacheRead),
+            (false, true) => Some(UnpricedReason::MissingCacheWrite),
+            (false, false) => None,
+        };
+        if let Some(reason) = missing {
+            return PriceQuote {
+                amount: None,
+                basis: PriceBasis::Unpriced {
+                    reason,
+                    attempted: Some(basis),
+                },
+            };
+        }
+        let mut amount = t.input as f64 * basis.input.usd_per_token
+            + t.output as f64 * basis.output.usd_per_token;
+        if t.cache_read > 0 {
+            amount += t.cache_read as f64 * basis.cache_read.as_ref().unwrap().usd_per_token;
+        }
+        if t.cache_write > 0 {
+            amount += t.cache_write as f64 * basis.cache_write.as_ref().unwrap().usd_per_token;
+        }
+        if amount.is_finite() {
+            PriceQuote {
+                amount: Some(amount),
+                basis: PriceBasis::Estimated(basis),
+            }
+        } else {
+            PriceQuote {
+                amount: None,
+                basis: PriceBasis::Unpriced {
+                    reason: UnpricedReason::NonFiniteAmount,
+                    attempted: Some(basis),
+                },
+            }
+        }
     }
 
-    /// 官方条目:<家族官方前缀>/<canonical>,其次裸 canonical 名;都不在目录则 None.
-    fn official_entry(&self, model: &str) -> Option<&ModelPrice> {
+    fn matched(&self, name: &str, method: MatchMethod) -> Option<MatchedEntry<'_>> {
+        self.entries
+            .get_key_value(name)
+            .map(|(name, entry)| MatchedEntry {
+                name,
+                entry,
+                method,
+                family_fallback: false,
+            })
+    }
+
+    fn official_entry(&self, model: &str) -> Option<MatchedEntry<'_>> {
         let canonical = crate::ledger::model_alias::canonical(model);
         if canonical == "unknown" {
             return None;
@@ -147,37 +378,40 @@ impl Pricing {
             .iter()
             .find(|(family, _)| canonical.starts_with(family))
             .map(|(_, prefix)| *prefix);
-        prefix
+        let name = prefix
             .and_then(|p| self.case_insensitive.get(&format!("{p}/{canonical}")))
-            .or_else(|| self.case_insensitive.get(&canonical))
+            .or_else(|| self.case_insensitive.get(&canonical))?;
+        self.matched(name, MatchMethod::OfficialReference)
     }
 
-    fn lookup(&self, model: &str) -> Option<&ModelPrice> {
+    fn lookup(&self, model: &str) -> Result<MatchedEntry<'_>, UnpricedReason> {
         if model.is_empty() {
-            return None;
+            return Err(UnpricedReason::UnknownModel);
         }
-        if let Some(price) = self.entries.get(model) {
-            return Some(price);
+        if let Some(matched) = self.matched(model, MatchMethod::Exact) {
+            return Ok(matched);
         }
         let lower = model.to_lowercase();
         if self.ambiguous_names.contains(&lower) {
-            return None;
+            return Err(UnpricedReason::AmbiguousName);
         }
-        if let Some(price) = self.case_insensitive.get(&lower) {
-            return Some(price);
+        if let Some(name) = self.case_insensitive.get(&lower) {
+            return Ok(self.matched(name, MatchMethod::CaseInsensitive).unwrap());
         }
 
-        // 保留已知 provider 的价格,再用聚合别名补目录缺名。
-        let canonical = crate::ledger::model_alias::canonical(model);
-        if canonical != model && canonical != "unknown"
-            && let Some(price) = self.entries.get(&canonical)
+        let (canonical, explicit_alias) = crate::ledger::model_alias::resolve(model);
+        let method = if explicit_alias {
+            MatchMethod::ExplicitAlias
+        } else {
+            MatchMethod::Canonical
+        };
+        if canonical != model
+            && canonical != "unknown"
+            && let Some(matched) = self.matched(&canonical, method)
         {
-            return Some(price);
+            return Ok(matched);
         }
 
-        // 裸名回落厂商官方条目:目录里的官方价优先于渠道加价/缓存缺项;
-        // 裸名缺条目(effort 变体、快照名)同样由此兜住。
-        // 带 provider 的记录仍按原渠道匹配,不推断它使用了官方端点。
         if !model.contains('/') && canonical != "unknown" {
             let prefix = OFFICIAL_PREFIXES
                 .iter()
@@ -187,37 +421,37 @@ impl Pricing {
                 .map(|p| format!("{p}/{canonical}"))
                 .into_iter()
                 .chain(std::iter::once(canonical.clone()));
-            for cand in candidates {
-                if cand != lower
-                    && let Some(price) = self.case_insensitive.get(&cand)
+            for candidate in candidates {
+                if candidate != lower
+                    && let Some(name) = self.case_insensitive.get(&candidate)
                 {
-                    return Some(price);
+                    return Ok(self.matched(name, MatchMethod::OfficialReference).unwrap());
                 }
             }
         }
 
-        // 反向别名:目录里常有推广短名条目而无全名条目
-        // (deepseek-flash ↔ deepseek-v4.1-flash),按短名取价。
         if canonical != "unknown" {
-            for src in crate::ledger::model_alias::source_names(&canonical) {
-                if src != lower
-                    && let Some(price) = self.case_insensitive.get(src)
+            for source in crate::ledger::model_alias::source_names(&canonical) {
+                if source != lower
+                    && let Some(name) = self.case_insensitive.get(source)
                 {
-                    return Some(price);
+                    return Ok(self.matched(name, MatchMethod::ReverseAlias).unwrap());
                 }
             }
         }
 
         let suffix = lower.rsplit('/').next().unwrap_or(&lower);
         if self.ambiguous_suffixes.contains(suffix) {
-            return None;
+            return Err(UnpricedReason::AmbiguousSuffix);
         }
-        if let Some(price) = self.unique_suffixes.get(suffix) {
-            return Some(price);
+        if let Some((name, method)) = self.unique_suffixes.get(suffix) {
+            return Ok(self.matched(name, *method).unwrap());
         }
-        // ponytail: 家族价只近似相邻 minor;需审计估价时改为显式匹配来源。
-        let family = family_name(model)?;
-        self.lookup(&family)
+        let family = family_name(model).ok_or(UnpricedReason::UnknownModel)?;
+        self.lookup(&family).map(|mut matched| {
+            matched.family_fallback = true;
+            matched
+        })
     }
 }
 
@@ -248,53 +482,159 @@ fn family_name(model: &str) -> Option<String> {
     Some(out)
 }
 
-fn read_cache(path: &Path) -> Option<(i64, Pricing)> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let doc: CacheDoc = serde_json::from_str(&text).ok()?;
-    Some((doc.fetched_at_ms, build(doc.models)))
+fn read_cache(
+    path: &Path,
+    loaded_at_ms: i64,
+) -> Result<(HashMap<String, ModelPrice>, PriceOrigin, PriceSnapshot), CacheState> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            CacheState::Missing
+        } else {
+            CacheState::Corrupt
+        }
+    })?;
+    let mut doc: CacheDoc = serde_json::from_str(&text).map_err(|_| CacheState::Corrupt)?;
+    doc.models.retain(|_, price| valid_price(price));
+    if doc.models.is_empty() {
+        return Err(CacheState::Corrupt);
+    }
+    let (source, origin, dataset_url) = match doc.schema_version {
+        Some(2) if doc.valid_v2() => (
+            SnapshotSource::CacheV2,
+            PriceOrigin::Upstream,
+            doc.dataset_url,
+        ),
+        None => (
+            SnapshotSource::LegacyCache,
+            PriceOrigin::LegacyUnknown,
+            None,
+        ),
+        _ => return Err(CacheState::Corrupt),
+    };
+    let fetched_at_ms = doc.fetched_at_ms.filter(|time| *time > 0);
+    let cache_state = match fetched_at_ms {
+        Some(time) if time > loaded_at_ms => CacheState::UnknownAge,
+        Some(time) if loaded_at_ms.saturating_sub(time) >= REFRESH_INTERVAL.as_millis() as i64 => {
+            CacheState::Stale
+        }
+        Some(_) => CacheState::Fresh,
+        None => CacheState::UnknownAge,
+    };
+    Ok((
+        doc.models,
+        origin,
+        PriceSnapshot {
+            version: String::new(),
+            loaded_at_ms,
+            fetched_at_ms,
+            dataset_url,
+            source,
+            cache_state,
+        },
+    ))
 }
 
-fn write_cache(path: &Path, now_ms: i64, pricing: &Pricing) -> std::io::Result<()> {
+fn write_cache(path: &Path, doc: &CacheDoc) -> std::io::Result<()> {
+    publish_cache(path, doc, |temporary, target| {
+        std::fs::rename(temporary, target)
+    })
+}
+
+fn publish_cache(
+    path: &Path,
+    doc: &CacheDoc,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    if !doc.valid_v2() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid upstream pricing document",
+        ));
+    }
+    let bytes = serde_json::to_vec(doc).map_err(std::io::Error::other)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let doc = CacheDoc {
-        fetched_at_ms: now_ms,
-        models: pricing.entries.clone(),
-    };
-    std::fs::write(path, serde_json::to_string(&doc).unwrap_or_default())
+    let filename = path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing cache filename")
+    })?;
+    let temporary = path.with_file_name(format!(
+        ".{}.{}-{}-{}.tmp",
+        filename.to_string_lossy(),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed),
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let result = (|| {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        replace(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
-fn fetch() -> Option<Pricing> {
+fn fetch() -> Option<CacheDoc> {
     PRICING_URLS.iter().find_map(|url| fetch_one(url))
 }
 
-fn fetch_one(url: &str) -> Option<Pricing> {
+fn fetch_one(url: &str) -> Option<CacheDoc> {
     let resp = crate::http::get(url).timeout(TIMEOUT).call().ok()?;
     let doc: HashMap<String, serde_json::Value> = resp.into_json().ok()?;
+    let fetched_at_ms = now_ms();
     let mut entries = HashMap::new();
-    for (name, v) in doc {
-        let Some(input) = v.get("input_cost_per_token").and_then(|x| x.as_f64()) else {
+    for (name, value) in doc {
+        let Some(input) = value
+            .get("input_cost_per_token")
+            .and_then(|value| value.as_f64())
+        else {
             continue;
         };
-        let Some(output) = v.get("output_cost_per_token").and_then(|x| x.as_f64()) else {
+        let Some(output) = value
+            .get("output_cost_per_token")
+            .and_then(|value| value.as_f64())
+        else {
             continue;
         };
-        let opt = |k: &str| v.get(k).and_then(|x| x.as_f64()).filter(|f| f.is_finite());
-        entries.insert(
-            name,
-            ModelPrice {
-                input,
-                output,
-                cache_read: opt("cache_read_input_token_cost"),
-                cache_write: opt("cache_creation_input_token_cost"),
-            },
-        );
+        let optional = |key: &str| {
+            value
+                .get(key)
+                .and_then(|value| value.as_f64())
+                .filter(|rate| rate.is_finite())
+        };
+        let price = ModelPrice {
+            input,
+            output,
+            cache_read: optional("cache_read_input_token_cost"),
+            cache_write: optional("cache_creation_input_token_cost"),
+        };
+        if valid_price(&price) {
+            entries.insert(name, price);
+        }
     }
     if entries.is_empty() {
         return None;
     }
-    Some(build(entries))
+    Some(CacheDoc {
+        schema_version: Some(2),
+        dataset_url: Some(url.into()),
+        fetched_at_ms: Some(fetched_at_ms),
+        models: entries,
+    })
 }
 
 /// 补充 LiteLLM 缺失的官方或主流模型定价 (来源: OpenRouter / DeepInfra 官方公开定价 / 限免模型)
@@ -406,65 +746,73 @@ const SUPPLEMENT: &[(&str, ModelPrice)] = &[
     ),
 ];
 
-/// Index exact and unique suffix names only. LiteLLM contains many providers for
-/// the same model ID, often with different prices; choosing the first suffix
-/// encountered in a HashMap would make the estimate nondeterministic.
-fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
-    entries.retain(|_, price| {
-        [Some(price.input), Some(price.output), price.cache_read, price.cache_write]
-            .into_iter().flatten().all(|value| value.is_finite() && value >= 0.0)
-    });
+fn build(
+    entries: HashMap<String, ModelPrice>,
+    origin: PriceOrigin,
+    mut snapshot: PriceSnapshot,
+) -> Pricing {
+    let mut entries: HashMap<String, Entry> = entries
+        .into_iter()
+        .filter(|(_, price)| valid_price(price))
+        .map(|(name, price)| (name, Entry { price, origin }))
+        .collect();
     for (name, price) in SUPPLEMENT {
-        entries.entry((*name).to_string()).or_insert(*price);
+        entries.entry((*name).into()).or_insert(Entry {
+            price: *price,
+            origin: PriceOrigin::Supplement,
+        });
     }
 
     let mut case_insensitive = HashMap::new();
     let mut ambiguous_names = HashSet::new();
-    let mut unique_suffixes: HashMap<String, ModelPrice> = HashMap::new();
+    let mut unique_suffixes = HashMap::new();
     let mut ambiguous_suffixes = HashSet::new();
-
-    // 后缀 → 同后缀全部条目;若多数价格一致(众数),取众数价而非判歧义。
-    // LiteLLM 里同一模型常被 6-9 家供应商收录且价格相同,歧义拒绝会把这些
-    // 模型整体挡在定价之外;众数在「少数渠道差异化定价」时仍取主流价。
-    let mut suffix_groups: HashMap<String, Vec<&ModelPrice>> = HashMap::new();
-    for (name, price) in &entries {
+    let mut suffix_groups: HashMap<String, Vec<&String>> = HashMap::new();
+    for name in entries.keys() {
         let lower = name.to_lowercase();
         if !ambiguous_names.contains(&lower) {
             if case_insensitive.remove(&lower).is_some() {
                 ambiguous_names.insert(lower);
             } else {
-                case_insensitive.insert(lower, *price);
+                case_insensitive.insert(lower, name.clone());
             }
         }
         let suffix = name.rsplit('/').next().unwrap_or(name).to_lowercase();
-        suffix_groups.entry(suffix).or_default().push(price);
+        suffix_groups.entry(suffix).or_default().push(name);
     }
 
-    for (suffix, group) in suffix_groups {
+    for (suffix, mut group) in suffix_groups {
+        group.sort();
         if group.len() == 1 {
-            unique_suffixes.insert(suffix, *group[0]);
+            unique_suffixes.insert(suffix, (group[0].clone(), MatchMethod::UniqueSuffix));
             continue;
         }
-        // 以四桶价格全等做众数统计;缺价和明确零价是不同状态。
-        let key = |p: &ModelPrice| (
-            p.input.to_bits(), p.output.to_bits(),
-            p.cache_read.map(f64::to_bits), p.cache_write.map(f64::to_bits),
-        );
+        let key = |name: &str| {
+            let p = entries[name].price;
+            (
+                p.input.to_bits(),
+                p.output.to_bits(),
+                p.cache_read.map(f64::to_bits),
+                p.cache_write.map(f64::to_bits),
+            )
+        };
         let mut counts = HashMap::new();
-        for price in &group {
-            let e = counts.entry(key(price)).or_insert((0, **price));
-            e.0 += 1;
+        for name in &group {
+            let entry = counts.entry(key(name)).or_insert((0, *name));
+            entry.0 += 1;
         }
-        if let Some((best_n, best_price)) = counts.values().max_by_key(|(n, _)| *n)
-            && best_n * 2 > group.len()
+        if let Some((number, name)) = counts.values().max_by_key(|(number, _)| *number)
+            && number * 2 > group.len()
         {
-            unique_suffixes.insert(suffix, *best_price);
+            unique_suffixes.insert(suffix, ((*name).clone(), MatchMethod::MajorityReference));
         } else {
             ambiguous_suffixes.insert(suffix);
         }
     }
 
+    snapshot.version = content_version(&entries, snapshot.dataset_url.as_deref());
     Pricing {
+        snapshot,
         entries,
         case_insensitive,
         ambiguous_names,
@@ -473,9 +821,210 @@ fn build(mut entries: HashMap<String, ModelPrice>) -> Pricing {
     }
 }
 
+fn valid_price(price: &ModelPrice) -> bool {
+    [
+        Some(price.input),
+        Some(price.output),
+        price.cache_read,
+        price.cache_write,
+    ]
+    .into_iter()
+    .flatten()
+    .all(|value| value.is_finite() && value >= 0.0)
+}
+
+fn content_version(entries: &HashMap<String, Entry>, dataset_url: Option<&str>) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut update = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    };
+    let dataset = dataset_url.unwrap_or("");
+    update(&(dataset.len() as u64).to_le_bytes());
+    update(dataset.as_bytes());
+    let mut named: Vec<_> = entries.iter().collect();
+    named.sort_by_key(|(name, _)| *name);
+    for (name, entry) in named {
+        update(&(name.len() as u64).to_le_bytes());
+        update(name.as_bytes());
+        update(&[match entry.origin {
+            PriceOrigin::Upstream => 0,
+            PriceOrigin::Supplement => 1,
+            PriceOrigin::LegacyUnknown => 2,
+        }]);
+        let p = entry.price;
+        for rate in [Some(p.input), Some(p.output), p.cache_read, p.cache_write] {
+            match rate {
+                Some(rate) => {
+                    update(&[1]);
+                    update(&rate.to_bits().to_le_bytes());
+                }
+                None => update(&[0]),
+            }
+        }
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn build(entries: HashMap<String, ModelPrice>) -> Pricing {
+        super::build(
+            entries,
+            PriceOrigin::LegacyUnknown,
+            PriceSnapshot::supplements(now_ms(), CacheState::NotLoaded),
+        )
+    }
+
+    struct TestHome(std::path::PathBuf);
+
+    impl TestHome {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "quotakeeper-pricing-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            std::fs::create_dir_all(path.join(".quotakeeper")).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    fn upstream_doc(models: HashMap<String, ModelPrice>) -> CacheDoc {
+        CacheDoc {
+            schema_version: Some(2),
+            dataset_url: Some(PRICING_URLS[1].into()),
+            fetched_at_ms: Some(now_ms() - 1_000),
+            models,
+        }
+    }
+
+    #[test]
+    fn future_fetch_time_keeps_prices_without_claiming_freshness() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let mut doc = upstream_doc(HashMap::from([(
+            "test".into(),
+            ModelPrice {
+                input: 3.0,
+                ..Default::default()
+            },
+        )]));
+        doc.fetched_at_ms = Some(2_000);
+        write_cache(&path, &doc).unwrap();
+        let (entries, origin, snapshot) = read_cache(&path, 1_000).unwrap();
+        assert_eq!(snapshot.fetched_at_ms, Some(2_000));
+        assert_eq!(snapshot.loaded_at_ms, 1_000);
+        assert_eq!(snapshot.cache_state, CacheState::UnknownAge);
+        let pricing = super::build(entries, origin, snapshot);
+        assert_eq!(
+            pricing
+                .quote(
+                    "test",
+                    &TokenBreakdown {
+                        input: 1,
+                        ..Default::default()
+                    }
+                )
+                .amount,
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn failed_cache_replacement_preserves_previous_document() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let mut doc = upstream_doc(HashMap::from([(
+            "test".into(),
+            ModelPrice {
+                input: 1.0,
+                ..Default::default()
+            },
+        )]));
+        write_cache(&path, &doc).unwrap();
+        let previous = std::fs::read(&path).unwrap();
+        doc.models.get_mut("test").unwrap().input = 2.0;
+        let error = publish_cache(&path, &doc, |temporary, target| {
+            assert_eq!(temporary.parent(), target.parent());
+            assert_ne!(temporary, target);
+            assert_eq!(std::fs::read(target).unwrap(), previous);
+            let ready: CacheDoc =
+                serde_json::from_slice(&std::fs::read(temporary).unwrap()).unwrap();
+            assert_eq!(ready.models["test"].input, 2.0);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "replacement denied",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn cache_v2_preserves_real_metadata_and_independent_origins() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let doc = upstream_doc(HashMap::from([(
+            "mimo-v2.6-flash".into(),
+            ModelPrice {
+                input: 9.0,
+                output: 9.0,
+                ..Default::default()
+            },
+        )]));
+        write_cache(&path, &doc).unwrap();
+        let p = Pricing::load(&home.0);
+        let snapshot = p.snapshot();
+        assert_eq!(snapshot.source, SnapshotSource::CacheV2);
+        assert_eq!(snapshot.cache_state, CacheState::Fresh);
+        assert_eq!(snapshot.fetched_at_ms, doc.fetched_at_ms);
+        assert_eq!(snapshot.dataset_url, doc.dataset_url);
+        assert!(snapshot.loaded_at_ms >= doc.fetched_at_ms.unwrap());
+        assert_eq!(Pricing::load(&home.0).snapshot().version, snapshot.version);
+        let tokens = TokenBreakdown {
+            input: 1,
+            ..Default::default()
+        };
+        for (name, origin) in [
+            ("mimo-v2.6-flash", PriceOrigin::Upstream),
+            ("hy3", PriceOrigin::Supplement),
+        ] {
+            let PriceBasis::Estimated(basis) = p.quote(name, &tokens).basis else {
+                panic!("known entry must be quoted");
+            };
+            for rate in [&basis.input, &basis.output]
+                .into_iter()
+                .chain(basis.cache_read.as_ref())
+            {
+                assert_eq!(rate.origin, origin);
+                assert_eq!(rate.entry, name);
+            }
+        }
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], 2);
+        assert_eq!(saved["models"].as_object().unwrap().len(), 1);
+        assert!(saved["models"].get("hy3").is_none());
+    }
 
     fn pricing_with(entries: &[(&str, f64, f64)]) -> Pricing {
         build(
@@ -497,6 +1046,39 @@ mod tests {
     }
 
     #[test]
+    fn quote_keeps_named_entries_for_exact_and_case_matches() {
+        let p = pricing_with(&[("provider/test-model", 3.0, 4.0)]);
+        let tokens = TokenBreakdown {
+            input: 10,
+            ..Default::default()
+        };
+        for (name, method) in [
+            ("provider/test-model", MatchMethod::Exact),
+            ("Provider/Test-Model", MatchMethod::CaseInsensitive),
+        ] {
+            let quote = p.quote(name, &tokens);
+            assert_eq!(quote.amount, Some(30.0));
+            let PriceBasis::Estimated(basis) = quote.basis else {
+                panic!("known entry must have an estimated basis");
+            };
+            assert_eq!(basis.matched_entry, "provider/test-model");
+            assert_eq!(basis.match_method, method);
+            assert_eq!(basis.input.entry, "provider/test-model");
+            assert_eq!(basis.input.usd_per_token, 3.0);
+            for rate in [
+                &basis.input,
+                &basis.output,
+                basis.cache_read.as_ref().unwrap(),
+            ] {
+                assert_eq!(rate.entry, "provider/test-model");
+                assert_eq!(rate.origin, PriceOrigin::LegacyUnknown);
+            }
+            assert!(!basis.family_fallback);
+            assert!(!basis.cache_fill);
+        }
+    }
+
+    #[test]
     fn bare_glm_uses_official_price_when_resellers_disagree() {
         let official = ModelPrice { input: 1.5e-7, output: 5e-7, cache_read: Some(3e-8), cache_write: Some(0.0) };
         let reseller = ModelPrice { cache_write: None, ..official };
@@ -509,14 +1091,28 @@ mod tests {
         let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, cache_write: 1_000_000, ..Default::default() };
         // 裸名直接落官方条目
         for name in ["glm-5.3-flash", "GLM-5.3-Flash"] {
-            assert!((p.estimate(name, &t).expect("official GLM price") - 0.68).abs() < 1e-9);
+            assert!((p.quote(name, &t).amount.expect("official GLM price") - 0.68).abs() < 1e-9);
         }
         // 后缀歧义的渠道名:官方条目兜底(渠道互相打架时不放弃估价)
-        assert!((p.estimate("openrouter/z-ai/glm-5.3-flash", &t).expect("official rescue") - 0.68).abs() < 1e-9);
-        assert!((p.estimate("nebius/zai-org/GLM-5.3-Flash", &t).expect("official rescue") - 0.68).abs() < 1e-9);
+        assert!(
+            (p.quote("openrouter/z-ai/glm-5.3-flash", &t)
+                .amount
+                .expect("official rescue")
+                - 0.68)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (p.quote("nebius/zai-org/GLM-5.3-Flash", &t)
+                .amount
+                .expect("official rescue")
+                - 0.68)
+                .abs()
+                < 1e-9
+        );
         // 裸名已有条目但缺缓存价:主价保留,官方只补缺桶 → 仍 0.68
         let p = build(HashMap::from([("glm-5.3-flash".into(), reseller), ("zai/glm-5.3-flash".into(), official)]));
-        assert!((p.estimate("glm-5.3-flash", &t).expect("official fill") - 0.68).abs() < 1e-9);
+        assert!((p.quote("glm-5.3-flash", &t).amount.expect("official fill") - 0.68).abs() < 1e-9);
     }
 
     #[test]
@@ -530,8 +1126,21 @@ mod tests {
             ("v3/glm-5.3-flash".into(), complete),
             ("zai/glm-5.3-flash".into(), official),
         ]));
-        let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, cache_write: 1_000_000, ..Default::default() };
-        assert!((p.estimate("v1/glm-5.3-flash", &t).expect("majority kept") - 0.83).abs() < 1e-9);
+        let t = TokenBreakdown {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            cache_write: 1_000_000,
+            ..Default::default()
+        };
+        assert!(
+            (p.quote("v1/glm-5.3-flash", &t)
+                .amount
+                .expect("majority kept")
+                - 0.83)
+                .abs()
+                < 1e-9
+        );
         // 众数渠道缺缓存价:基础桶用渠道价,缺的桶由官方补
         let no_cache = ModelPrice { cache_read: None, cache_write: None, ..complete };
         let p = build(HashMap::from([
@@ -541,8 +1150,20 @@ mod tests {
             ("zai/glm-5.3-flash".into(), official),
         ]));
         // 0.2(in) + 0.6(out) + 0.03(官方 cr);cw 未消耗不参与
-        let t2 = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
-        assert!((p.estimate("v1/glm-5.3-flash", &t2).expect("official fills cache_read") - 0.83).abs() < 1e-9);
+        let t2 = TokenBreakdown {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            ..Default::default()
+        };
+        assert!(
+            (p.quote("v1/glm-5.3-flash", &t2)
+                .amount
+                .expect("official fills cache_read")
+                - 0.83)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -555,7 +1176,7 @@ mod tests {
         let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
         let expected = 0.3 + 1.2 + 0.006;
         for name in ["deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"] {
-            assert!((p.estimate(name, &t).expect("reverse alias") - expected).abs() < 1e-9);
+            assert!((p.quote(name, &t).amount.expect("reverse alias") - expected).abs() < 1e-9);
         }
     }
 
@@ -568,7 +1189,14 @@ mod tests {
         )]));
         let t = TokenBreakdown { input: 1_000_000, output: 1_000_000, cache_read: 1_000_000, ..Default::default() };
         let expected = 0.75 + 3.75 + 0.075;
-        assert!((p.estimate("gemini-3.8-flash-high", &t).expect("effort variant") - expected).abs() < 1e-9);
+        assert!(
+            (p.quote("gemini-3.8-flash-high", &t)
+                .amount
+                .expect("effort variant")
+                - expected)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
@@ -578,7 +1206,17 @@ mod tests {
             ("vendor-a/shared-model".into(), ModelPrice { input: 1.0, output: 2.0, ..Default::default() }),
             ("vendor-b/shared-model".into(), ModelPrice { input: 3.0, output: 4.0, ..Default::default() }),
         ]));
-        assert_eq!(p.estimate("shared-model", &TokenBreakdown { input: 10, ..Default::default() }), None);
+        assert_eq!(
+            p.quote(
+                "shared-model",
+                &TokenBreakdown {
+                    input: 10,
+                    ..Default::default()
+                }
+            )
+            .amount,
+            None
+        );
     }
 
     #[test]
@@ -590,17 +1228,17 @@ mod tests {
         let price = ModelPrice { input: 1.0, output: 2.0, ..Default::default() };
         let p = build(HashMap::from([("test".into(), price)]));
         let mut t = TokenBreakdown { input: 10, ..Default::default() };
-        assert_eq!(p.estimate("test", &t), Some(10.0));
+        assert_eq!(p.quote("test", &t).amount, Some(10.0));
         t.cache_read = 5;
-        assert_eq!(p.estimate("test", &t), None);
+        assert_eq!(p.quote("test", &t).amount, None);
         t.cache_read = 0;
         t.cache_write = 5;
-        assert_eq!(p.estimate("test", &t), None);
+        assert_eq!(p.quote("test", &t).amount, None);
         let p = build(HashMap::from([("test".into(), ModelPrice { cache_read: Some(0.0), cache_write: Some(0.0), ..price })]));
-        assert_eq!(p.estimate("test", &t), Some(10.0));
+        assert_eq!(p.quote("test", &t).amount, Some(10.0));
         for input in [-1.0, f64::NAN, f64::INFINITY] {
             let p = build(HashMap::from([("invalid".into(), ModelPrice { input, ..price })]));
-            assert_eq!(p.estimate("invalid", &t), None);
+            assert_eq!(p.quote("invalid", &t).amount, None);
         }
     }
 
@@ -608,7 +1246,7 @@ mod tests {
     fn qualified_case_insensitive_name_precedes_bare_alias() {
         let p = pricing_with(&[("test-model", 1.0, 2.0), ("provider/test-model", 3.0, 4.0)]);
         let t = TokenBreakdown { input: 10, ..Default::default() };
-        assert_eq!(p.estimate("Provider/Test-Model", &t), Some(30.0));
+        assert_eq!(p.quote("Provider/Test-Model", &t).amount, Some(30.0));
     }
 
     #[test]
@@ -622,7 +1260,7 @@ mod tests {
             reasoning: 0,
         };
         // 每-token 单价 × token 数:1e6×2 + 1e5×8 + 5e5×0.1
-        let cost = p.estimate("gpt-6-sol", &t).unwrap();
+        let cost = p.quote("gpt-6-sol", &t).amount.unwrap();
         assert!((cost - 2_850_000.0).abs() < 1e-6);
     }
 
@@ -630,15 +1268,18 @@ mod tests {
     fn provider_prefix_falls_back_to_suffix() {
         let p = pricing_with(&[("deepseek-v4.1-flash", 1.0, 2.0)]);
         assert!(
-            p.estimate("deepseek/deepseek-v4.1-flash", &TokenBreakdown::default())
+            p.quote("deepseek/deepseek-v4.1-flash", &TokenBreakdown::default())
+                .amount
                 .is_some()
         );
         assert!(
-            p.estimate("DeepSeek/deepseek-v4.1-flash", &TokenBreakdown::default())
+            p.quote("DeepSeek/deepseek-v4.1-flash", &TokenBreakdown::default())
+                .amount
                 .is_some()
         );
         assert!(
-            p.estimate("totally-unknown-model", &TokenBreakdown::default())
+            p.quote("totally-unknown-model", &TokenBreakdown::default())
+                .amount
                 .is_none()
         );
     }
@@ -652,10 +1293,10 @@ mod tests {
             input: 1_000_000,
             ..Default::default()
         };
-        assert_eq!(p.estimate("glm-5.3-flash", &t), Some(2_000_000.0));
-        assert_eq!(p.estimate("zai/glm-5.3-flash", &t), Some(2_000_000.0));
+        assert_eq!(p.quote("glm-5.3-flash", &t).amount, Some(2_000_000.0));
+        assert_eq!(p.quote("zai/glm-5.3-flash", &t).amount, Some(2_000_000.0));
         // 精确名命中时优先于家族兜底
-        assert_eq!(p.estimate("glm-5-flash", &t), Some(2_000_000.0));
+        assert_eq!(p.quote("glm-5-flash", &t).amount, Some(2_000_000.0));
     }
 
     #[test]
@@ -677,10 +1318,14 @@ mod tests {
     fn canonical_alias_recovers_missing_catalog_names() {
         let p = pricing_with(&[("deepseek-v4.1-flash", 1.0, 2.0)]);
         let cost = p
-            .estimate("deepseek-flash", &TokenBreakdown {
-                input: 1_000_000,
-                ..Default::default()
-            })
+            .quote(
+                "deepseek-flash",
+                &TokenBreakdown {
+                    input: 1_000_000,
+                    ..Default::default()
+                },
+            )
+            .amount
             .unwrap();
         assert!((cost - 1_000_000.0).abs() < 1e-9);
     }
@@ -701,11 +1346,15 @@ mod tests {
         );
         let p = build(entries);
         let cost = p
-            .estimate("glm-5.3-flash", &TokenBreakdown {
-                input: 1_000_000,
-                output: 1_000_000,
-                ..Default::default()
-            })
+            .quote(
+                "glm-5.3-flash",
+                &TokenBreakdown {
+                    input: 1_000_000,
+                    output: 1_000_000,
+                    ..Default::default()
+                },
+            )
+            .amount
             .unwrap();
         assert!((cost - (0.15 + 0.5)).abs() < 1e-9);
     }
@@ -721,7 +1370,11 @@ mod tests {
             );
         }
         let p = build(entries);
-        assert!(p.estimate("shared-model", &TokenBreakdown::default()).is_none());
+        assert!(
+            p.quote("shared-model", &TokenBreakdown::default())
+                .amount
+                .is_none()
+        );
     }
 
     #[test]
@@ -754,14 +1407,14 @@ mod tests {
         };
 
         assert_eq!(
-            p.estimate("provider-a/shared-model", &tokens),
+            p.quote("provider-a/shared-model", &tokens).amount,
             Some(1_000_000.0)
         );
         assert_eq!(
-            p.estimate("provider-b/shared-model", &tokens),
+            p.quote("provider-b/shared-model", &tokens).amount,
             Some(3_000_000.0)
         );
-        assert_eq!(p.estimate("shared-model", &tokens), None);
+        assert_eq!(p.quote("shared-model", &tokens).amount, None);
     }
 
     #[test]
@@ -798,7 +1451,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(p.estimate("shared-model", &tokens), Some(5_000_000.0));
+        assert_eq!(p.quote("shared-model", &tokens).amount, Some(5_000_000.0));
     }
 
     #[test]
@@ -820,7 +1473,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(p.estimate("OpenAI/GPT-6-SOL", &tokens), Some(2.0));
+        assert_eq!(p.quote("OpenAI/GPT-6-SOL", &tokens).amount, Some(2.0));
     }
 
     /// 路由层命名(group/auto-*):点分版本被消毒成连字符再套 auto- 路由前缀。
@@ -856,17 +1509,20 @@ mod tests {
         };
         // deepseek:反向别名 deepseek-flash,0.3 + 1.2 + 0.006
         let ds = p
-            .estimate("group/auto-deepseek-v4-1-flash", &t)
+            .quote("group/auto-deepseek-v4-1-flash", &t)
+            .amount
             .expect("router deepseek");
         assert!((ds - (0.3 + 1.2 + 0.006)).abs() < 1e-9);
         // glm:官方条目兜底,0.15 + 0.5 + 0.03
         let glm = p
-            .estimate("group/auto-glm-5-3-flash", &t)
+            .quote("group/auto-glm-5-3-flash", &t)
+            .amount
             .expect("router glm");
         assert!((glm - (0.15 + 0.5 + 0.03)).abs() < 1e-9);
         // mimo:补充价 0.14 + 0.28 + 0.0028
         let mimo = p
-            .estimate("group/auto-mimo-v2-6-flash", &t)
+            .quote("group/auto-mimo-v2-6-flash", &t)
+            .amount
             .expect("router mimo");
         assert!((mimo - 0.4228).abs() < 1e-6);
     }
@@ -881,32 +1537,32 @@ mod tests {
             ..Default::default()
         };
         // mimo-v2.6-flash: 1e6 * 1.4e-7 + 1e6 * 2.8e-7 + 1e6 * 2.8e-9 = 0.14 + 0.28 + 0.0028 = 0.4228
-        let cost_mimo = p.estimate("mimo-v2.6-flash", &t).unwrap();
+        let cost_mimo = p.quote("mimo-v2.6-flash", &t).amount.unwrap();
         assert!((cost_mimo - 0.4228).abs() < 1e-6);
 
         // xiaomi/mimo-v2.6-flash 匹配
-        let cost_xiaomi = p.estimate("xiaomi/mimo-v2.6-flash", &t).unwrap();
+        let cost_xiaomi = p.quote("xiaomi/mimo-v2.6-flash", &t).amount.unwrap();
         assert!((cost_xiaomi - 0.4228).abs() < 1e-6);
 
         // hy3: 1e6 * 1.3e-7 + 1e6 * 5.3e-7 + 1e6 * 3.3e-8 = 0.13 + 0.53 + 0.033 = 0.693
-        let cost_hy3 = p.estimate("hy3", &t).unwrap();
+        let cost_hy3 = p.quote("hy3", &t).amount.unwrap();
         assert!((cost_hy3 - 0.693).abs() < 1e-6);
 
         // gpt-6.1-sol(LiteLLM 收录空窗期补的 OpenRouter 官价):
         // 1e6 * 2e-6 + 1e6 * 1e-5 + 1e6 * 1e-7 = 2 + 10 + 0.1 = 12.1
-        let cost_61 = p.estimate("gpt-6.1-sol", &t).unwrap();
+        let cost_61 = p.quote("gpt-6.1-sol", &t).amount.unwrap();
         assert!((cost_61 - 12.1).abs() < 1e-9);
-        let cost_61_prefixed = p.estimate("openai/gpt-6.1-sol", &t).unwrap();
+        let cost_61_prefixed = p.quote("openai/gpt-6.1-sol", &t).amount.unwrap();
         assert!((cost_61_prefixed - 12.1).abs() < 1e-9);
 
         // 官方限免/隐身模型为 0 元
-        let cost_free = p.estimate("big-pickle", &t).unwrap();
+        let cost_free = p.quote("big-pickle", &t).amount.unwrap();
         assert_eq!(cost_free, 0.0);
-        let cost_bunny = p.estimate("space-bunny-free", &t).unwrap();
+        let cost_bunny = p.quote("space-bunny-free", &t).amount.unwrap();
         assert_eq!(cost_bunny, 0.0);
 
         // 内部审查模型不入表，保持缺价
-        assert!(p.estimate("codex-auto-review", &t).is_none());
+        assert!(p.quote("codex-auto-review", &t).amount.is_none());
     }
 
     #[test]
@@ -925,7 +1581,572 @@ mod tests {
             input: 1_000_000,
             ..Default::default()
         };
-        let cost = p.estimate("mimo-v2.6-flash", &t).unwrap();
+        let cost = p.quote("mimo-v2.6-flash", &t).amount.unwrap();
         assert!((cost - 9_000_000.0).abs() < 1e-6);
+    }
+    fn estimated_basis(quote: PriceQuote) -> EstimateBasis {
+        match quote.basis {
+            PriceBasis::Estimated(basis) => basis,
+            other => panic!("expected estimated basis, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quote_explains_alias_reference_suffix_and_family_matches() {
+        let cases: &[(&[(&str, f64, f64)], &str, &str, MatchMethod, bool)] = &[
+            (
+                &[("deepseek-v4.1-flash", 1.0, 2.0)],
+                "deepseek-flash",
+                "deepseek-v4.1-flash",
+                MatchMethod::ExplicitAlias,
+                false,
+            ),
+            (
+                &[("glm-5.3-flash", 1.0, 2.0)],
+                "openrouter/z-ai/GLM-Flash-Latest",
+                "glm-5.3-flash",
+                MatchMethod::ExplicitAlias,
+                false,
+            ),
+            (
+                &[("deepseek-flash", 1.0, 2.0)],
+                "deepseek-v4.1-flash",
+                "deepseek-flash",
+                MatchMethod::ReverseAlias,
+                false,
+            ),
+            (
+                &[("plain-model", 1.0, 2.0)],
+                "provider/plain-model",
+                "plain-model",
+                MatchMethod::Canonical,
+                false,
+            ),
+            (
+                &[("gemini-3.8-flash", 1.0, 2.0)],
+                "gemini-3.8-flash-high",
+                "gemini-3.8-flash",
+                MatchMethod::Canonical,
+                false,
+            ),
+            (
+                &[("gemini/gemini-3.8-flash", 1.0, 2.0)],
+                "gemini-3.8-flash",
+                "gemini/gemini-3.8-flash",
+                MatchMethod::OfficialReference,
+                false,
+            ),
+            (
+                &[("vendor/unique-model", 1.0, 2.0)],
+                "unique-model",
+                "vendor/unique-model",
+                MatchMethod::UniqueSuffix,
+                false,
+            ),
+            (
+                &[("glm-5-flash", 1.0, 2.0)],
+                "glm-5.3-flash",
+                "glm-5-flash",
+                MatchMethod::Exact,
+                true,
+            ),
+        ];
+        let tokens = TokenBreakdown {
+            input: 1,
+            ..Default::default()
+        };
+        for (entries, model, entry, method, family) in cases {
+            let quote = pricing_with(entries).quote(model, &tokens);
+            assert_eq!(quote.amount, Some(1.0), "{model}");
+            let basis = estimated_basis(quote);
+            assert_eq!(basis.matched_entry, *entry, "{model}");
+            for rate in [
+                &basis.input,
+                &basis.output,
+                basis.cache_read.as_ref().unwrap(),
+            ] {
+                assert_eq!(rate.entry, *entry, "{model}");
+                assert_eq!(rate.origin, PriceOrigin::LegacyUnknown, "{model}");
+            }
+            assert_eq!(basis.match_method, *method, "{model}");
+            assert_eq!(basis.family_fallback, *family, "{model}");
+        }
+    }
+
+    #[test]
+    fn majority_reference_selects_a_stable_named_entry_without_overriding_channels() {
+        let entries = [
+            ("z/shared-model", 3.0, 2.0),
+            ("b/shared-model", 1.0, 2.0),
+            ("a/shared-model", 1.0, 2.0),
+        ];
+        let tokens = TokenBreakdown {
+            input: 1,
+            ..Default::default()
+        };
+        let first = pricing_with(&entries).quote("shared-model", &tokens);
+        let second = pricing_with(&entries.into_iter().rev().collect::<Vec<_>>())
+            .quote("shared-model", &tokens);
+        assert_eq!(first, second);
+        assert_eq!(first.amount, Some(1.0));
+        let basis = estimated_basis(first);
+        assert_eq!(basis.match_method, MatchMethod::MajorityReference);
+        assert_eq!(basis.matched_entry, "a/shared-model");
+        for rate in [
+            &basis.input,
+            &basis.output,
+            basis.cache_read.as_ref().unwrap(),
+        ] {
+            assert_eq!(rate.entry, "a/shared-model");
+            assert_eq!(rate.origin, PriceOrigin::LegacyUnknown);
+        }
+        let direct = pricing_with(&entries).quote("z/shared-model", &tokens);
+        assert_eq!(direct.amount, Some(3.0));
+        assert_eq!(estimated_basis(direct).match_method, MatchMethod::Exact);
+    }
+
+    #[test]
+    fn quote_unpriced_reasons_preserve_attempted_rates_and_explicit_zero() {
+        let price = ModelPrice {
+            input: 1.0,
+            output: 2.0,
+            ..Default::default()
+        };
+        let p = build(HashMap::from([("test".into(), price)]));
+        for (read, write, reason) in [
+            (5, 0, UnpricedReason::MissingCacheRead),
+            (0, 5, UnpricedReason::MissingCacheWrite),
+            (5, 5, UnpricedReason::MissingCacheReadAndWrite),
+        ] {
+            let quote = p.quote(
+                "test",
+                &TokenBreakdown {
+                    input: 10,
+                    cache_read: read,
+                    cache_write: write,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(quote.amount, None);
+            let PriceBasis::Unpriced {
+                reason: actual,
+                attempted: Some(basis),
+            } = quote.basis
+            else {
+                panic!("missing consumed bucket must refuse the whole estimate");
+            };
+            assert_eq!(actual, reason);
+            assert_eq!(basis.input.entry, "test");
+            assert_eq!(basis.input.usd_per_token, 1.0);
+        }
+        let zero = build(HashMap::from([(
+            "test".into(),
+            ModelPrice {
+                cache_read: Some(0.0),
+                cache_write: Some(0.0),
+                ..price
+            },
+        )]));
+        let quote = zero.quote(
+            "test",
+            &TokenBreakdown {
+                input: 10,
+                cache_read: 5,
+                cache_write: 5,
+                ..Default::default()
+            },
+        );
+        assert_eq!(quote.amount, Some(10.0));
+        assert_eq!(
+            estimated_basis(quote).cache_write.unwrap().usd_per_token,
+            0.0
+        );
+        assert_eq!(
+            p.quote("test", &TokenBreakdown::default()).amount,
+            Some(0.0)
+        );
+        assert_eq!(
+            p.quote("missing", &TokenBreakdown::default()).basis,
+            PriceBasis::Unpriced {
+                reason: UnpricedReason::UnknownModel,
+                attempted: None
+            }
+        );
+        let ambiguous = pricing_with(&[("Vendor/Test", 1.0, 2.0), ("vendor/test", 1.0, 2.0)]);
+        assert_eq!(
+            ambiguous
+                .quote("VENDOR/TEST", &TokenBreakdown::default())
+                .basis,
+            PriceBasis::Unpriced {
+                reason: UnpricedReason::AmbiguousName,
+                attempted: None
+            }
+        );
+        let ambiguous = pricing_with(&[("a/shared", 1.0, 2.0), ("b/shared", 3.0, 2.0)]);
+        assert_eq!(
+            ambiguous.quote("shared", &TokenBreakdown::default()).basis,
+            PriceBasis::Unpriced {
+                reason: UnpricedReason::AmbiguousSuffix,
+                attempted: None
+            }
+        );
+        let huge = build(HashMap::from([(
+            "huge".into(),
+            ModelPrice {
+                input: f64::MAX,
+                ..Default::default()
+            },
+        )]));
+        assert!(matches!(
+            huge.quote(
+                "huge",
+                &TokenBreakdown {
+                    input: 2,
+                    ..Default::default()
+                }
+            )
+            .basis,
+            PriceBasis::Unpriced {
+                reason: UnpricedReason::NonFiniteAmount,
+                attempted: Some(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn quote_keeps_channel_buckets_and_fills_only_consumed_missing_cache_rates() {
+        let channel = "openrouter/z-ai/glm-5.3-flash";
+        let official = "zai/glm-5.3-flash";
+        let main = ModelPrice {
+            input: 2.0,
+            output: 3.0,
+            cache_read: None,
+            cache_write: Some(0.0),
+        };
+        let reference = ModelPrice {
+            input: 1.0,
+            output: 1.0,
+            cache_read: Some(0.1),
+            cache_write: Some(5.0),
+        };
+        let p = build(HashMap::from([
+            (channel.into(), main),
+            (official.into(), reference),
+        ]));
+        let tokens = TokenBreakdown {
+            input: 1,
+            output: 1,
+            cache_read: 1,
+            cache_write: 1,
+            ..Default::default()
+        };
+        let quote = p.quote(channel, &tokens);
+        assert_eq!(quote.amount, Some(5.1));
+        let basis = estimated_basis(quote);
+        assert_eq!(basis.matched_entry, channel);
+        assert_eq!(basis.match_method, MatchMethod::Exact);
+        assert!(basis.cache_fill);
+        for rate in [
+            &basis.input,
+            &basis.output,
+            basis.cache_read.as_ref().unwrap(),
+            basis.cache_write.as_ref().unwrap(),
+        ] {
+            assert_eq!(rate.origin, PriceOrigin::LegacyUnknown);
+        }
+        assert_eq!(
+            (basis.input.entry.as_str(), basis.input.usd_per_token),
+            (channel, 2.0)
+        );
+        assert_eq!(
+            (basis.output.entry.as_str(), basis.output.usd_per_token),
+            (channel, 3.0)
+        );
+        let read = basis.cache_read.unwrap();
+        assert_eq!((read.entry.as_str(), read.usd_per_token), (official, 0.1));
+        let write = basis.cache_write.unwrap();
+        assert_eq!((write.entry.as_str(), write.usd_per_token), (channel, 0.0));
+        let unused = estimated_basis(p.quote(
+            channel,
+            &TokenBreakdown {
+                input: 1,
+                ..Default::default()
+            },
+        ));
+        assert!(!unused.cache_fill);
+        assert!(unused.cache_read.is_none());
+        let p = build(HashMap::from([
+            (
+                channel.into(),
+                ModelPrice {
+                    cache_write: None,
+                    ..main
+                },
+            ),
+            (official.into(), reference),
+        ]));
+        let consumed = estimated_basis(p.quote(
+            channel,
+            &TokenBreakdown {
+                cache_read: 1,
+                ..Default::default()
+            },
+        ));
+        assert!(consumed.cache_fill);
+        assert!(consumed.cache_write.is_none());
+        let p = build(HashMap::from([
+            (
+                channel.into(),
+                ModelPrice {
+                    cache_read: Some(0.25),
+                    ..main
+                },
+            ),
+            (official.into(), reference),
+        ]));
+        let complete = p.quote(channel, &tokens);
+        assert_eq!(complete.amount, Some(5.25));
+        assert!(!estimated_basis(complete).cache_fill);
+    }
+
+    #[test]
+    fn legacy_channel_and_supplement_cache_fill_keep_different_origins() {
+        let home = TestHome::new();
+        std::fs::write(
+            cache_path(&home.0),
+            br#"{"fetched_at_ms":1,"models":{"vendor/gpt-6.1-sol":{"input":2,"output":5}}}"#,
+        )
+        .unwrap();
+        let p = Pricing::load(&home.0);
+        let quote = p.quote(
+            "vendor/gpt-6.1-sol",
+            &TokenBreakdown {
+                input: 1,
+                cache_read: 1,
+                ..Default::default()
+            },
+        );
+        assert_eq!(quote.amount, Some(2.0000001));
+        let basis = estimated_basis(quote);
+        assert!(basis.cache_fill);
+        assert_eq!(basis.input.origin, PriceOrigin::LegacyUnknown);
+        assert_eq!(basis.input.entry, "vendor/gpt-6.1-sol");
+        assert_eq!(basis.output.entry, "vendor/gpt-6.1-sol");
+        assert_eq!(basis.output.origin, PriceOrigin::LegacyUnknown);
+        assert_eq!(basis.output.usd_per_token, 5.0);
+        let cache = basis.cache_read.unwrap();
+        assert_eq!(cache.origin, PriceOrigin::Supplement);
+        assert_eq!(cache.entry, "gpt-6.1-sol");
+        assert_eq!(cache.usd_per_token, 1e-7);
+    }
+
+    #[test]
+    fn cache_load_distinguishes_missing_corrupt_legacy_and_stale_documents() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let missing = Pricing::load(&home.0);
+        assert_eq!(missing.snapshot().source, SnapshotSource::SupplementsOnly);
+        assert_eq!(missing.snapshot().cache_state, CacheState::Missing);
+        assert_eq!(missing.snapshot().fetched_at_ms, None);
+        assert_eq!(missing.snapshot().dataset_url, None);
+        assert_eq!(
+            missing.snapshot().version,
+            Pricing::default().snapshot().version
+        );
+        assert_eq!(
+            estimated_basis(missing.quote("hy3", &TokenBreakdown::default()))
+                .input
+                .origin,
+            PriceOrigin::Supplement
+        );
+        for bad in [
+            "{",
+            "{}",
+            r#"{"models":{}}"#,
+            r#"{"schema_version":3,"models":{"test":{"input":1,"output":2}}}"#,
+            r#"{"schema_version":2,"models":{"test":{"input":1,"output":2}}}"#,
+            r#"{"models":{"test":{"input":-1,"output":2}}}"#,
+        ] {
+            std::fs::write(&path, bad).unwrap();
+            let corrupt = Pricing::load(&home.0);
+            assert_eq!(corrupt.snapshot().cache_state, CacheState::Corrupt, "{bad}");
+            assert_eq!(corrupt.snapshot().source, SnapshotSource::SupplementsOnly);
+            assert_eq!(
+                estimated_basis(corrupt.quote("hy3", &TokenBreakdown::default()))
+                    .input
+                    .origin,
+                PriceOrigin::Supplement
+            );
+        }
+        std::fs::write(
+            &path,
+            br#"{"models":{"mimo-v2.6-flash":{"input":9,"output":9}}}"#,
+        )
+        .unwrap();
+        let legacy = Pricing::load(&home.0);
+        assert_eq!(legacy.snapshot().source, SnapshotSource::LegacyCache);
+        assert_eq!(legacy.snapshot().cache_state, CacheState::UnknownAge);
+        assert_eq!(legacy.snapshot().fetched_at_ms, None);
+        assert_eq!(legacy.snapshot().dataset_url, None);
+        assert_eq!(
+            estimated_basis(legacy.quote("mimo-v2.6-flash", &TokenBreakdown::default()))
+                .input
+                .origin,
+            PriceOrigin::LegacyUnknown
+        );
+        assert_eq!(
+            estimated_basis(legacy.quote("hy3", &TokenBreakdown::default()))
+                .input
+                .origin,
+            PriceOrigin::Supplement
+        );
+        let mut doc = upstream_doc(HashMap::from([(
+            "test".into(),
+            ModelPrice {
+                input: 1.0,
+                ..Default::default()
+            },
+        )]));
+        doc.fetched_at_ms = Some(1_000);
+        write_cache(&path, &doc).unwrap();
+        let interval = REFRESH_INTERVAL.as_millis() as i64;
+        assert_eq!(
+            read_cache(&path, 1_000 + interval - 1)
+                .unwrap()
+                .2
+                .cache_state,
+            CacheState::Fresh
+        );
+        assert_eq!(
+            read_cache(&path, 1_000 + interval).unwrap().2.cache_state,
+            CacheState::Stale
+        );
+        let stale = Pricing::load(&home.0);
+        assert_eq!(stale.snapshot().cache_state, CacheState::Stale);
+        assert_eq!(
+            stale
+                .quote(
+                    "test",
+                    &TokenBreakdown {
+                        input: 1,
+                        ..Default::default()
+                    }
+                )
+                .amount,
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn cache_version_tracks_content_and_origins_not_fetch_clocks_or_map_order() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let models = [
+            (
+                "a".to_string(),
+                ModelPrice {
+                    input: 1.0,
+                    ..Default::default()
+                },
+            ),
+            (
+                "b".to_string(),
+                ModelPrice {
+                    input: 2.0,
+                    ..Default::default()
+                },
+            ),
+        ];
+        let mut doc = upstream_doc(models.clone().into());
+        doc.fetched_at_ms = Some(1_000);
+        write_cache(&path, &doc).unwrap();
+        let first = Pricing::load(&home.0).snapshot().version.clone();
+        doc.models = models.into_iter().rev().collect();
+        doc.fetched_at_ms = Some(2_000);
+        write_cache(&path, &doc).unwrap();
+        assert_eq!(Pricing::load(&home.0).snapshot().version, first);
+        doc.models.get_mut("a").unwrap().input = 3.0;
+        write_cache(&path, &doc).unwrap();
+        assert_ne!(Pricing::load(&home.0).snapshot().version, first);
+        doc.models.get_mut("a").unwrap().input = 1.0;
+        doc.dataset_url = Some(PRICING_URLS[0].into());
+        write_cache(&path, &doc).unwrap();
+        assert_ne!(Pricing::load(&home.0).snapshot().version, first);
+        doc.schema_version = None;
+        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        let legacy = Pricing::load(&home.0);
+        assert_eq!(legacy.snapshot().source, SnapshotSource::LegacyCache);
+        assert_ne!(legacy.snapshot().version, first);
+    }
+
+    #[test]
+    fn invalid_upstream_documents_cannot_replace_a_valid_cache() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let mut doc = upstream_doc(HashMap::from([(
+            "test".into(),
+            ModelPrice {
+                input: 1.0,
+                ..Default::default()
+            },
+        )]));
+        write_cache(&path, &doc).unwrap();
+        let previous = std::fs::read(&path).unwrap();
+        for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+            doc.models.get_mut("test").unwrap().input = invalid;
+            assert!(write_cache(&path, &doc).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), previous);
+        }
+        doc.models.get_mut("test").unwrap().input = 1.0;
+        doc.dataset_url = None;
+        assert!(write_cache(&path, &doc).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn concurrent_cache_replacements_publish_complete_unique_documents() {
+        let home = TestHome::new();
+        let path = cache_path(&home.0);
+        let temporary_names = std::sync::Mutex::new(HashSet::new());
+        std::thread::scope(|scope| {
+            for rate in 1..=4 {
+                let path = &path;
+                let names = &temporary_names;
+                scope.spawn(move || {
+                    let doc = upstream_doc(HashMap::from([(
+                        "test".into(),
+                        ModelPrice {
+                            input: rate as f64,
+                            ..Default::default()
+                        },
+                    )]));
+                    publish_cache(path, &doc, |temporary, target| {
+                        let ready: CacheDoc =
+                            serde_json::from_slice(&std::fs::read(temporary).unwrap()).unwrap();
+                        assert_eq!(ready.models["test"].input, rate as f64);
+                        assert!(names.lock().unwrap().insert(temporary.to_owned()));
+                        std::fs::rename(temporary, target)
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        assert_eq!(temporary_names.into_inner().unwrap().len(), 4);
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        let quote = Pricing::load(&home.0).quote(
+            "test",
+            &TokenBreakdown {
+                input: 1,
+                ..Default::default()
+            },
+        );
+        assert!([Some(1.0), Some(2.0), Some(3.0), Some(4.0)].contains(&quote.amount));
     }
 }

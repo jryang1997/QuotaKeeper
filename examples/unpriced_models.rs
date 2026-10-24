@@ -1,6 +1,6 @@
 //! 冒烟:列出本机账本里无法估价的模型(按缺价 token 量降序).仅用于开发验证.
 //!
-//! 与 app 同路径:真实采集 → Pricing 缓存估价 → 仍 None 的按 canonical 模型汇总.
+//! 与 app 共用 aggregate 的单次计价结果。
 
 use std::collections::HashMap;
 
@@ -34,14 +34,7 @@ fn main() {
     }
 
     let pricing = pricing::Pricing::load(&home);
-    for r in records.iter_mut() {
-        if r.cost.is_none()
-            && let Some(c) = pricing.estimate(&r.model, &r.tokens)
-        {
-            r.cost = Some(c);
-            r.cost_is_estimate = true;
-        }
-    }
+    let report = ledger::aggregate(records, Local::now(), &pricing);
 
     // canonical 模型 → (缺价 messages, 缺价 tokens, 总 messages, 总 tokens, 客户端集合, 原始名样例, 缺价记录的桶拆分)
     type ModelStat = (
@@ -54,25 +47,23 @@ fn main() {
         [i64; 4],
     );
     let mut models: HashMap<String, ModelStat> = HashMap::new();
-    let now_ms = Local::now().timestamp_millis();
-    for r in records.iter().filter(|r| r.ts_ms > 0 && r.ts_ms <= now_ms) {
-        let key = ledger::model_alias::canonical(&r.model);
-        let e = models.entry(key).or_default();
-        e.3 += r.tokens.total();
-        e.2 += 1;
-        if r.cost.is_none() {
-            e.0 += 1;
-            e.1 += r.tokens.total();
+    for row in &report.analysis_rows {
+        let e = models.entry(row.model.clone()).or_default();
+        e.3 += row.agg.total();
+        e.2 += row.agg.messages;
+        if row.unpriced_messages > 0 {
+            e.0 += row.unpriced_messages;
+            e.1 += row.agg.total();
             e.6 = [
-                e.6[0] + r.tokens.input,
-                e.6[1] + r.tokens.output,
-                e.6[2] + r.tokens.cache_read,
-                e.6[3] + r.tokens.cache_write,
+                e.6[0] + row.agg.input,
+                e.6[1] + row.agg.output,
+                e.6[2] + row.agg.cache_read,
+                e.6[3] + row.agg.cache_write,
             ];
         }
-        e.4.insert(r.client);
-        if e.5.len() < 3 && !e.5.iter().any(|n| n == &r.model) {
-            e.5.push(r.model.clone());
+        e.4.insert(row.client);
+        if e.5.len() < 3 && !e.5.iter().any(|name| name == &row.raw_model) {
+            e.5.push(row.raw_model.clone());
         }
     }
 
