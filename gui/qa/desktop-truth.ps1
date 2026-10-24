@@ -1,6 +1,6 @@
-﻿# 桌面真相截图:主窗挪开、悬浮窗挪到干净位置后 CopyFromScreen。
+# 桌面真相截图:主窗挪开、悬浮窗挪到干净位置后 CopyFromScreen。
 # 用法: powershell -File desktop-truth.ps1 [-Out <path>]
-param([string]$Out = 'C:/Users/Jerry/Desktop/tui_token_moniter/gui/shots/desktop-truth.png')
+param([string]$Out = 'C:/Users/<user>/Desktop/tui_token_moniter/gui/shots/desktop-truth.png')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @'

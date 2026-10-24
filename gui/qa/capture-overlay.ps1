@@ -1,4 +1,4 @@
-﻿# 悬浮窗桌面区域截图:验证 DWM Acrylic 背板(CDP 截不到窗外的合成结果)
+# 悬浮窗桌面区域截图:验证 DWM Acrylic 背板(CDP 截不到窗外的合成结果)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
@@ -36,6 +36,6 @@ Write-Output "RECT $L $T $W $H"
 $bmp = New-Object System.Drawing.Bitmap($W, $H)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($L, $T, 0, 0, $bmp.Size)
-$out = 'C:/Users/Jerry/Desktop/tui_token_moniter/gui/qa/shots/glass/ov-desktop.png'
+$out = 'C:/Users/<user>/Desktop/tui_token_moniter/gui/qa/shots/glass/ov-desktop.png'
 $bmp.Save($out)
 Write-Output "SAVED $out"
